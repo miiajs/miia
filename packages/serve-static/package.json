@@ -1,0 +1,47 @@
+{
+  "name": "@miiajs/serve-static",
+  "version": "0.0.1",
+  "author": "Ruslan Matiushev",
+  "license": "MIT",
+  "description": "Static file serving for MiiaJS - Range, weak ETag, conditional GET, charset negotiation, SPA fallback, dotfile guard, symlink-safe paths.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miiajs/miia.git",
+    "directory": "packages/serve-static"
+  },
+  "homepage": "https://github.com/miiajs/miia/tree/main/packages/serve-static#readme",
+  "bugs": {
+    "url": "https://github.com/miiajs/miia/issues"
+  },
+  "keywords": ["miiajs", "miia", "static-files", "http", "mime", "etag", "range", "spa"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.22.1",
+    "bun": ">=1.3.11",
+    "deno": ">=2.6.1"
+  },
+  "dependencies": {
+    "@miiajs/core": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  }
+}

@@ -1,0 +1,6 @@
+export * from './create-post.schema.js'
+export * from './list-posts.schema.js'
+export * from './paginated-posts-response.schema.js'
+export * from './post-id.schema.js'
+export * from './post-response.schema.js'
+export * from './update-post.schema.js'

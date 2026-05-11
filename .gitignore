@@ -1,0 +1,44 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
+
+# Bun
+bun.lockb
+
+# Other package managers — Bun is canonical for this repo (bun.lock).
+# Ignore lockfiles and metadata from npm/pnpm/yarn to prevent drift.
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+.yarn/
+.pnp.*
+.pnpm-store/
+
+# Package manager debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Auto-generated per-package LICENSE copies (from root LICENSE via scripts/copy-license.ts)
+packages/*/LICENSE
+
+# Temp
+tmp/
+
+# Benchmarks
+benchmarks/**/.results/

@@ -1,0 +1,57 @@
+{
+  "name": "@miiajs/cli",
+  "version": "0.0.1",
+  "author": "Ruslan Matiushev",
+  "license": "MIT",
+  "description": "CLI for MiiaJS - build, develop, and scaffold MiiaJS applications",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miiajs/miia.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/miiajs/miia/tree/main/packages/cli#readme",
+  "bugs": {
+    "url": "https://github.com/miiajs/miia/issues"
+  },
+  "keywords": ["miiajs", "miia", "cli", "scaffold", "dev-server", "build-tool"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "miia": "./dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    }
+  },
+  "main": "./dist/cli.js",
+  "types": "./dist/cli.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.22.1",
+    "bun": ">=1.3.11",
+    "deno": ">=2.6.1"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.2.0",
+    "citty": "^0.2.2",
+    "consola": "^3.4.2",
+    "execa": "^9.5.3",
+    "magicast": "^0.5.2"
+  },
+  "devDependencies": {
+    "@babel/types": "^7.29.0"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  }
+}

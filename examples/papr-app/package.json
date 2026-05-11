@@ -1,0 +1,23 @@
+{
+  "name": "example-papr-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "dev:deno": "miia dev --runtime deno",
+    "dev:node": "miia dev --runtime node"
+  },
+  "dependencies": {
+    "@miiajs/config": "workspace:*",
+    "@miiajs/core": "workspace:*",
+    "@miiajs/node-server": "workspace:*",
+    "@miiajs/papr": "workspace:*",
+    "mongodb": "^7.1.1",
+    "papr": "^17.0.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "workspace:*",
+    "typescript": "^6.0.2"
+  }
+}

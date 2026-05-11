@@ -1,0 +1,25 @@
+{
+  "name": "example-drizzle-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "dev:deno": "miia dev --runtime deno",
+    "dev:node": "miia dev --runtime node",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@miiajs/config": "workspace:*",
+    "@miiajs/core": "workspace:*",
+    "@miiajs/drizzle": "workspace:*",
+    "@miiajs/node-server": "workspace:*",
+    "drizzle-orm": "^0.45.0",
+    "postgres": "^3.4.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "workspace:*",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^6.0.2"
+  }
+}

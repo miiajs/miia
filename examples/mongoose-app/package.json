@@ -1,0 +1,22 @@
+{
+  "name": "example-mongoose-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "dev:deno": "miia dev --runtime deno",
+    "dev:node": "miia dev --runtime node"
+  },
+  "dependencies": {
+    "@miiajs/config": "workspace:*",
+    "@miiajs/core": "workspace:*",
+    "@miiajs/mongoose": "workspace:*",
+    "@miiajs/node-server": "workspace:*",
+    "mongoose": "^9.4.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "workspace:*",
+    "typescript": "^6.0.2"
+  }
+}

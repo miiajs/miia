@@ -1,0 +1,48 @@
+{
+  "name": "@miiajs/core",
+  "version": "0.0.1",
+  "author": "Ruslan Matiushev",
+  "license": "MIT",
+  "description": "Lightweight, decorator-driven HTTP framework for TypeScript - DI, router, middleware, exceptions.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miiajs/miia.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/miiajs/miia/tree/main/packages/core#readme",
+  "bugs": {
+    "url": "https://github.com/miiajs/miia/issues"
+  },
+  "keywords": ["miiajs", "miia", "framework", "http", "decorator", "typescript", "di", "router"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing/index.d.ts",
+      "import": "./dist/testing/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.22.1",
+    "bun": ">=1.3.11",
+    "deno": ">=2.6.1"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  }
+}

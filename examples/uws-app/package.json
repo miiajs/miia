@@ -1,0 +1,20 @@
+{
+  "name": "example-uws-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check"
+  },
+  "dependencies": {
+    "@miiajs/core": "workspace:*",
+    "@miiajs/uws-server": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "workspace:*",
+    "typescript": "^6.0.2"
+  }
+}

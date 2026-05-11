@@ -1,0 +1,30 @@
+{
+  "name": "example-full-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "miia dev",
+    "build": "miia build",
+    "start": "miia start",
+    "check": "miia check"
+  },
+  "dependencies": {
+    "@miiajs/auth": "workspace:*",
+    "@miiajs/config": "workspace:*",
+    "@miiajs/core": "workspace:*",
+    "@miiajs/drizzle": "workspace:*",
+    "@miiajs/jwt": "workspace:*",
+    "@miiajs/serve-static": "workspace:*",
+    "@miiajs/swagger": "workspace:*",
+    "@node-rs/argon2": "^2.0.2",
+    "drizzle-orm": "^0.45.2",
+    "postgres": "^3.4.9",
+    "swagger-ui-dist": "^5.32.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "workspace:*",
+    "drizzle-kit": "^0.31.10",
+    "typescript": "^6.0.2"
+  }
+}

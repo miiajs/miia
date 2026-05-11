@@ -1,0 +1,19 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/config" },
+    { "path": "packages/serve-static" },
+    { "path": "packages/node-server" },
+    { "path": "packages/uws-server" },
+    { "path": "packages/drizzle" },
+    { "path": "packages/papr" },
+    { "path": "packages/auth" },
+    { "path": "packages/jwt" },
+    { "path": "packages/swagger" },
+    { "path": "packages/mongoose" },
+    { "path": "packages/messaging" },
+    { "path": "packages/messaging-redis" },
+    { "path": "packages/cli" }
+  ]
+}

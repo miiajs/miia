@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1776086658034,
+      "tag": "0000_watery_piledriver",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1776088622794,
+      "tag": "0001_tired_gateway",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1776259423921,
+      "tag": "0002_fresh_squadron_supreme",
+      "breakpoints": true
+    }
+  ]
+}

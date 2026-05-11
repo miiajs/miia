@@ -1,0 +1,84 @@
+title: 'The [decorator-driven]{.text-primary} HTTP framework for TypeScript'
+description: 'Build structured, type-safe APIs with decorators, dependency injection, and middleware - powered by Web Standards. Deploy to Bun, Deno, Node.js, or any serverless/edge platform.'
+seo:
+  title: MiiaJS - Decorator-Driven HTTP Framework for TypeScript
+  description: Build structured, type-safe HTTP APIs with native decorators, dependency injection, and Koa-style middleware. Deploy to Bun, Deno, Node.js, or any serverless/edge platform.
+navigation: false
+hero:
+  links:
+    - label: Get started
+      icon: i-lucide-arrow-right
+      trailing: true
+      to: /docs/getting-started
+      size: xl
+    - label: View on GitHub
+      icon: i-simple-icons-github
+      size: xl
+      color: neutral
+      variant: subtle
+      to: https://github.com/miiajs/miia
+      target: _blank
+sections:
+  - title: Familiar patterns, modern foundation
+    description: 'The architecture you know from Angular and NestJS - controllers, modules, DI, and Koa-style middleware - rebuilt from scratch on native decorators and Web Standards.'
+    id: features
+    orientation: horizontal
+    features:
+      - title: Decorators That Just Work
+        description: '@Controller, @Get, @Injectable, @Module - the modern decorator standard. No reflect-metadata, no experimental flags, no setup.'
+        icon: i-lucide-at-sign
+      - title: Web Standards First
+        description: Request in, Response out. Your handlers receive standard web objects - no proprietary context, no framework lock-in.
+        icon: i-lucide-globe
+      - title: Koa-Style Middleware
+        description: A single middleware concept replaces interceptors, pipes, and filters. Easier to learn, easier to compose.
+        icon: i-lucide-layers
+  - title: One fetch handler, every platform
+    description: 'Inspired by Hono''s multi-runtime philosophy. Write your API once and deploy it to any JavaScript runtime, serverless platform, or edge network.'
+    orientation: horizontal
+    reverse: true
+    id: runtimes
+    features:
+      - title: True Portability
+        description: 'Bun, Deno, Node.js, Cloudflare Workers, AWS Lambda - same code, different entry point.'
+        icon: i-lucide-rocket
+      - title: Modern JavaScript Only
+        description: Pure ESM, latest ECMAScript target. Clean imports, fast startup, works with modern tooling out of the box.
+        icon: i-lucide-package
+      - title: Serverless Ready
+        description: 'Use app.fetch as your handler - Cloudflare Workers, AWS Lambda, or any edge platform. Lazy init, zero overhead.'
+        icon: i-lucide-cloud
+features:
+  title: Batteries included, bloat excluded
+  description: Every tool you need to ship production APIs. Nothing you need to rip out later.
+  items:
+    - title: Simple Dependency Injection
+      description: Per-app container with inject() - no global singletons, no hidden magic. Singleton, transient, and request scopes built in.
+      icon: i-lucide-boxes
+    - title: Auth & Guards
+      description: JWT and local strategies with composable guards. Protect routes at any level - skip specific guards when needed.
+      icon: i-lucide-lock-keyhole
+    - title: Schema Validation
+      description: Validate request body, query, and params with any ZodLike schema. Type-safe from request to handler, errors handled automatically.
+      icon: i-lucide-shield-check
+    - title: Database Ready
+      description: Official integrations for PostgreSQL, MySQL, and SQLite via Drizzle ORM, and MongoDB via Papr and Mongoose.
+      icon: i-lucide-database
+    - title: Swagger / OpenAPI
+      description: OpenAPI 3.1 spec auto-generated from your decorators. Swagger UI included and ready to serve.
+      icon: i-lucide-file-json
+    - title: Developer CLI
+      description: Dev server, production builds, type-checking, and project scaffolding - one tool for the full workflow.
+      icon: i-lucide-terminal
+cta:
+  title: 'Ready to build with [MiiaJS]{.text-primary}?'
+  description: Start building in minutes. Open source, MIT licensed.
+  links:
+    - label: Get started
+      to: /docs/getting-started
+      trailingIcon: i-lucide-arrow-right
+    - label: View on GitHub
+      to: https://github.com/miiajs/miia
+      target: _blank
+      variant: subtle
+      icon: i-simple-icons-github

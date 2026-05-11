@@ -1,0 +1,55 @@
+{
+  "name": "@miiajs/papr",
+  "version": "0.0.1",
+  "author": "Ruslan Matiushev",
+  "license": "MIT",
+  "description": "MongoDB integration for MiiaJS via Papr.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miiajs/miia.git",
+    "directory": "packages/papr"
+  },
+  "homepage": "https://github.com/miiajs/miia/tree/main/packages/papr#readme",
+  "bugs": {
+    "url": "https://github.com/miiajs/miia/issues"
+  },
+  "keywords": ["miiajs", "miia", "papr", "mongodb", "odm"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.22.1",
+    "bun": ">=1.3.11",
+    "deno": ">=2.6.1"
+  },
+  "dependencies": {
+    "@miiajs/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "mongodb": "^7.1.1",
+    "papr": "^17.0.0"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  },
+  "devDependencies": {
+    "mongodb": "^7.1.1",
+    "papr": "^17.0.0"
+  }
+}

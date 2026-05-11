@@ -1,0 +1,25 @@
+{
+  "name": "example-messaging-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "miia dev",
+    "dev:deno": "miia dev --runtime deno",
+    "dev:node": "miia dev --runtime node",
+    "build": "miia build",
+    "start": "miia start",
+    "check": "miia check"
+  },
+  "dependencies": {
+    "@miiajs/config": "workspace:*",
+    "@miiajs/core": "workspace:*",
+    "@miiajs/messaging": "workspace:*",
+    "@miiajs/messaging-redis": "workspace:*",
+    "ioredis": "^5.4.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "workspace:*",
+    "typescript": "^6.0.2"
+  }
+}
