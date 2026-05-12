@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/messaging",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Messaging for MiiaJS - decorator-driven event bus, retry with auto-DLQ, idempotency, named buses, pluggable transports.",
@@ -13,7 +13,15 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "messaging", "events", "event-bus", "pubsub", "decorator"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "messaging",
+    "events",
+    "event-bus",
+    "pubsub",
+    "decorator"
+  ],
   "publishConfig": {
     "access": "public"
   },

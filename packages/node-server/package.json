@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/node-server",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Node.js HTTP adapter for MiiaJS - optimized and native modes.",
@@ -13,7 +13,14 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "node", "http", "server", "adapter"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "node",
+    "http",
+    "server",
+    "adapter"
+  ],
   "publishConfig": {
     "access": "public"
   },

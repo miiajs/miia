@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/messaging-redis",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Redis Streams transport for @miiajs/messaging - consumer groups, exponential backoff retry via ZSET, auto-DLQ, idempotency store.",
@@ -13,7 +13,16 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "messaging", "events", "redis", "streams", "pubsub", "transport"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "messaging",
+    "events",
+    "redis",
+    "streams",
+    "pubsub",
+    "transport"
+  ],
   "publishConfig": {
     "access": "public"
   },

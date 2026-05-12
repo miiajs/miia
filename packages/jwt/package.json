@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/jwt",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Injectable JWT sign/verify service for MiiaJS - a thin wrapper around jose.",
@@ -13,7 +13,15 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "jwt", "jose", "sign", "verify", "token"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "jwt",
+    "jose",
+    "sign",
+    "verify",
+    "token"
+  ],
   "publishConfig": {
     "access": "public"
   },

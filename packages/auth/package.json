@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/auth",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Lightweight auth primitives for MiiaJS - AuthProvider interface, AuthGuard factory, HTTP token extractors, timing-safe equality.",
@@ -13,7 +13,14 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "auth", "authentication", "authorization", "guard"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "auth",
+    "authentication",
+    "authorization",
+    "guard"
+  ],
   "publishConfig": {
     "access": "public"
   },

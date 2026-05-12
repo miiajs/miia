@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/swagger",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "OpenAPI 3.1 spec generation and Swagger UI for MiiaJS.",
@@ -13,7 +13,13 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "swagger", "openapi", "documentation"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "swagger",
+    "openapi",
+    "documentation"
+  ],
   "publishConfig": {
     "access": "public"
   },

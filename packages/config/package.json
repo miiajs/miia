@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/config",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "ConfigModule and ConfigService for MiiaJS with validated environment variables (Zod, Valibot, ArkType, or any ZodLike validator).",
@@ -13,7 +13,13 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "config", "env", "validation"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "config",
+    "env",
+    "validation"
+  ],
   "publishConfig": {
     "access": "public"
   },

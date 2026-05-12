@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/core",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Lightweight, decorator-driven HTTP framework for TypeScript - DI, router, middleware, exceptions.",
@@ -13,7 +13,16 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "framework", "http", "decorator", "typescript", "di", "router"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "framework",
+    "http",
+    "decorator",
+    "typescript",
+    "di",
+    "router"
+  ],
   "publishConfig": {
     "access": "public"
   },

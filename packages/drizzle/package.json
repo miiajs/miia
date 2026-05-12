@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/drizzle",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Drizzle ORM integration for MiiaJS (PostgreSQL, MySQL, SQLite).",
@@ -13,7 +13,15 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "drizzle", "orm", "postgres", "mysql", "sqlite"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "drizzle",
+    "orm",
+    "postgres",
+    "mysql",
+    "sqlite"
+  ],
   "publishConfig": {
     "access": "public"
   },

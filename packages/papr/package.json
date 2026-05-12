@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/papr",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "MongoDB integration for MiiaJS via Papr.",
@@ -13,7 +13,13 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "papr", "mongodb", "odm"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "papr",
+    "mongodb",
+    "odm"
+  ],
   "publishConfig": {
     "access": "public"
   },

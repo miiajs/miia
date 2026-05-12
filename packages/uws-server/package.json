@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/uws-server",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "uWebSockets.js HTTP adapter for MiiaJS - optimized and native modes.",
@@ -13,7 +13,14 @@
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
-  "keywords": ["miiajs", "miia", "uwebsockets", "http", "server", "performance"],
+  "keywords": [
+    "miiajs",
+    "miia",
+    "uwebsockets",
+    "http",
+    "server",
+    "performance"
+  ],
   "publishConfig": {
     "access": "public"
   },
