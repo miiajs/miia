@@ -26,7 +26,7 @@
   },
   "type": "module",
   "bin": {
-    "miia": "./dist/bin.js"
+    "miia": "dist/bin.js"
   },
   "exports": {
     ".": {
