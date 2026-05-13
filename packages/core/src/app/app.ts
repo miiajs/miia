@@ -188,7 +188,7 @@ export class Miia {
       pathname = parsed.pathname
       search = parsed.search
     }
-    const ctx = this.createContext(req, search)
+    const ctx = new Context(req, search)
 
     // Slow path: global middleware wraps router.match + per-route pipeline + handler.
     // Errors (including NotFoundException from router) bubble through the onion so
@@ -483,45 +483,6 @@ export class Miia {
     this.compiled = true
   }
 
-  private createContext(req: Request, search: string): RequestContext {
-    let _query: Record<string, string> | null = null
-    let _rawQuery: URLSearchParams | null = null
-    let _jsonPromise: Promise<unknown> | null = null
-    let _textPromise: Promise<string> | null = null
-
-    return {
-      req,
-      res: new ResponseBuilder(),
-      params: {},
-      get query() {
-        if (_query === null) {
-          _rawQuery ??= new URLSearchParams(search)
-          _query = Object.fromEntries(_rawQuery)
-        }
-        return _query
-      },
-      set query(v) {
-        _query = v
-      },
-      get rawQuery() {
-        _rawQuery ??= new URLSearchParams(search)
-        return _rawQuery
-      },
-      set rawQuery(v) {
-        _rawQuery = v
-      },
-      json<T = any>(): Promise<T> {
-        return (_jsonPromise ??= req.json()) as Promise<T>
-      },
-      text(): Promise<string> {
-        return (_textPromise ??= req.text())
-      },
-      _setBody(value: unknown): void {
-        _jsonPromise = Promise.resolve(value)
-      },
-    }
-  }
-
   private isLoggerService(value: LoggerService | LoggerConfig): value is LoggerService {
     return typeof (value as LoggerService).log === 'function'
   }
@@ -548,6 +509,58 @@ export class Miia {
       status: httpError.statusCode,
       headers,
     })
+  }
+}
+
+// Class-based RequestContext for deterministic hidden classes on hot path.
+// Object literals with mixed getters/methods cause hidden-class transitions per
+// property assignment in V8; a constructor with fixed field order does not.
+class Context implements RequestContext {
+  req: Request
+  res: ResponseBuilder = new ResponseBuilder()
+  params: Record<string, any> = {}
+  private _search: string
+  private _query: Record<string, string> | null = null
+  private _rawQuery: URLSearchParams | null = null
+  private _jsonPromise: Promise<unknown> | null = null
+  private _textPromise: Promise<string> | null = null
+
+  constructor(req: Request, search: string) {
+    this.req = req
+    this._search = search
+  }
+
+  get query(): Record<string, string> {
+    if (this._query === null) {
+      this._rawQuery ??= new URLSearchParams(this._search)
+      this._query = Object.fromEntries(this._rawQuery)
+    }
+    return this._query
+  }
+
+  set query(v: Record<string, string>) {
+    this._query = v
+  }
+
+  get rawQuery(): URLSearchParams {
+    this._rawQuery ??= new URLSearchParams(this._search)
+    return this._rawQuery
+  }
+
+  set rawQuery(v: URLSearchParams) {
+    this._rawQuery = v
+  }
+
+  json<T = any>(): Promise<T> {
+    return (this._jsonPromise ??= this.req.json()) as Promise<T>
+  }
+
+  text(): Promise<string> {
+    return (this._textPromise ??= this.req.text())
+  }
+
+  _setBody(value: unknown): void {
+    this._jsonPromise = Promise.resolve(value)
   }
 }
 
