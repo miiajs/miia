@@ -43,9 +43,11 @@
     "bun": ">=1.3.11",
     "deno": ">=2.6.1"
   },
+  "dependencies": {
+    "@miiajs/serve-static": "^0.1.1"
+  },
   "peerDependencies": {
     "@miiajs/core": "^0.1.1",
-    "@miiajs/serve-static": "^0.1.1",
     "swagger-ui-dist": "^5.0.0"
   },
   "scripts": {
@@ -54,7 +56,6 @@
   },
   "devDependencies": {
     "@miiajs/core": "workspace:*",
-    "@miiajs/serve-static": "workspace:*",
     "swagger-ui-dist": "^5.32.4",
     "zod": "^4.3.6"
   }

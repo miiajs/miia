@@ -225,14 +225,15 @@
     "packages/messaging-redis": {
       "name": "@miiajs/messaging-redis",
       "version": "0.1.1",
+      "dependencies": {
+        "@miiajs/messaging": "^0.1.1",
+      },
       "devDependencies": {
         "@miiajs/core": "workspace:*",
-        "@miiajs/messaging": "workspace:*",
         "ioredis": "^5.4.1",
       },
       "peerDependencies": {
         "@miiajs/core": "^0.1.1",
-        "@miiajs/messaging": "^0.1.1",
         "ioredis": "^5.0.0",
       },
     },
@@ -279,15 +280,16 @@
     "packages/swagger": {
       "name": "@miiajs/swagger",
       "version": "0.1.1",
+      "dependencies": {
+        "@miiajs/serve-static": "^0.1.1",
+      },
       "devDependencies": {
         "@miiajs/core": "workspace:*",
-        "@miiajs/serve-static": "workspace:*",
         "swagger-ui-dist": "^5.32.4",
         "zod": "^4.3.6",
       },
       "peerDependencies": {
         "@miiajs/core": "^0.1.1",
-        "@miiajs/serve-static": "^0.1.1",
         "swagger-ui-dist": "^5.0.0",
       },
     },
