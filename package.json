@@ -27,7 +27,6 @@
     "changeset": "changeset",
     "changeset:status": "changeset status --verbose",
     "changeset:version": "bun --env-file=.env.local changeset version && bun install --lockfile-only",
-    "release:dry": "bun run clean:dist && bun run build && changeset publish --dry-run",
     "release": "bun run clean:dist && bun run build && changeset publish"
   },
   "devDependencies": {

@@ -44,7 +44,10 @@
     "bun": ">=1.3.11",
     "deno": ">=2.6.1"
   },
-  "dependencies": {
+  "peerDependencies": {
+    "@miiajs/core": "^0.1.0"
+  },
+  "devDependencies": {
     "@miiajs/core": "workspace:*"
   },
   "scripts": {
