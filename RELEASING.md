@@ -63,7 +63,7 @@ git commit -m "chore: release"
 bun run release
 ```
 
-`changeset publish` validates `npm login` has access to the `@miiajs` scope, publishes each package with `publishConfig.access: public`, and creates per-package git tags (e.g., `@miiajs/core@0.1.0`, 14 total).
+`changeset publish` validates `npm login` has access to the `@miiajs` scope and publishes each package with `publishConfig.access: public`. The `--no-git-tag` flag suppresses the 14 per-package tags changesets would otherwise create - we use a single parent tag `v{version}` (Step 6) for the whole release since all `@miiajs/*` packages share a version via the `fixed` group.
 
 Use Step 1 (`bun run changeset:status`) as the preview - `changeset publish` has no `--dry-run` flag, so publishing is the publish.
 
@@ -77,7 +77,7 @@ git tag -a "v${VERSION}" -m "Release v${VERSION}"
 git push --follow-tags
 ```
 
-The parent tag `v{version}` is used by GitHub Releases and human-friendly history navigation; per-package tags were created by `changeset publish` in step 5.
+The parent tag `v{version}` is the only tag we create per release - it covers all 14 `@miiajs/*` packages via the `fixed` group, and is used by GitHub Releases and human-friendly history navigation.
 
 ### 7. GitHub Release
 
@@ -89,6 +89,6 @@ Open the parent tag on GitHub and create a release:
 ## Recovering from mistakes
 
 - **After `changeset:version` but before commit.** Revert with `git restore . && git checkout HEAD -- .changeset/` to get the changeset files back.
-- **After commit but before `git push`.** `git reset --hard HEAD~1` drops the release commit. Per-package tags created by `changeset publish` exist only locally if you have not run it yet.
+- **After commit but before `git push`.** `git reset --hard HEAD~1` drops the release commit. Drop the parent tag too with `git tag -d v{version}` if you created it.
 - **After `changeset publish` but before `git push`.** Packages are in npm already, but the repo state is out of sync. Finish the push - do not roll back, because `npm unpublish` is severely restricted.
 - **After `git push`.** Live. npm allows `npm unpublish` within 72 hours only for packages with no dependents - practically unusable for a framework. Ship a patch release with the fix instead.
