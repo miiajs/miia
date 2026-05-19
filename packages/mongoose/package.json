@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/mongoose",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "MongoDB integration for MiiaJS via Mongoose.",
@@ -44,7 +44,7 @@
     "deno": ">=2.6.1"
   },
   "peerDependencies": {
-    "@miiajs/core": "^0.1.0",
+    "@miiajs/core": "^0.1.1",
     "mongoose": "^9.4.1"
   },
   "scripts": {

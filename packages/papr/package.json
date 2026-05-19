@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/papr",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "MongoDB integration for MiiaJS via Papr.",
@@ -44,7 +44,7 @@
     "deno": ">=2.6.1"
   },
   "peerDependencies": {
-    "@miiajs/core": "^0.1.0",
+    "@miiajs/core": "^0.1.1",
     "mongodb": "^7.1.1",
     "papr": "^17.0.0"
   },

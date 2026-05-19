@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/uws-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "uWebSockets.js HTTP adapter for MiiaJS - optimized and native modes.",
