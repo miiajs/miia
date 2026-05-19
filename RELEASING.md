@@ -59,19 +59,13 @@ git commit -m "chore: release"
 
 ### 5. Publish
 
-Verify the publish plan before doing it for real:
-
-```sh
-bun run release:dry
-```
-
-Confirm all 14 `@miiajs/*` packages appear with the new version and no examples/apps leak in. Then publish:
-
 ```sh
 bun run release
 ```
 
 `changeset publish` validates `npm login` has access to the `@miiajs` scope, publishes each package with `publishConfig.access: public`, and creates per-package git tags (e.g., `@miiajs/core@0.1.0`, 14 total).
+
+Use Step 1 (`bun run changeset:status`) as the preview - `changeset publish` has no `--dry-run` flag, so publishing is the publish.
 
 ### 6. Tag and push
 
