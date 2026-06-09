@@ -6,6 +6,7 @@ import {
   METHOD_GUARDS,
   STATUSES,
   SKIP_GUARDS,
+  BODY_LIMITS,
   BODY_SCHEMAS,
   QUERY_SCHEMAS,
   PARAMS_SCHEMAS,
@@ -13,7 +14,7 @@ import {
   setMeta,
   setInMapMeta,
 } from './metadata.js'
-import { UnprocessableException } from '../exceptions.js'
+import { HttpException, UnprocessableException } from '../exceptions.js'
 import { createMethodDecorator } from './create-decorator.js'
 import { createDecorator } from './create-decorator.js'
 
@@ -52,14 +53,37 @@ export const SkipGuard = createDecorator<[first: Guard | Function, ...rest: (Gua
   },
 )
 
+// ─── @BodyLimit ──────────────────────────────────────────────────
+
+/**
+ * Sets the max request body size in bytes for a route (method) or all routes
+ * of a controller (class). Method-level overrides class-level, which overrides
+ * the app-wide `maxBodySize` option. A declared Content-Length above the limit
+ * yields a 413 PayloadTooLargeException before the handler runs.
+ *
+ * Chunked bodies (no Content-Length) are capped by the adapter-level ceiling
+ * (max of all limits), not the per-route value - the body is read independently
+ * of route matching.
+ */
+export const BodyLimit = createDecorator<[bytes: number]>((context, bytes) => {
+  if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) {
+    throw new TypeError(`@BodyLimit expects a non-negative finite number of bytes, got ${String(bytes)}`)
+  }
+  const name = context.kind === 'class' ? '*' : String(context.name)
+  setInMapMeta(context.metadata!, BODY_LIMITS, name, bytes)
+})
+
 // ─── @ValidateBody ───────────────────────────────────────────────
 
 export const ValidateBody = createMethodDecorator<[schema: ZodLike]>((_target, context, schema) => {
   const mw: Middleware = async (ctx, next) => {
-    // .catch(() => null) intentionally swallows both fresh req.json() rejections
-    // (malformed body) and cached rejections from prior ctx.json() calls in other
-    // middleware - null then flows through safeParse and becomes an UnprocessableException.
-    const body = await ctx.json().catch(() => null)
+    // Swallow malformed-body rejections into null (-> 422 via safeParse), but
+    // rethrow HttpExceptions and the adapters' body-limit errors (name
+    // 'PayloadTooLargeError') so an oversized body stays a 413, not a 422.
+    const body = await ctx.json().catch((e: unknown) => {
+      if (e instanceof HttpException || (e instanceof Error && e.name === 'PayloadTooLargeError')) throw e
+      return null
+    })
     const result = schema.safeParse(body)
     if (!result.success) {
       throw new UnprocessableException('Body validation failed', result.error.issues)

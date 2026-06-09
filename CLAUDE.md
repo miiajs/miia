@@ -161,10 +161,10 @@ Handlers can also return plain objects (auto-serialized to JSON), `Response` ins
 
 Base `HttpException(statusCode, message, details?)` with `.toJSON()`. Derived classes:
 - `BadRequestException` (400), `UnauthorizedException` (401), `ForbiddenException` (403)
-- `NotFoundException` (404), `ConflictException` (409), `UnprocessableException` (422)
-- `InternalServerException` (500)
+- `NotFoundException` (404), `ConflictException` (409), `PayloadTooLargeException` (413)
+- `UnprocessableException` (422), `InternalServerException` (500)
 
-Unhandled errors in handlers are caught, logged, and returned as 500.
+Unhandled errors in handlers are caught, logged, and returned as 500. An `Error` whose `name` is `'PayloadTooLargeError'` (thrown by node-server/uws-server body streams, which do not depend on core) is mapped to `PayloadTooLargeException` (413).
 
 ### CORS: built-in middleware
 
@@ -211,6 +211,8 @@ Swagger routes register themselves with `{ skipGlobalGuards: true }` so the UI s
 - Body buffering for small POST bodies (Content-Length ≤ `bufferThreshold`, default 100KB): `Promise<Uint8Array>` with direct `JSON.parse(textDecoder.decode(buf))`, bypasses ReadableStream + `new Request()`. Large/chunked bodies fall back to streaming.
 - LightResponse cache (status/body/headers tuple, no real Response created for simple responses)
 - Sync fast path (zero Promises when no middleware)
+
+**Body size limits.** `new Miia({ maxBodySize })` (default 1MB, `false` disables) + per-route `@BodyLimit(bytes)` (method > class > app option). Limits are resolved into the route table at registration time; declared Content-Length is checked in core after route matching -> `PayloadTooLargeException` (413). Chunked bodies are capped by the adapter ceiling - `max(maxBodySize, all @BodyLimit values)` - enforced natively on Bun (`maxRequestBodySize`), via a counting stream wrapper on Deno, and by `maxBodySize` in node-server/uws-server (early 413 on Content-Length, in-stream byte cap for chunked; the stream errors with an `Error` named `'PayloadTooLargeError'` since adapters don't depend on core).
 
 ### Static file serving
 

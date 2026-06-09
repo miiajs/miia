@@ -23,7 +23,16 @@ export type { DiscoveredMethod, DiscoverableMethodMeta } from './discovery/index
 export { Injectable, Controller, Module } from './decorators/index.js'
 export type { InjectableOptions } from './decorators/index.js'
 export { Get, Post, Put, Patch, Delete, Head, Options } from './decorators/index.js'
-export { Use, UseGuard, SkipGuard, ValidateBody, ValidateQuery, ValidateParams, Status } from './decorators/index.js'
+export {
+  Use,
+  UseGuard,
+  SkipGuard,
+  BodyLimit,
+  ValidateBody,
+  ValidateQuery,
+  ValidateParams,
+  Status,
+} from './decorators/index.js'
 export {
   createClassDecorator,
   createMethodDecorator,
@@ -49,6 +58,7 @@ export {
   METHOD_GUARDS,
   SKIP_GUARDS,
   GUARD_FACTORY,
+  BODY_LIMITS,
   BODY_SCHEMAS,
   QUERY_SCHEMAS,
   PARAMS_SCHEMAS,
@@ -68,9 +78,13 @@ export {
   ForbiddenException,
   NotFoundException,
   ConflictException,
+  PayloadTooLargeException,
   UnprocessableException,
   InternalServerException,
 } from './exceptions.js'
+
+// Body limit
+export { DEFAULT_BODY_LIMIT, countingLimitStream, applyBodyCeiling } from './body-limit.js'
 
 // Response
 export { ResponseBuilder } from './response.js'

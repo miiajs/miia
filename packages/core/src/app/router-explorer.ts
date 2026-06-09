@@ -1,19 +1,20 @@
 import type { Container } from '../di-container.js'
 import { Logger } from '../logger.js'
 import {
-  getMeta,
-  CLASS_MW,
+  BODY_LIMITS,
   CLASS_GUARDS,
+  CLASS_MW,
+  getMeta,
+  GUARD_FACTORY,
   METHOD_GUARDS,
   METHOD_MW,
   ROUTES,
-  STATUSES,
   SKIP_GUARDS,
-  GUARD_FACTORY,
+  STATUSES,
 } from '../decorators/index.js'
 import { guardToMiddleware } from '../middleware.js'
 import type { Router } from '../router.js'
-import type { Constructor, Guard, HttpMethod, Middleware, RequestContext, RouteDefinition } from '../types.js'
+import type { Constructor, Guard, Middleware, RequestContext, RouteDefinition } from '../types.js'
 import { joinPaths } from '../utils/index.js'
 
 export class RouterExplorer {
@@ -31,6 +32,7 @@ export class RouterExplorer {
     const mwMap = getMeta<Map<string, Middleware[]>>(controller, METHOD_MW)
     const guardMap = getMeta<Map<string, Guard[]>>(controller, METHOD_GUARDS)
     const statusMap = getMeta<Map<string, number>>(controller, STATUSES)
+    const bodyLimitMap = getMeta<Map<string, number>>(controller, BODY_LIMITS)
 
     for (const route of routes) {
       const fullPath = joinPaths(controllerPrefix, route.path)
@@ -39,6 +41,8 @@ export class RouterExplorer {
       const methodMws = mwMap?.get(route.handlerName) ?? []
       const methodGuards = guardMap?.get(route.handlerName) ?? []
       const customStatus = statusMap?.get(route.handlerName)
+      // method-level @BodyLimit > class-level ('*') > Router.defaultBodyLimit (via undefined)
+      const bodyLimit = bodyLimitMap?.get(route.handlerName) ?? bodyLimitMap?.get('*')
 
       const skipSet = getSkipSet(controller, route.handlerName)
       const ctrlGuardMws = this.resolveGuards(filterGuards(ctrlGuards, skipSet))
@@ -56,6 +60,7 @@ export class RouterExplorer {
       this.router.add(route.method, fullPath, finalHandler, {
         middlewares: routeMws,
         skippedGuardClasses: skipSet,
+        bodyLimit,
       })
 
       this.logger.log(`Mapped {/${fullPath}, ${route.method}} route`)

@@ -71,6 +71,7 @@ const CACHE = Symbol('responseCache')
 const textDecoder = new TextDecoder()
 const EMPTY_U8 = new Uint8Array(0)
 const DEFAULT_BUFFER_THRESHOLD = 102_400 // 100KB
+const DEFAULT_MAX_BODY_SIZE = 1_048_576 // 1MB
 
 // ─── Lightweight Headers Proxy ───────────────────────────────
 //
@@ -184,8 +185,15 @@ const requestProto: Record<string | symbol, any> = {
             ;(init as any).duplex = 'half'
           }
         } else {
-          // Stream path - original Readable.toWeb
-          init.body = Readable.toWeb(this._incoming) as any
+          // Stream path - original Readable.toWeb, capped when a body limit is
+          // set (chunked bodies). Single injection point: every consumer
+          // (json/text/arrayBuffer/blob/formData/body) goes through here.
+          let stream = Readable.toWeb(this._incoming) as any
+          if (this._bodyLimit !== null) {
+            const incoming = this._incoming
+            stream = limitStream(stream, this._bodyLimit, () => drainIncoming(incoming))
+          }
+          init.body = stream
           ;(init as any).duplex = 'half'
         }
       }
@@ -323,6 +331,7 @@ function createRequestProxy(
   proxy._bodyBuffer = null
   proxy._bodyStream = null
   proxy._bodyReject = null
+  proxy._bodyLimit = null
   return proxy as any
 }
 
@@ -518,6 +527,56 @@ function sendError(nodeRes: ServerResponse, error: unknown, logger: LoggerLike):
   nodeRes.end(JSON.stringify({ statusCode: 500, error: 'Internal Server Error', message: 'Internal Server Error' }))
 }
 
+function send413(nodeRes: ServerResponse): void {
+  if (nodeRes.headersSent || nodeRes.closed) return
+  nodeRes.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
+  nodeRes.end(JSON.stringify({ statusCode: 413, error: 'Payload Too Large', message: 'Payload Too Large' }))
+}
+
+/** Recognized by @miiajs/core's error handler and mapped to a 413 response. */
+function payloadTooLargeError(limit: number): Error {
+  const err = new Error(`Request body exceeded ${limit} byte limit`)
+  err.name = 'PayloadTooLargeError'
+  return err
+}
+
+/**
+ * Caps a body stream at `limit` bytes. On exceed, errors only the
+ * consumer-facing side (req.text()/json() reject with PayloadTooLargeError)
+ * WITHOUT cancelling the source: cancelling Readable.toWeb destroys the
+ * underlying socket, which would kill the 413 response the handler is about
+ * to send. `onExceed` (drainIncoming) disposes of the connection instead -
+ * after the response is written.
+ */
+function limitStream(
+  source: ReadableStream<Uint8Array>,
+  limit: number,
+  onExceed: () => void,
+): ReadableStream<Uint8Array> {
+  let total = 0
+  const reader = source.getReader()
+  return new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const { done, value } = await reader.read()
+      if (done) {
+        controller.close()
+        return
+      }
+      total += value.byteLength
+      if (total > limit) {
+        controller.error(payloadTooLargeError(limit))
+        reader.releaseLock()
+        onExceed()
+        return
+      }
+      controller.enqueue(value)
+    },
+    cancel(reason) {
+      return reader.cancel(reason)
+    },
+  })
+}
+
 // ─── Incoming Drain ──────────────────────────────────────────
 //
 // Drain unconsumed request body to allow connection reuse (keep-alive).
@@ -575,6 +634,12 @@ export interface ServeOptions {
   /** Bodies with Content-Length <= threshold are buffered as Promise<Uint8Array> for fast path.
    *  Larger or without Content-Length → Readable.toWeb stream. @default 102400 (100KB) */
   bufferThreshold?: number
+  /** Max request body size in bytes. A larger declared Content-Length gets an immediate
+   *  413 response (handler never runs); chunked bodies error mid-stream past the cap
+   *  (the body stream rejects with an Error named 'PayloadTooLargeError', which
+   *  @miiajs/core maps to a 413). `false` disables the cap. Miia passes its computed
+   *  ceiling automatically via `app.listen(port, serve)`. @default 1048576 (1MB) */
+  maxBodySize?: number | false
   /** Logger for unhandled handler errors. Defaults to `console`. Miia passes its internal logger automatically when used via `app.listen(port, hostname, serve)`. */
   logger?: LoggerLike
 }
@@ -590,6 +655,7 @@ export function serve(options: ServeOptions): Promise<ServerHandle> {
     hostname = '0.0.0.0',
     mode = 'optimized',
     bufferThreshold = DEFAULT_BUFFER_THRESHOLD,
+    maxBodySize = DEFAULT_MAX_BODY_SIZE,
     logger = console,
   } = options
   const native = mode === 'native'
@@ -601,8 +667,8 @@ export function serve(options: ServeOptions): Promise<ServerHandle> {
   return new Promise((resolve) => {
     const httpServer = createServer(
       native
-        ? createNativeListener(handler, port, hostname, logger)
-        : createOptimizedListener(handler, port, hostname, bufferThreshold, logger),
+        ? createNativeListener(handler, port, hostname, logger, maxBodySize)
+        : createOptimizedListener(handler, port, hostname, bufferThreshold, logger, maxBodySize),
     )
 
     httpServer.listen(port, hostname, () => {
@@ -630,6 +696,7 @@ function createOptimizedListener(
   hostname: string,
   bufferThreshold: number,
   logger: LoggerLike,
+  maxBodySize: number | false,
 ) {
   return (nodeReq: IncomingMessage, nodeRes: ServerResponse) => {
     try {
@@ -644,6 +711,13 @@ function createOptimizedListener(
       const clHeader = nodeReq.headers['content-length']
       const cl = clHeader != null ? +clHeader : -1
       const shouldBuffer = hasBody && cl >= 0 && cl <= bufferThreshold
+
+      // ── Early 413: declared Content-Length over the cap, handler never runs ──
+      if (maxBodySize !== false && hasBody && cl > maxBodySize) {
+        send413(nodeRes)
+        drainIncoming(nodeReq)
+        return
+      }
 
       let closeListenerRegistered = false
       const ensureCloseListener = () => {
@@ -701,6 +775,11 @@ function createOptimizedListener(
         ensureCloseListener()
       } else if (hasBody) {
         // ── Stream path: large body, no Content-Length ──
+        // Chunked bodies can't be pre-checked - cap them in-stream. CL-framed
+        // bodies are bounded by Node's parser and were pre-checked above.
+        // `!(cl >= 0)`, not `cl < 0`: a malformed header yields cl = NaN, for
+        // which both the early 413 and `cl < 0` are false.
+        if (maxBodySize !== false && !(cl >= 0)) req._bodyLimit = maxBodySize
         ensureCloseListener()
       } else {
         req._ensureCloseListener = ensureCloseListener
@@ -732,10 +811,20 @@ function createNativeListener(
   port: number,
   hostname: string,
   logger: LoggerLike,
+  maxBodySize: number | false,
 ) {
   return async (nodeReq: IncomingMessage, nodeRes: ServerResponse) => {
     try {
-      const request = toWebRequest(nodeReq, port, hostname)
+      const method = (nodeReq.method ?? 'GET').toUpperCase()
+      if (maxBodySize !== false && method !== 'GET' && method !== 'HEAD') {
+        const clHeader = nodeReq.headers['content-length']
+        if (clHeader != null && +clHeader > maxBodySize) {
+          send413(nodeRes)
+          drainIncoming(nodeReq)
+          return
+        }
+      }
+      const request = toWebRequest(nodeReq, port, hostname, maxBodySize)
       const response = await handler(request)
       await sendFullResponse(nodeRes, response)
     } catch (error) {
@@ -744,7 +833,7 @@ function createNativeListener(
   }
 }
 
-function toWebRequest(nodeReq: IncomingMessage, port: number, hostname: string): Request {
+function toWebRequest(nodeReq: IncomingMessage, port: number, hostname: string, maxBodySize: number | false): Request {
   const host = nodeReq.headers.host ?? `${hostname}:${port}`
   const url = `http://${host}${nodeReq.url ?? '/'}`
 
@@ -761,7 +850,12 @@ function toWebRequest(nodeReq: IncomingMessage, port: number, hostname: string):
   const method = (nodeReq.method ?? 'GET').toUpperCase()
   const hasBody = method !== 'GET' && method !== 'HEAD'
 
-  const body = hasBody ? (Readable.toWeb(nodeReq) as any) : undefined
+  let body = hasBody ? (Readable.toWeb(nodeReq) as any) : undefined
+  // Cap chunked bodies in-stream (no Content-Length to pre-check; oversized
+  // declared lengths were already rejected in the listener).
+  if (body && maxBodySize !== false && nodeReq.headers['content-length'] == null) {
+    body = limitStream(body, maxBodySize, () => drainIncoming(nodeReq))
+  }
 
   return new GlobalRequest(url, {
     method,

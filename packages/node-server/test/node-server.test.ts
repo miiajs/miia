@@ -624,4 +624,192 @@ describe('node-server', () => {
       server = undefined as any // prevent afterEach double-close
     })
   })
+
+  // ── maxBodySize ───────────────────────────────────────────
+
+  describe('maxBodySize', () => {
+    // Note: Bun's node:http client recomputes Content-Length from the actual
+    // body bytes (an explicit mismatched header is overwritten), so oversized-CL
+    // cases send real bodies. Chunked framing requires Transfer-Encoding AND
+    // multiple write() calls - a single write+end is coalesced into CL framing.
+
+    function chunkedRequest(url: string, parts: string[]): Promise<{ status: number; body: string }> {
+      return new Promise((resolve, reject) => {
+        const parsed = new URL(url)
+        const req = http.request(
+          {
+            hostname: parsed.hostname,
+            port: parsed.port,
+            path: parsed.pathname,
+            method: 'POST',
+            headers: { 'Transfer-Encoding': 'chunked' },
+          },
+          (res) => {
+            let body = ''
+            res.on('data', (chunk: Buffer) => (body += chunk))
+            res.on('end', () => resolve({ status: res.statusCode!, body }))
+          },
+        )
+        req.on('error', reject)
+        for (const part of parts) req.write(part)
+        req.end()
+      })
+    }
+
+    it('should reject declared Content-Length over the cap with immediate 413, handler never runs', async () => {
+      const port = nextPort++
+      let handlerCalled = false
+      server = await serve({
+        port,
+        maxBodySize: 1000,
+        fetch: () => {
+          handlerCalled = true
+          return new Response('ok')
+        },
+      })
+
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: 'x'.repeat(5000),
+      })
+      expect(res.status).toBe(413)
+      expect(JSON.parse(res.body)).toEqual({
+        statusCode: 413,
+        error: 'Payload Too Large',
+        message: 'Payload Too Large',
+      })
+      expect(handlerCalled).toBe(false)
+    })
+
+    it('should error chunked bodies past the cap with PayloadTooLargeError', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        maxBodySize: 100,
+        fetch: async (req) => {
+          try {
+            await req.text()
+            return new Response('should not get here', { status: 500 })
+          } catch (e) {
+            return new Response((e as Error).name, { status: 413 })
+          }
+        },
+      })
+
+      const res = await chunkedRequest(`http://localhost:${port}/upload`, ['x'.repeat(250), 'x'.repeat(250)])
+      expect(res.status).toBe(413)
+      expect(res.body).toBe('PayloadTooLargeError')
+    })
+
+    it('should deliver chunked bodies under the cap intact', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        maxBodySize: 1000,
+        fetch: async (req) => new Response(await req.text()),
+      })
+
+      const res = await chunkedRequest(`http://localhost:${port}/upload`, ['y'.repeat(250), 'y'.repeat(250)])
+      expect(res.status).toBe(200)
+      expect(res.body).toBe('y'.repeat(500))
+    })
+
+    it('should accept large bodies when maxBodySize is false', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        maxBodySize: false,
+        fetch: async (req) => {
+          const text = await req.text()
+          return new Response(String(text.length))
+        },
+      })
+
+      const payload = 'z'.repeat(2 * 1024 * 1024)
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: payload,
+        headers: { 'content-length': String(payload.length) },
+      })
+      expect(res.status).toBe(200)
+      expect(res.body).toBe(String(2 * 1024 * 1024))
+    })
+
+    it('should apply the 1MB default when the option is omitted', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        fetch: () => new Response('ok'),
+      })
+
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: 'x'.repeat(2_000_000),
+      })
+      expect(res.status).toBe(413)
+    })
+
+    it('should reject oversized Content-Length in native mode', async () => {
+      const port = nextPort++
+      let handlerCalled = false
+      server = await serve({
+        port,
+        mode: 'native',
+        maxBodySize: 1000,
+        fetch: () => {
+          handlerCalled = true
+          return new Response('ok')
+        },
+      })
+
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: 'x'.repeat(5000),
+      })
+      expect(res.status).toBe(413)
+      expect(handlerCalled).toBe(false)
+    })
+
+    it('should error chunked bodies past the cap in native mode', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        mode: 'native',
+        maxBodySize: 100,
+        fetch: async (req) => {
+          try {
+            await req.text()
+            return new Response('should not get here', { status: 500 })
+          } catch (e) {
+            return new Response((e as Error).name, { status: 413 })
+          }
+        },
+      })
+
+      const res = await chunkedRequest(`http://localhost:${port}/upload`, ['x'.repeat(250), 'x'.repeat(250)])
+      expect(res.status).toBe(413)
+      expect(res.body).toBe('PayloadTooLargeError')
+    })
+
+    it('should keep the buffer fast path working with the option set', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        maxBodySize: 1000,
+        fetch: async (req) => {
+          const body = await req.json()
+          return new Response(JSON.stringify(body))
+        },
+      })
+
+      const payload = JSON.stringify({ name: 'test' })
+      const res = await request(`http://localhost:${port}/data`, {
+        method: 'POST',
+        body: payload,
+        headers: { 'Content-Type': 'application/json', 'content-length': String(payload.length) },
+      })
+      expect(res.status).toBe(200)
+      expect(JSON.parse(res.body)).toEqual({ name: 'test' })
+    })
+  })
 })

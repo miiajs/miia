@@ -101,6 +101,12 @@ export interface ListenInfo {
   hostname: string
   fetch: (req: Request) => Response | Promise<Response>
   logger?: LoggerService
+  /**
+   * Adapter-level body cap computed by Miia: max(app `maxBodySize`, all
+   * `@BodyLimit` values), or `false` when limits are disabled. Adapters fall
+   * back to their own 1 MiB default when undefined (standalone serve() usage).
+   */
+  maxBodySize?: number | false
 }
 
 export interface ServerHandle {

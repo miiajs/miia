@@ -1,10 +1,11 @@
+import { applyBodyCeiling, DEFAULT_BODY_LIMIT } from '../body-limit.js'
 import { Container } from '../di-container.js'
-import { DiscoveryService } from '../discovery/discovery-service.js'
-import { Router, type GlobalGuardBinding, type MatchResult } from '../router.js'
+import { DiscoveryService } from '../discovery/index.js'
+import { type GlobalGuardBinding, type MatchResult, Router } from '../router.js'
 import { compose, guardToMiddleware } from '../middleware.js'
 import { ResponseBuilder } from '../response.js'
 import { Resolver } from '../resolver.js'
-import { HttpException, InternalServerException, NotFoundException } from '../exceptions.js'
+import { HttpException, InternalServerException, NotFoundException, PayloadTooLargeException } from '../exceptions.js'
 import type { LoggerConfig, LoggerService } from '../logger.js'
 import { ConsoleLogger, Logger } from '../logger.js'
 import { ModuleLoader } from './module-loader.js'
@@ -61,6 +62,20 @@ export interface MiiaOptions {
    *   own `destroy()`.
    */
   shutdownHooks?: boolean | NodeJS.Signals[]
+  /**
+   * Maximum request body size in bytes for non-GET/HEAD requests. Per-route
+   * `@BodyLimit()` overrides this (method > class > this option). `false`
+   * disables the default limit and the adapter-level cap.
+   *
+   * Declared Content-Length is checked in core after route matching against
+   * the per-route limit. Chunked bodies (no Content-Length) are capped by the
+   * adapter ceiling - `max(maxBodySize, all @BodyLimit values)` - enforced
+   * natively on Bun (`maxRequestBodySize`), via a counting stream wrapper on
+   * Deno, and by the node-server/uws-server adapters.
+   *
+   * @default 1_048_576 (1 MiB)
+   */
+  maxBodySize?: number | false
 }
 
 const JSON_RESPONSE_INIT = Object.freeze({
@@ -125,6 +140,9 @@ export class Miia {
     }
     this.logger = new Logger('App')
     this.shutdownHooksOption = options?.shutdownHooks ?? true
+    // Before any register() call, so every route registration (including
+    // programmatic ones like swagger's onReady) resolves against this default.
+    this.router.defaultBodyLimit = options?.maxBodySize ?? DEFAULT_BODY_LIMIT
     this.moduleLoader = new ModuleLoader(this.router, this.container)
 
     // Auto-register DiscoveryService so any provider can inject it without
@@ -203,6 +221,11 @@ export class Miia {
       return this.handleError(new NotFoundException(`Cannot ${req.method} ${pathname}`), req)
     }
 
+    if (req.method !== 'GET' && req.method !== 'HEAD' && matched.bodyLimit !== false) {
+      const tooLarge = this.checkBodyLimit(req, matched.bodyLimit)
+      if (tooLarge) return this.handleError(tooLarge, req, ctx)
+    }
+
     ctx.params = matched.params
 
     // Has per-route middleware → async path
@@ -263,17 +286,37 @@ export class Miia {
 
     await this.init()
 
+    // Adapter-level body cap: max(app maxBodySize, all @BodyLimit values).
+    // Routes are all registered by now (init() runs onReady hooks, e.g. swagger).
+    const ceiling = this.router.adapterBodyCeiling
+
     try {
       if (cb) {
-        const result = await cb({ port, hostname, fetch: this.fetch, logger: this.logger })
+        const result = await cb({ port, hostname, fetch: this.fetch, logger: this.logger, maxBodySize: ceiling })
         if (result && typeof (result as ServerHandle).close === 'function') {
           this.closeServer = () => (result as ServerHandle).close()
         }
       } else if ('Bun' in globalThis) {
-        const server = globalThis.Bun.serve({ fetch: this.fetch, port, hostname })
+        const server = globalThis.Bun.serve({
+          fetch: this.fetch,
+          port,
+          hostname,
+          // When disabled, omit the option - Bun's own default (128MB) applies.
+          ...(ceiling !== false ? { maxRequestBodySize: ceiling } : {}),
+        })
         this.closeServer = () => server.stop()
       } else if ('Deno' in globalThis) {
-        const server = globalThis.Deno.serve({ port, hostname, onListen: () => {} }, this.fetch)
+        // Deno.serve has no body size option - cap chunked bodies (no
+        // Content-Length) by re-wrapping the request with a counting stream.
+        const fetchFn = ceiling === false ? this.fetch : (req: Request) => this.fetch(applyBodyCeiling(req, ceiling))
+        const server = globalThis.Deno.serve(
+          {
+            port,
+            hostname,
+            onListen: () => {},
+          },
+          fetchFn,
+        )
         this.closeServer = () => server.shutdown()
       } else {
         throw new Error(
@@ -416,6 +459,11 @@ export class Miia {
         const matched = this.router.match(req.method, pathname)
         if (!matched) throw new NotFoundException(`Cannot ${req.method} ${pathname}`)
 
+        if (req.method !== 'GET' && req.method !== 'HEAD' && matched.bodyLimit !== false) {
+          const tooLarge = this.checkBodyLimit(req, matched.bodyLimit)
+          if (tooLarge) throw tooLarge // bubbles through the global middleware onion
+        }
+
         ctx.params = matched.params
 
         if (matched.compiledPipeline) {
@@ -487,11 +535,27 @@ export class Miia {
     return typeof (value as LoggerService).log === 'function'
   }
 
+  private checkBodyLimit(req: Request, limit: number): PayloadTooLargeException | null {
+    const cl = req.headers.get('content-length')
+    // NaN comparisons are false: a malformed Content-Length falls through to
+    // the adapter ceiling rather than producing a spurious 413.
+    if (cl !== null && +cl > limit) {
+      return new PayloadTooLargeException(`Request body of ${cl} bytes exceeds the ${limit} byte limit`)
+    }
+    return null
+  }
+
   private handleError(error: unknown, req?: Request, ctx?: RequestContext): Response {
     let httpError: HttpException
 
     if (error instanceof HttpException) {
       httpError = error
+    } else if (error instanceof Error && error.name === 'PayloadTooLargeError') {
+      // Contract with @miiajs/node-server and @miiajs/uws-server: their body
+      // streams error with an Error named 'PayloadTooLargeError' when the
+      // adapter cap is exceeded mid-stream (chunked bodies). They do not
+      // depend on core, so they cannot throw PayloadTooLargeException itself.
+      httpError = new PayloadTooLargeException(error.message)
     } else {
       this.logger.error('Unhandled error', error instanceof Error ? error.stack : String(error), 'RequestHandler')
       httpError = new InternalServerException()

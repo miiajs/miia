@@ -47,6 +47,7 @@ const CACHE = Symbol('responseCache')
 const textDecoder = new TextDecoder()
 const EMPTY_U8 = new Uint8Array(0)
 const DEFAULT_BUFFER_THRESHOLD = 102_400 // 100KB
+const DEFAULT_MAX_BODY_SIZE = 1_048_576 // 1MB
 
 // ─── Lightweight Headers Proxy (optimized mode) ─────────────
 //
@@ -418,6 +419,12 @@ export interface ServeOptions {
   /** Bodies with Content-Length <= threshold are buffered as Promise<Uint8Array> for fast path.
    *  Larger or without Content-Length → ReadableStream. @default 102400 (100KB) */
   bufferThreshold?: number
+  /** Max request body size in bytes. A larger declared Content-Length gets an immediate
+   *  413 response (handler never runs); chunked bodies error mid-stream past the cap
+   *  (the body stream rejects with an Error named 'PayloadTooLargeError', which
+   *  @miiajs/core maps to a 413). `false` disables the cap. Miia passes its computed
+   *  ceiling automatically via `app.listen(port, serve)`. @default 1048576 (1MB) */
+  maxBodySize?: number | false
   /** Logger for unhandled handler errors. Defaults to `console`. Miia passes its internal logger automatically when used via `app.listen(port, hostname, serve)`. */
   logger?: LoggerLike
 }
@@ -428,6 +435,7 @@ export const serve = async ({
   fetch: handler,
   mode = 'optimized',
   bufferThreshold = DEFAULT_BUFFER_THRESHOLD,
+  maxBodySize = DEFAULT_MAX_BODY_SIZE,
   logger = console,
 }: ServeOptions): Promise<{ close(): Promise<void> }> => {
   const native = mode === 'native'
@@ -460,6 +468,20 @@ export const serve = async ({
     // ── 2. Sync: set up body stream ─────────────────────────
 
     const hasBody = method !== 'GET' && method !== 'HEAD'
+
+    // ── Early 413: declared Content-Length over the cap, handler never runs ──
+    // Fully synchronous - no async gap yet, so no onAborted registration is
+    // needed. uWS closes the connection itself when a response ends before
+    // the request body was consumed.
+    if (maxBodySize !== false && hasBody && contentLength > maxBodySize) {
+      res.cork(() => {
+        res.writeStatus('413')
+        res.writeHeader('content-type', 'application/json')
+        res.end(JSON.stringify({ statusCode: 413, error: 'Payload Too Large', message: 'Payload Too Large' }))
+      })
+      return
+    }
+
     const shouldBuffer = !native && hasBody && contentLength >= 0 && contentLength <= bufferThreshold
 
     let body: ReadableStream<Uint8Array> | undefined
@@ -487,10 +509,33 @@ export const serve = async ({
       bodyPromise.catch(() => {}) // prevent unhandled rejection if handler never reads body
     } else if (hasBody) {
       // ── Stream path: large body, no Content-Length, or native mode ──
+      // Chunked bodies (no CL) are capped in-stream: uWS enforces CL framing
+      // for valid declared lengths, and oversized ones were pre-checked above.
+      // `!(contentLength >= 0)`, not `< 0`: a malformed header yields NaN, for
+      // which both the early 413 and `< 0` are false.
+      const streamLimit = maxBodySize !== false && !(contentLength >= 0) ? maxBodySize : -1
+      let received = 0
       body = new ReadableStream<Uint8Array>({
         start(controller) {
           bodyController = controller
           res.onData((chunk: ArrayBuffer, isLast: boolean) => {
+            if (bodyClosed) return // already errored on limit - ignore remaining chunks
+            if (streamLimit >= 0) {
+              received += chunk.byteLength
+              if (received > streamLimit) {
+                // Set BEFORE controller.error: the onAborted handlers guard on
+                // !bodyClosed, so this prevents a double-error on the controller.
+                bodyClosed = true
+                const err = new Error(`Request body exceeded ${streamLimit} byte limit`)
+                err.name = 'PayloadTooLargeError' // mapped to 413 by @miiajs/core
+                try {
+                  controller.error(err)
+                } catch {
+                  /* already closed */
+                }
+                return
+              }
+            }
             if (chunk.byteLength > 0) {
               // Must copy - uWS reuses the underlying ArrayBuffer memory
               controller.enqueue(new Uint8Array(chunk.slice(0)))

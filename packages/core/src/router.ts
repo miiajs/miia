@@ -1,3 +1,4 @@
+import { DEFAULT_BODY_LIMIT } from './body-limit.js'
 import { GUARD_FACTORY } from './decorators/metadata.js'
 import { compose } from './middleware.js'
 import type { HttpMethod, Middleware, RequestContext } from './types.js'
@@ -9,12 +10,14 @@ interface RouteEntry {
   middlewares: Middleware[]
   skipGlobalGuards: boolean
   skippedGuardClasses: Set<unknown> | null
+  bodyLimit: number | false
   compiledPipeline?: Middleware
 }
 
 export interface MatchResult {
   handler: (ctx: RequestContext) => unknown
   params: Record<string, string>
+  bodyLimit: number | false
   compiledPipeline?: Middleware
 }
 
@@ -32,6 +35,12 @@ export interface AddRouteOptions {
    * (they skip everything).
    */
   skippedGuardClasses?: Set<unknown> | null
+  /**
+   * Max request body size in bytes for this route (checked against the declared
+   * Content-Length after matching). Defaults to `Router.defaultBodyLimit`.
+   * `false` disables the check for this route.
+   */
+  bodyLimit?: number | false
 }
 
 export interface GlobalGuardBinding {
@@ -59,6 +68,21 @@ export class Router {
   private tries = new Map<string, TrieNode>()
   private allEntries: RouteEntry[] = []
 
+  /**
+   * App default for routes registered without an explicit bodyLimit.
+   * Set by Miia from `MiiaOptions.maxBodySize` before any route registration.
+   */
+  defaultBodyLimit: number | false = DEFAULT_BODY_LIMIT
+  private maxRouteBodyLimit = 0
+
+  /**
+   * Adapter-level body cap: max(default, all per-route limits); `false` when
+   * the app default is disabled. Read by Miia.listen() after init.
+   */
+  get adapterBodyCeiling(): number | false {
+    return this.defaultBodyLimit === false ? false : Math.max(this.defaultBodyLimit, this.maxRouteBodyLimit)
+  }
+
   add(
     method: HttpMethod,
     pattern: string,
@@ -66,6 +90,10 @@ export class Router {
     options: AddRouteOptions = {},
   ): void {
     const { middlewares = [], skipGlobalGuards = false, skippedGuardClasses = null } = options
+    const bodyLimit = options.bodyLimit ?? this.defaultBodyLimit
+    if (typeof bodyLimit === 'number' && bodyLimit > this.maxRouteBodyLimit) {
+      this.maxRouteBodyLimit = bodyLimit
+    }
     const normalized = normalizePath(pattern)
     const segments = normalized === '' ? [] : normalized.split('/')
     const entry: RouteEntry = {
@@ -75,6 +103,7 @@ export class Router {
       middlewares,
       skipGlobalGuards,
       skippedGuardClasses,
+      bodyLimit,
     }
 
     this.allEntries.push(entry)
@@ -130,7 +159,7 @@ export class Router {
       return {
         handler: staticEntry.handler,
         params: {},
-
+        bodyLimit: staticEntry.bodyLimit,
         compiledPipeline: staticEntry.compiledPipeline,
       }
     }
@@ -142,7 +171,7 @@ export class Router {
         return {
           handler: headEntry.handler,
           params: {},
-
+          bodyLimit: headEntry.bodyLimit,
           compiledPipeline: headEntry.compiledPipeline,
         }
       }
@@ -207,7 +236,7 @@ export class Router {
       if (node.wildcard) {
         params[node.wildcard.name] = pathSegments.slice(i).join('/')
         const e = node.wildcard.entry
-        return { handler: e.handler, params, compiledPipeline: e.compiledPipeline }
+        return { handler: e.handler, params, bodyLimit: e.bodyLimit, compiledPipeline: e.compiledPipeline }
       }
 
       return null
@@ -217,7 +246,7 @@ export class Router {
       return {
         handler: node.entry.handler,
         params,
-
+        bodyLimit: node.entry.bodyLimit,
         compiledPipeline: node.entry.compiledPipeline,
       }
     }
@@ -225,7 +254,7 @@ export class Router {
     if (node.wildcard) {
       params[node.wildcard.name] = ''
       const e = node.wildcard.entry
-      return { handler: e.handler, params, compiledPipeline: e.compiledPipeline }
+      return { handler: e.handler, params, bodyLimit: e.bodyLimit, compiledPipeline: e.compiledPipeline }
     }
 
     return null

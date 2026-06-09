@@ -624,4 +624,157 @@ describe('uws-server', () => {
       server = undefined as any // prevent afterEach double-close
     })
   })
+
+  // ── maxBodySize ───────────────────────────────────────────
+
+  describe('maxBodySize', () => {
+    it('should reject declared Content-Length over the cap with immediate 413, handler never runs', async () => {
+      const port = nextPort++
+      let handlerCalled = false
+      server = await serve({
+        port,
+        maxBodySize: 1000,
+        fetch: () => {
+          handlerCalled = true
+          return new Response('ok')
+        },
+      })
+
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: 'small actual body',
+        headers: { 'content-length': '5000' },
+      })
+      assert.equal(res.status, 413)
+      assert.deepEqual(JSON.parse(res.body), {
+        statusCode: 413,
+        error: 'Payload Too Large',
+        message: 'Payload Too Large',
+      })
+      assert.equal(handlerCalled, false)
+    })
+
+    it('should error chunked bodies past the cap with PayloadTooLargeError', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        maxBodySize: 100,
+        fetch: async (req) => {
+          try {
+            await req.text()
+            return new Response('should not get here', { status: 500 })
+          } catch (e) {
+            return new Response((e as Error).name, { status: 413 })
+          }
+        },
+      })
+
+      // No content-length → Node's http client sends chunked
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: 'x'.repeat(500),
+      })
+      assert.equal(res.status, 413)
+      assert.equal(res.body, 'PayloadTooLargeError')
+    })
+
+    it('should deliver chunked bodies under the cap intact', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        maxBodySize: 1000,
+        fetch: async (req) => new Response(await req.text()),
+      })
+
+      const payload = 'y'.repeat(500)
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: payload,
+      })
+      assert.equal(res.status, 200)
+      assert.equal(res.body, payload)
+    })
+
+    it('should accept large bodies when maxBodySize is false', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        maxBodySize: false,
+        fetch: async (req) => {
+          const text = await req.text()
+          return new Response(String(text.length))
+        },
+      })
+
+      const payload = 'z'.repeat(2 * 1024 * 1024)
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: payload,
+        headers: { 'content-length': String(payload.length) },
+      })
+      assert.equal(res.status, 200)
+      assert.equal(res.body, String(2 * 1024 * 1024))
+    })
+
+    it('should apply the 1MB default when the option is omitted', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        fetch: () => new Response('ok'),
+      })
+
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: 'tiny',
+        headers: { 'content-length': '2000000' },
+      })
+      assert.equal(res.status, 413)
+    })
+
+    it('should reject oversized Content-Length in native mode', async () => {
+      const port = nextPort++
+      let handlerCalled = false
+      server = await serve({
+        port,
+        mode: 'native',
+        maxBodySize: 1000,
+        fetch: () => {
+          handlerCalled = true
+          return new Response('ok')
+        },
+      })
+
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: 'small',
+        headers: { 'content-length': '5000' },
+      })
+      assert.equal(res.status, 413)
+      assert.equal(handlerCalled, false)
+    })
+
+    it('should error chunked bodies past the cap in native mode', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        mode: 'native',
+        maxBodySize: 100,
+        fetch: async (req) => {
+          try {
+            await req.text()
+            return new Response('should not get here', { status: 500 })
+          } catch (e) {
+            return new Response((e as Error).name, { status: 413 })
+          }
+        },
+      })
+
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: 'x'.repeat(500),
+      })
+      assert.equal(res.status, 413)
+      assert.equal(res.body, 'PayloadTooLargeError')
+    })
+  })
 })

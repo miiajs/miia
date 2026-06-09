@@ -1,7 +1,16 @@
 export { Injectable, Controller, Module } from './class.js'
 export type { InjectableOptions } from './class.js'
 export { Get, Post, Put, Patch, Delete, Head, Options } from './http.js'
-export { Use, UseGuard, SkipGuard, ValidateBody, ValidateQuery, ValidateParams, Status } from './middleware.js'
+export {
+  Use,
+  UseGuard,
+  SkipGuard,
+  BodyLimit,
+  ValidateBody,
+  ValidateQuery,
+  ValidateParams,
+  Status,
+} from './middleware.js'
 export {
   INJECTABLE,
   MODULE,
@@ -15,6 +24,7 @@ export {
   METHOD_GUARDS,
   SKIP_GUARDS,
   GUARD_FACTORY,
+  BODY_LIMITS,
   BODY_SCHEMAS,
   QUERY_SCHEMAS,
   PARAMS_SCHEMAS,
