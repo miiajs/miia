@@ -45,7 +45,7 @@
     "deno": ">=2.6.1"
   },
   "dependencies": {
-    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.64.0"
+    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.68.0"
   },
   "scripts": {
     "build": "tsc --build",

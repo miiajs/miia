@@ -235,6 +235,21 @@ describe('uws-server', () => {
   // ── Response types ────────────────────────────────────────
 
   describe('response types', () => {
+    it('should send non-ASCII string bodies as UTF-8 bytes', async () => {
+      const port = nextPort++
+      const payload = 'привіт 🇺🇦'
+      server = await serve({
+        port,
+        fetch: () => new Response(payload),
+      })
+
+      const res = await request(`http://localhost:${port}/utf8`)
+      assert.equal(res.status, 200)
+      // Byte-for-byte: the helper accumulates Buffer chunks decoded as UTF-8,
+      // so any Latin-1 mis-encoding on the wire breaks this equality.
+      assert.equal(res.body, payload)
+    })
+
     it('should return custom status code and headers', async () => {
       const port = nextPort++
       server = await serve({

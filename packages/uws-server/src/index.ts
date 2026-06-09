@@ -4,7 +4,7 @@ import type { us_listen_socket } from 'uWebSockets.js'
  * @miiajs/uws-server - uWebSockets.js HTTP server for Web API frameworks.
  *
  * Requires `uWebSockets.js` to be installed separately:
- *   bun add uWebSockets.js@uNetworking/uWebSockets.js#v20.64.0
+ *   bun add uWebSockets.js@uNetworking/uWebSockets.js#v20.68.0
  *
  * Usage:
  *   import { serve } from '@miiajs/uws-server';
