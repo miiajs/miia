@@ -1,5 +1,11 @@
 # @miiajs/cli
 
+## 0.2.0
+
+### Patch Changes
+
+- Version bump only - fixed versioning across the @miiajs/* group.
+
 ## 0.1.1
 
 ### Patch Changes

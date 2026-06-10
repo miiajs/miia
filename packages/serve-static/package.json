@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/serve-static",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Static file serving for MiiaJS - Range, weak ETag, conditional GET, charset negotiation, SPA fallback, dotfile guard, symlink-safe paths.",
@@ -47,7 +47,7 @@
     "deno": ">=2.6.1"
   },
   "peerDependencies": {
-    "@miiajs/core": "^0.1.1"
+    "@miiajs/core": "^0.2.0"
   },
   "devDependencies": {
     "@miiajs/core": "workspace:*"

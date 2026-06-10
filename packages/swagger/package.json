@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/swagger",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "OpenAPI 3.1 spec generation and Swagger UI for MiiaJS.",
@@ -44,10 +44,10 @@
     "deno": ">=2.6.1"
   },
   "dependencies": {
-    "@miiajs/serve-static": "^0.1.1"
+    "@miiajs/serve-static": "^0.2.0"
   },
   "peerDependencies": {
-    "@miiajs/core": "^0.1.1",
+    "@miiajs/core": "^0.2.0",
     "swagger-ui-dist": "^5.0.0"
   },
   "scripts": {

@@ -1,5 +1,19 @@
 # @miiajs/messaging-redis
 
+## 0.2.0
+
+### Patch Changes
+
+- [`7ccf372`](https://github.com/miiajs/miia/commit/7ccf3729590c8446eec61d2fb55320f69bca5c26) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Auto-install internal implementation dependencies.
+
+  `@miiajs/swagger` requires `@miiajs/serve-static` to serve the Swagger UI bundle, and `@miiajs/messaging-redis` requires `@miiajs/messaging` as the abstract bus it implements a transport for. In `0.1.1` these were declared as `peerDependencies`, which meant `bun add @miiajs/swagger` did not install `@miiajs/serve-static` automatically and the consumer had to know about it and add it manually.
+
+  Move both back to `dependencies` (as plain semver `^0.2.0`, not `workspace:` - the workspace protocol would still leak into the published package). `@miiajs/core` stays a `peerDependency` because it is the framework root and a single instance must be shared across all plugins.
+
+- Updated dependencies:
+  - @miiajs/core@0.2.0
+  - @miiajs/messaging@0.2.0
+
 ## 0.1.1
 
 ### Patch Changes

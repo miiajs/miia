@@ -140,17 +140,17 @@
     },
     "packages/auth": {
       "name": "@miiajs/auth",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.1.1",
+        "@miiajs/core": "^0.2.0",
       },
     },
     "packages/cli": {
       "name": "@miiajs/cli",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "bin": {
         "miia": "dist/bin.js",
       },
@@ -167,28 +167,28 @@
     },
     "packages/config": {
       "name": "@miiajs/config",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "zod": "^4.3.6",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.1.1",
+        "@miiajs/core": "^0.2.0",
       },
     },
     "packages/core": {
       "name": "@miiajs/core",
-      "version": "0.1.1",
+      "version": "0.2.0",
     },
     "packages/drizzle": {
       "name": "@miiajs/drizzle",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "drizzle-orm": "^0.45.2",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.1.1",
+        "@miiajs/core": "^0.2.0",
         "better-sqlite3": "^11.0.0",
         "drizzle-orm": ">=0.45.2 <1.0.0",
         "mysql2": "^3.0.0",
@@ -202,86 +202,86 @@
     },
     "packages/jwt": {
       "name": "@miiajs/jwt",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "jose": "^6.0.11",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.1.1",
+        "@miiajs/core": "^0.2.0",
         "jose": "^6.0.0",
       },
     },
     "packages/messaging": {
       "name": "@miiajs/messaging",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.1.1",
+        "@miiajs/core": "^0.2.0",
       },
     },
     "packages/messaging-redis": {
       "name": "@miiajs/messaging-redis",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "dependencies": {
-        "@miiajs/messaging": "^0.1.1",
+        "@miiajs/messaging": "^0.2.0",
       },
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "ioredis": "^5.4.1",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.1.1",
+        "@miiajs/core": "^0.2.0",
         "ioredis": "^5.0.0",
       },
     },
     "packages/mongoose": {
       "name": "@miiajs/mongoose",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "mongoose": "^9.4.1",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.1.1",
+        "@miiajs/core": "^0.2.0",
         "mongoose": "^9.4.1",
       },
     },
     "packages/node-server": {
       "name": "@miiajs/node-server",
-      "version": "0.1.1",
+      "version": "0.2.0",
     },
     "packages/papr": {
       "name": "@miiajs/papr",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "mongodb": "^7.1.1",
         "papr": "^17.0.0",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.1.1",
+        "@miiajs/core": "^0.2.0",
         "mongodb": "^7.1.1",
         "papr": "^17.0.0",
       },
     },
     "packages/serve-static": {
       "name": "@miiajs/serve-static",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.1.1",
+        "@miiajs/core": "^0.2.0",
       },
     },
     "packages/swagger": {
       "name": "@miiajs/swagger",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "dependencies": {
-        "@miiajs/serve-static": "^0.1.1",
+        "@miiajs/serve-static": "^0.2.0",
       },
       "devDependencies": {
         "@miiajs/core": "workspace:*",
@@ -289,13 +289,13 @@
         "zod": "^4.3.6",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.1.1",
+        "@miiajs/core": "^0.2.0",
         "swagger-ui-dist": "^5.0.0",
       },
     },
     "packages/uws-server": {
       "name": "@miiajs/uws-server",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "dependencies": {
         "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.68.0",
       },

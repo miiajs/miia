@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/drizzle",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Drizzle ORM integration for MiiaJS (PostgreSQL, MySQL, SQLite).",
@@ -46,7 +46,7 @@
     "deno": ">=2.6.1"
   },
   "peerDependencies": {
-    "@miiajs/core": "^0.1.1",
+    "@miiajs/core": "^0.2.0",
     "better-sqlite3": "^11.0.0",
     "drizzle-orm": ">=0.45.2 <1.0.0",
     "mysql2": "^3.0.0",
