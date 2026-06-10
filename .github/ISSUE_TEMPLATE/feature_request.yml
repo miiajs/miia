@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest an addition or improvement
+title: '[feature]: '
+labels: ['enhancement', 'triage']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that MiiaJS currently makes hard or impossible?
+      placeholder: Describe the use case, not only the solution you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like it to work? API sketches welcome.
+      placeholder: |
+        ```ts
+        // what the API could look like
+        ```
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, or how other frameworks solve this.
