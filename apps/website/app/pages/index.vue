@@ -90,13 +90,13 @@ async function copyInstall() {
             <span class="sm:hidden">
               <span class="font-semibold text-default">17% vs Hono</span>
               <span class="opacity-40 mx-1">·</span>
-              <span class="font-semibold text-default">38% vs NestJS</span>
+              <span class="font-semibold text-default">31% vs NestJS</span>
             </span>
             <!-- Desktop: full claim with 'Up to' eyebrow and runtime annotation -->
             <span class="hidden sm:inline">Up to</span>
             <span class="hidden sm:inline font-semibold text-default">17% faster than Hono</span>
             <span class="hidden sm:inline opacity-40">·</span>
-            <span class="hidden sm:inline font-semibold text-default">38% vs NestJS</span>
+            <span class="hidden sm:inline font-semibold text-default">31% vs NestJS</span>
             <span class="hidden sm:inline opacity-60 text-xs font-mono">(on Bun)</span>
             <UIcon name="i-lucide-arrow-right" class="size-3.5 transition group-hover:translate-x-0.5" />
           </NuxtLink>
@@ -333,7 +333,7 @@ async function copyInstall() {
             <p class="mt-2 text-sm text-muted">faster than Hono<br />on Bun (realistic API)</p>
           </div>
           <div class="sm:border-x sm:border-[color:var(--ui-border)] sm:px-6">
-            <div class="font-display font-bold text-5xl sm:text-6xl text-plasma">38%</div>
+            <div class="font-display font-bold text-5xl sm:text-6xl text-plasma">31%</div>
             <p class="mt-2 text-sm text-muted">faster than<br />NestJS + Fastify on Bun</p>
           </div>
           <div>

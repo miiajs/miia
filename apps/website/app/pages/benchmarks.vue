@@ -468,15 +468,15 @@ function formatNum(n: number) {
           </p>
 
           <p class="text-sm text-muted mt-4">
-            Last updated: April 10, 2026.
+            Last updated: June 10, 2026.
           </p>
         </section>
 
         <!-- ====== NODE.JS CALLOUT ====== -->
         <div class="rounded-xl border border-[color:var(--ui-border)] bg-[color:var(--ui-bg-muted)] p-6">
           <p class="text-base text-toned">
-            <strong>Node.js:</strong> MiiaJS with the uWS adapter outperforms Hono uWS by up to 48% and NestJS+Fastify by
-            up to 33% in realistic API tests on M1 Pro. Same transport - the difference is pure framework overhead.
+            <strong>Node.js:</strong> MiiaJS with the uWS adapter outperforms Hono uWS by up to 45% and NestJS+Fastify by
+            up to 34% in realistic API tests on M1 Pro. Same transport - the difference is pure framework overhead.
           </p>
         </div>
 
