@@ -12,6 +12,7 @@ import { ModuleLoader } from './module-loader.js'
 import type {
   CanActivate,
   ConfiguredModule,
+  ConnInfo,
   Constructor,
   Guard,
   HttpMethod,
@@ -76,6 +77,21 @@ export interface MiiaOptions {
    * @default 1_048_576 (1 MiB)
    */
   maxBodySize?: number | false
+  /**
+   * Trust proxy headers when resolving `ctx.ip`. Enable only when behind a
+   * trusted reverse proxy.
+   *
+   * - `true` - use the leftmost entry of `x-forwarded-for`. WARNING: the
+   *   leftmost element is forgeable if the proxy appends to XFF rather than
+   *   overwriting it - prefer your edge's vendor header instead.
+   * - `string` / `string[]` - trusted header(s) in priority order, e.g.
+   *   `'cf-connecting-ip'` or `['cf-connecting-ip', 'x-real-ip']`.
+   *
+   * `ctx.conn.remoteAddress` is always the honest socket IP regardless of this.
+   *
+   * @default false
+   */
+  trustProxy?: boolean | string | string[]
 }
 
 const JSON_RESPONSE_INIT = Object.freeze({
@@ -117,6 +133,7 @@ export class Miia {
   private compiledGlobalPipeline?: Middleware
   private closeServer?: () => void | Promise<void>
   private logger: Logger
+  private trustProxy: string[] | false
   private shutdownHooksOption: boolean | NodeJS.Signals[]
   private shutdownHandlersRegistered = false
   private shutdownInProgress = false
@@ -139,6 +156,9 @@ export class Miia {
       Logger.setLogger(this.isLoggerService(options.logger) ? options.logger : new ConsoleLogger(options.logger))
     }
     this.logger = new Logger('App')
+    // Normalize trustProxy once: false/undefined -> false; true -> leftmost XFF;
+    // string -> single trusted header; array -> lowercased copy (case-insensitive).
+    this.trustProxy = normalizeTrustProxy(options?.trustProxy)
     this.shutdownHooksOption = options?.shutdownHooks ?? true
     // Before any register() call, so every route registration (including
     // programmatic ones like swagger's onReady) resolves against this default.
@@ -192,8 +212,8 @@ export class Miia {
     return this.container.resolve<T>(token)
   }
 
-  fetch = (req: Request): Response | Promise<Response> => {
-    if (!this.initialized) return this.initAndFetch(req)
+  fetch = (req: Request, env?: unknown): Response | Promise<Response> => {
+    if (!this.initialized) return this.initAndFetch(req, env)
     if (!this.compiled) this.compilePipelines()
 
     const r = req as Request & { _pathname?: string; _search?: string }
@@ -206,7 +226,7 @@ export class Miia {
       pathname = parsed.pathname
       search = parsed.search
     }
-    const ctx = new Context(req, search)
+    const ctx = new Context(req, search, env, this.trustProxy)
 
     // Slow path: global middleware wraps router.match + per-route pipeline + handler.
     // Errors (including NotFoundException from router) bubble through the onion so
@@ -308,7 +328,10 @@ export class Miia {
       } else if ('Deno' in globalThis) {
         // Deno.serve has no body size option - cap chunked bodies (no
         // Content-Length) by re-wrapping the request with a counting stream.
-        const fetchFn = ceiling === false ? this.fetch : (req: Request) => this.fetch(applyBodyCeiling(req, ceiling))
+        const fetchFn =
+          ceiling === false
+            ? this.fetch
+            : (req: Request, info?: unknown) => this.fetch(applyBodyCeiling(req, ceiling), info)
         const server = globalThis.Deno.serve(
           {
             port,
@@ -395,9 +418,9 @@ export class Miia {
     }
   }
 
-  private async initAndFetch(req: Request): Promise<Response> {
+  private async initAndFetch(req: Request, env?: unknown): Promise<Response> {
     await this.init()
-    return this.fetch(req)
+    return this.fetch(req, env)
   }
 
   // ─── Private ─────────────────────────────────────────────────
@@ -588,10 +611,40 @@ class Context implements RequestContext {
   private _rawQuery: URLSearchParams | null = null
   private _jsonPromise: Promise<unknown> | null = null
   private _textPromise: Promise<string> | null = null
+  private _env: unknown
+  private _trustProxy: string[] | false
+  private _connInfo: ConnInfo | null = null
 
-  constructor(req: Request, search: string) {
+  constructor(req: Request, search: string, env: unknown, trustProxy: string[] | false) {
     this.req = req
     this._search = search
+    this._env = env
+    this._trustProxy = trustProxy
+  }
+
+  get conn(): ConnInfo {
+    return (this._connInfo ??= resolveConn(this.req, this._env))
+  }
+
+  get ip(): string | undefined {
+    if (this._trustProxy !== false) {
+      for (const name of this._trustProxy) {
+        const value = this.req.headers.get(name)
+        if (!value) continue
+        let candidate: string
+        if (name === 'x-forwarded-for') {
+          const comma = value.indexOf(',')
+          candidate = (comma === -1 ? value : value.substring(0, comma)).trim()
+        } else {
+          candidate = value.trim() // vendor headers (cf-connecting-ip etc.) are single-value
+        }
+        if (candidate) return candidate // empty/whitespace value -> next header / socket
+        // Deliberate: an empty leftmost in XFF (" , 2.2.2.2") drops the WHOLE header to the
+        // next entry in the trust list / socket - we do NOT try later XFF elements (they are
+        // even less trusted than the leftmost; simplicity beats heuristics on broken input).
+      }
+    }
+    return this.conn.remoteAddress
   }
 
   get query(): Record<string, string> {
@@ -626,6 +679,47 @@ class Context implements RequestContext {
   _setBody(value: unknown): void {
     this._jsonPromise = Promise.resolve(value)
   }
+}
+
+/** Normalize the `trustProxy` option into a lowercased trusted-header list, or `false`. */
+function normalizeTrustProxy(option: boolean | string | string[] | undefined): string[] | false {
+  if (!option) return false
+  if (option === true) return ['x-forwarded-for']
+  if (typeof option === 'string') return [option.toLowerCase()]
+  return option.map((h) => h.toLowerCase())
+}
+
+/**
+ * Resolve socket-level connection info from the runtime, by priority:
+ * 1. `req._conn` - set by node-server/uws-server adapters and TestApp;
+ * 2. Bun: `env.requestIP(req)` -> `{ address, port, family }` (closed conn -> null -> `{}`);
+ * 3. Deno: `env.remoteAddr` -> `{ hostname, port }`;
+ * 4. otherwise `{}`.
+ */
+function resolveConn(req: Request, env: unknown): ConnInfo {
+  const fromAdapter = (req as { _conn?: ConnInfo })._conn
+  if (fromAdapter) return fromAdapter
+
+  if (env && typeof (env as { requestIP?: unknown }).requestIP === 'function') {
+    // Bun: field names differ from ConnInfo - map explicitly.
+    const addr = (
+      env as { requestIP: (r: Request) => { address: string; port: number; family: string } | null }
+    ).requestIP(req)
+    if (!addr) return {}
+    return { remoteAddress: addr.address, remotePort: addr.port, family: addr.family as 'IPv4' | 'IPv6' }
+  }
+
+  const remoteAddr = (env as { remoteAddr?: { hostname?: string; port?: number } } | undefined)?.remoteAddr
+  if (remoteAddr && typeof remoteAddr.hostname === 'string') {
+    // Deno: ConnInfo['Addr'] with a `hostname` field.
+    return {
+      remoteAddress: remoteAddr.hostname,
+      remotePort: remoteAddr.port,
+      family: remoteAddr.hostname.includes(':') ? 'IPv6' : 'IPv4',
+    }
+  }
+
+  return {}
 }
 
 /** Lightweight URL parse for HTTP request URLs (always have pathname, never have fragment) */

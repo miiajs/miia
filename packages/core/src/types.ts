@@ -11,12 +11,29 @@ export type Scope = 'singleton' | 'transient' | 'request'
 
 // ─── Request Context ─────────────────────────────────────────────
 
+export interface ConnInfo {
+  remoteAddress?: string
+  remotePort?: number
+  family?: 'IPv4' | 'IPv6'
+}
+
 export interface RequestContext {
   req: Request
   res: ResponseBuilder
   params: Record<string, any>
   query: Record<string, any>
   rawQuery: URLSearchParams
+  /**
+   * Connection info for the request, resolved lazily and cached. `{}` when the
+   * runtime exposes no socket address (e.g. unit tests without `_conn`). The
+   * `remoteAddress` is always the honest socket IP, never a proxy header.
+   */
+  readonly conn: ConnInfo
+  /**
+   * Client IP. Resolves from trusted proxy headers when `trustProxy` is set
+   * (see `MiiaOptions.trustProxy`), otherwise falls back to `conn.remoteAddress`.
+   */
+  readonly ip: string | undefined
   /**
    * Returns the parsed JSON body, cached per request.
    * After `@ValidateBody` runs, returns the validated (and possibly transformed) data.

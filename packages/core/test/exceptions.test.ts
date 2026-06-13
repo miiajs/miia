@@ -7,6 +7,7 @@ import {
   NotFoundException,
   ConflictException,
   UnprocessableException,
+  TooManyRequestsException,
   InternalServerException,
 } from '../src/index.js'
 
@@ -100,6 +101,13 @@ describe('Built-in exceptions', () => {
     expect(err.message).toBe('Unprocessable Entity')
   })
 
+  it('TooManyRequestsException → 429', () => {
+    const err = new TooManyRequestsException()
+    expect(err.statusCode).toBe(429)
+    expect(err.message).toBe('Too Many Requests')
+    expect(err.toJSON().error).toBe('Too Many Requests')
+  })
+
   it('InternalServerException → 500', () => {
     const err = new InternalServerException()
     expect(err.statusCode).toBe(500)
@@ -114,6 +122,7 @@ describe('Built-in exceptions', () => {
       new NotFoundException(),
       new ConflictException(),
       new UnprocessableException(),
+      new TooManyRequestsException(),
       new InternalServerException(),
     ]
     for (const err of exceptions) {

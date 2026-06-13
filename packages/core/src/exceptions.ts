@@ -75,6 +75,12 @@ export class UnprocessableException extends HttpException {
   }
 }
 
+export class TooManyRequestsException extends HttpException {
+  constructor(message = 'Too Many Requests', details?: unknown) {
+    super(429, message, details)
+  }
+}
+
 export class InternalServerException extends HttpException {
   constructor(message = 'Internal Server Error', details?: unknown) {
     super(500, message, details)

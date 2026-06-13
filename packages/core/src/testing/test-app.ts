@@ -71,6 +71,7 @@ export class TestApp {
       body?: any
       headers?: Record<string, string>
       query?: Record<string, string>
+      ip?: string
     },
   ): Promise<Response> {
     let url = `http://localhost${path}`
@@ -87,7 +88,9 @@ export class TestApp {
         ...options?.headers,
       }
     }
-    return this.app.fetch(new Request(url, init))
+    const req = new Request(url, init)
+    if (options?.ip !== undefined) (req as any)._conn = { remoteAddress: options.ip }
+    return this.app.fetch(req)
   }
 
   resolve<T>(token: Constructor<T> | string): T {

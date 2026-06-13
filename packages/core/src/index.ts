@@ -80,6 +80,7 @@ export {
   ConflictException,
   PayloadTooLargeException,
   UnprocessableException,
+  TooManyRequestsException,
   InternalServerException,
 } from './exceptions.js'
 
@@ -113,6 +114,7 @@ export type {
   HttpMethod,
   RouteDefinition,
   RequestContext,
+  ConnInfo,
   ListenInfo,
   ServerHandle,
   ListenAdapter,
