@@ -158,6 +158,15 @@ const requestProto: Record<string | symbol, any> = {
     return this._abortController.signal
   },
 
+  /** Lazy connection info - read by @miiajs/core's resolveConn. */
+  get _conn() {
+    if (!this._connCache) {
+      const s = this._incoming.socket
+      this._connCache = s ? { remoteAddress: s.remoteAddress, remotePort: s.remotePort, family: s.remoteFamily } : {}
+    }
+    return this._connCache
+  },
+
   /** Create real GlobalRequest - only for rare operations (blob, formData, clone) */
   _getReal(): Request {
     if (!this._real) {
@@ -332,6 +341,7 @@ function createRequestProxy(
   proxy._bodyStream = null
   proxy._bodyReject = null
   proxy._bodyLimit = null
+  proxy._connCache = null
   return proxy as any
 }
 
@@ -857,11 +867,20 @@ function toWebRequest(nodeReq: IncomingMessage, port: number, hostname: string, 
     body = limitStream(body, maxBodySize, () => drainIncoming(nodeReq))
   }
 
-  return new GlobalRequest(url, {
+  const request = new GlobalRequest(url, {
     method,
     headers,
     body,
     // @ts-expect-error - duplex is required for streaming bodies in Node 20+
     duplex: hasBody ? 'half' : undefined,
   })
+
+  const socket = nodeReq.socket
+  ;(request as any)._conn = {
+    remoteAddress: socket.remoteAddress,
+    remotePort: socket.remotePort,
+    family: socket.remoteFamily as 'IPv4' | 'IPv6' | undefined,
+  }
+
+  return request
 }

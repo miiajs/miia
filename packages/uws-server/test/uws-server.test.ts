@@ -792,4 +792,46 @@ describe('uws-server', () => {
       assert.equal(res.body, 'PayloadTooLargeError')
     })
   })
+
+  // ── Connection info ───────────────────────────────────────
+
+  describe('connection info', () => {
+    // uWS reports remote addresses in expanded form: dotted-quad for IPv4,
+    // and either full IPv6 (`0000:...:0001`) or IPv4-mapped (`...ffff:7f00:0001`)
+    // for loopback over a dual-stack listener. Accept all of them, and just
+    // assert family is consistent with the presence of ':' in the address.
+    const looksLikeLoopback = (addr: string) =>
+      typeof addr === 'string' && (addr === '127.0.0.1' || addr.includes(':') || /\.\d+$/.test(addr))
+
+    it('should expose _conn in optimized mode', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        fetch: (req) => Response.json((req as any)._conn),
+      })
+
+      const res = await request(`http://localhost:${port}/conn`)
+      assert.equal(res.status, 200)
+      const conn = JSON.parse(res.body)
+      assert.ok(looksLikeLoopback(conn.remoteAddress), `unexpected remoteAddress: ${conn.remoteAddress}`)
+      assert.equal(conn.family, conn.remoteAddress.includes(':') ? 'IPv6' : 'IPv4')
+      assert.ok(typeof conn.remotePort === 'number' && conn.remotePort > 0, `unexpected remotePort: ${conn.remotePort}`)
+    })
+
+    it('should expose _conn in native mode', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        mode: 'native',
+        fetch: (req) => Response.json((req as any)._conn),
+      })
+
+      const res = await request(`http://localhost:${port}/conn`)
+      assert.equal(res.status, 200)
+      const conn = JSON.parse(res.body)
+      assert.ok(looksLikeLoopback(conn.remoteAddress), `unexpected remoteAddress: ${conn.remoteAddress}`)
+      assert.equal(conn.family, conn.remoteAddress.includes(':') ? 'IPv6' : 'IPv4')
+      assert.ok(typeof conn.remotePort === 'number' && conn.remotePort > 0, `unexpected remotePort: ${conn.remotePort}`)
+    })
+  })
 })

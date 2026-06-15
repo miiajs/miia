@@ -812,4 +812,41 @@ describe('node-server', () => {
       expect(JSON.parse(res.body)).toEqual({ name: 'test' })
     })
   })
+
+  // ── Connection info ───────────────────────────────────────
+
+  describe('connection info', () => {
+    const loopbacks = ['127.0.0.1', '::1', '::ffff:127.0.0.1']
+
+    it('should expose _conn on the request proxy (optimized mode)', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        fetch: (req) => new Response(JSON.stringify((req as any)._conn)),
+      })
+
+      const res = await request(`http://localhost:${port}/`)
+      expect(res.status).toBe(200)
+      const conn = JSON.parse(res.body)
+      expect(loopbacks).toContain(conn.remoteAddress)
+      expect(typeof conn.remotePort).toBe('number')
+      expect(['IPv4', 'IPv6']).toContain(conn.family)
+    })
+
+    it('should expose _conn on the request (native mode)', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        mode: 'native',
+        fetch: (req) => new Response(JSON.stringify((req as any)._conn)),
+      })
+
+      const res = await request(`http://localhost:${port}/`)
+      expect(res.status).toBe(200)
+      const conn = JSON.parse(res.body)
+      expect(loopbacks).toContain(conn.remoteAddress)
+      expect(typeof conn.remotePort).toBe('number')
+      expect(['IPv4', 'IPv6']).toContain(conn.family)
+    })
+  })
 })

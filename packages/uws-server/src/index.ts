@@ -263,6 +263,7 @@ function createRequestProxy(
   port: number,
   pathname: string,
   query: string,
+  conn: { remoteAddress: string; remotePort?: number; family: 'IPv4' | 'IPv6' },
 ): Request {
   const proxy = Object.create(requestProto)
   proxy._method = method
@@ -281,6 +282,7 @@ function createRequestProxy(
   proxy._ac = null
   proxy._real = null
   proxy._aborted = false
+  proxy._conn = conn
   return proxy
 }
 
@@ -465,6 +467,17 @@ export const serve = async ({
       else if (key === 'content-length') contentLength = +value
     })
 
+    // ── Connection info: must read remote address in the sync section ──
+    // (uWS invalidates res after the first async gap). getRemotePort() returns
+    // 0 when the port is unavailable, normalized to undefined.
+    const remoteAddress = textDecoder.decode(res.getRemoteAddressAsText())
+    const remotePort = res.getRemotePort() || undefined
+    const conn = {
+      remoteAddress,
+      remotePort,
+      family: remoteAddress.includes(':') ? ('IPv6' as const) : ('IPv4' as const),
+    }
+
     // ── 2. Sync: set up body stream ─────────────────────────
 
     const hasBody = method !== 'GET' && method !== 'HEAD'
@@ -564,6 +577,7 @@ export const serve = async ({
         // @ts-expect-error - duplex required for streaming request bodies in Node
         duplex: hasBody ? 'half' : undefined,
       })
+      ;(request as any)._conn = conn
       res.onAborted(() => {
         aborted = true
         ac.abort(new Error('Client connection closed'))
@@ -576,7 +590,7 @@ export const serve = async ({
         }
       })
     } else {
-      request = createRequestProxy(method, headerPairs, body, bodyPromise, host, hostname, port, path, query)
+      request = createRequestProxy(method, headerPairs, body, bodyPromise, host, hostname, port, path, query, conn)
       res.onAborted(() => {
         aborted = true
         ;(request as any)._aborted = true
