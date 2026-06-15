@@ -713,7 +713,7 @@ export const serve = async ({
   // ── Listen ─────────────────────────────────────────────────
 
   await new Promise<void>((resolve, reject) => {
-    app.listen(port, (token: us_listen_socket | false) => {
+    app.listen(hostname, port, (token: us_listen_socket | false) => {
       if (token) {
         listenSocket = token
         resolve()
