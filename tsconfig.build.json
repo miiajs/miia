@@ -10,6 +10,7 @@
     { "path": "packages/papr" },
     { "path": "packages/auth" },
     { "path": "packages/jwt" },
+    { "path": "packages/rate-limit" },
     { "path": "packages/swagger" },
     { "path": "packages/mongoose" },
     { "path": "packages/messaging" },
