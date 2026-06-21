@@ -143,17 +143,17 @@
     },
     "packages/auth": {
       "name": "@miiajs/auth",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
       },
     },
     "packages/cli": {
       "name": "@miiajs/cli",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "bin": {
         "miia": "dist/bin.js",
       },
@@ -170,28 +170,28 @@
     },
     "packages/config": {
       "name": "@miiajs/config",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "zod": "^4.3.6",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
       },
     },
     "packages/core": {
       "name": "@miiajs/core",
-      "version": "0.2.0",
+      "version": "0.3.0",
     },
     "packages/drizzle": {
       "name": "@miiajs/drizzle",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "drizzle-orm": "^0.45.2",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
         "better-sqlite3": "^11.0.0",
         "drizzle-orm": ">=0.45.2 <1.0.0",
         "mysql2": "^3.0.0",
@@ -205,96 +205,96 @@
     },
     "packages/jwt": {
       "name": "@miiajs/jwt",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "jose": "^6.0.11",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
         "jose": "^6.0.0",
       },
     },
     "packages/messaging": {
       "name": "@miiajs/messaging",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
       },
     },
     "packages/messaging-redis": {
       "name": "@miiajs/messaging-redis",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
-        "@miiajs/messaging": "^0.2.0",
+        "@miiajs/messaging": "^0.3.0",
       },
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "ioredis": "^5.4.1",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
         "ioredis": "^5.0.0",
       },
     },
     "packages/mongoose": {
       "name": "@miiajs/mongoose",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "mongoose": "^9.4.1",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
         "mongoose": "^9.4.1",
       },
     },
     "packages/node-server": {
       "name": "@miiajs/node-server",
-      "version": "0.2.0",
+      "version": "0.3.0",
     },
     "packages/papr": {
       "name": "@miiajs/papr",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "mongodb": "^7.1.1",
         "papr": "^17.0.0",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
         "mongodb": "^7.1.1",
         "papr": "^17.0.0",
       },
     },
     "packages/rate-limit": {
       "name": "@miiajs/rate-limit",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
       },
     },
     "packages/serve-static": {
       "name": "@miiajs/serve-static",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
       },
     },
     "packages/swagger": {
       "name": "@miiajs/swagger",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
-        "@miiajs/serve-static": "^0.2.0",
+        "@miiajs/serve-static": "^0.3.0",
       },
       "devDependencies": {
         "@miiajs/core": "workspace:*",
@@ -302,13 +302,13 @@
         "zod": "^4.3.6",
       },
       "peerDependencies": {
-        "@miiajs/core": "^0.2.0",
+        "@miiajs/core": ">=0.3.0 <1.0.0",
         "swagger-ui-dist": "^5.0.0",
       },
     },
     "packages/uws-server": {
       "name": "@miiajs/uws-server",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.68.0",
       },
@@ -3115,8 +3115,6 @@
     "@manypkg/get-packages/@changesets/types": ["@changesets/types@4.1.0", "", {}, "sha512-LDQvVDv5Kb50ny2s25Fhm3d9QSZimsoUGBsUioj6MC3qbMUCuC8GPIvk/M6IvXx3lYhAs0lwWUQLb+VIEUCECw=="],
 
     "@manypkg/get-packages/fs-extra": ["fs-extra@8.1.0", "", { "dependencies": { "graceful-fs": "^4.2.0", "jsonfile": "^4.0.0", "universalify": "^0.1.0" } }, "sha512-yhlQgA6mnOJUKOsRUFsgJdQCvkKhcz8tlZG5HBQfReYZy46OwLcY+Zia0mtdHsOo9y/hP+CxMN0TU9QxoOtG4g=="],
-
-    "@miiajs/uws-server/uWebSockets.js": ["uWebSockets.js@github:uNetworking/uWebSockets.js#6249877", {}, "uNetworking-uWebSockets.js-6249877", "sha512-v3uosx395ESYX2RQyPUPbhjdRFJbSjvzcg1DKx7hzL0qcD0xuq2fgBJBEJt1i2bHwh79lJzj27/R1RUaTJmmHQ=="],
 
     "@nuxt/content/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 

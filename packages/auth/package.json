@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/auth",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Lightweight auth primitives for MiiaJS - AuthProvider interface, AuthGuard factory, HTTP token extractors, timing-safe equality.",
@@ -45,7 +45,7 @@
     "deno": ">=2.6.1"
   },
   "peerDependencies": {
-    "@miiajs/core": ">=0.2.0 <1.0.0"
+    "@miiajs/core": ">=0.3.0 <1.0.0"
   },
   "devDependencies": {
     "@miiajs/core": "workspace:*"

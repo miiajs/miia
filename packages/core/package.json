@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/core",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Lightweight, decorator-driven HTTP framework for TypeScript - DI, router, middleware, exceptions.",
