@@ -66,8 +66,11 @@
         "@miiajs/core": "workspace:*",
         "@miiajs/drizzle": "workspace:*",
         "@miiajs/jwt": "workspace:*",
+        "@miiajs/node-server": "workspace:*",
+        "@miiajs/rate-limit": "workspace:*",
         "@miiajs/serve-static": "workspace:*",
         "@miiajs/swagger": "workspace:*",
+        "@miiajs/uws-server": "workspace:*",
         "@node-rs/argon2": "^2.0.2",
         "drizzle-orm": "^0.45.2",
         "postgres": "^3.4.9",
@@ -265,6 +268,16 @@
         "@miiajs/core": "^0.2.0",
         "mongodb": "^7.1.1",
         "papr": "^17.0.0",
+      },
+    },
+    "packages/rate-limit": {
+      "name": "@miiajs/rate-limit",
+      "version": "0.2.0",
+      "devDependencies": {
+        "@miiajs/core": "workspace:*",
+      },
+      "peerDependencies": {
+        "@miiajs/core": "^0.2.0",
       },
     },
     "packages/serve-static": {
@@ -664,6 +677,8 @@
     "@miiajs/node-server": ["@miiajs/node-server@workspace:packages/node-server"],
 
     "@miiajs/papr": ["@miiajs/papr@workspace:packages/papr"],
+
+    "@miiajs/rate-limit": ["@miiajs/rate-limit@workspace:packages/rate-limit"],
 
     "@miiajs/serve-static": ["@miiajs/serve-static@workspace:packages/serve-static"],
 
@@ -3100,6 +3115,8 @@
     "@manypkg/get-packages/@changesets/types": ["@changesets/types@4.1.0", "", {}, "sha512-LDQvVDv5Kb50ny2s25Fhm3d9QSZimsoUGBsUioj6MC3qbMUCuC8GPIvk/M6IvXx3lYhAs0lwWUQLb+VIEUCECw=="],
 
     "@manypkg/get-packages/fs-extra": ["fs-extra@8.1.0", "", { "dependencies": { "graceful-fs": "^4.2.0", "jsonfile": "^4.0.0", "universalify": "^0.1.0" } }, "sha512-yhlQgA6mnOJUKOsRUFsgJdQCvkKhcz8tlZG5HBQfReYZy46OwLcY+Zia0mtdHsOo9y/hP+CxMN0TU9QxoOtG4g=="],
+
+    "@miiajs/uws-server/uWebSockets.js": ["uWebSockets.js@github:uNetworking/uWebSockets.js#6249877", {}, "uNetworking-uWebSockets.js-6249877", "sha512-v3uosx395ESYX2RQyPUPbhjdRFJbSjvzcg1DKx7hzL0qcD0xuq2fgBJBEJt1i2bHwh79lJzj27/R1RUaTJmmHQ=="],
 
     "@nuxt/content/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 
