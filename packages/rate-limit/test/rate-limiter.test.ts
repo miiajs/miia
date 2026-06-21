@@ -1,5 +1,27 @@
 import { describe, expect, it } from 'bun:test'
+import type { IncrementOptions, RateLimitStore, StoreRecord } from '../src/index.js'
 import { MemoryStore, RateLimiter } from '../src/index.js'
+
+class FakeStore implements RateLimitStore {
+  lastIncrementKey?: string
+  lastIncrementOpts?: IncrementOptions
+  lastResetKey?: string
+  record: StoreRecord
+
+  constructor(initial: StoreRecord) {
+    this.record = initial
+  }
+
+  async increment(key: string, opts: IncrementOptions): Promise<StoreRecord> {
+    this.lastIncrementKey = key
+    this.lastIncrementOpts = opts
+    return this.record
+  }
+
+  async reset(key: string): Promise<void> {
+    this.lastResetKey = key
+  }
+}
 
 describe('RateLimiter', () => {
   it('returns the expected shape under, at and over the limit', async () => {
@@ -85,5 +107,39 @@ describe('RateLimiter', () => {
     const second = await limiter.limit('a') // exceed -> base * 2
     expect(second.success).toBe(false)
     expect(second.retryAfterMs).toBe(100)
+  })
+
+  it('delegates to a custom async store and maps its StoreRecord', async () => {
+    const store = new FakeStore({
+      totalHits: 1,
+      timeToExpireMs: 1000,
+      isBlocked: false,
+      timeToBlockExpireMs: 0,
+      strikes: 0,
+    })
+    const limiter = new RateLimiter({ limit: 5, window: '1m', store, prefix: 'x:' })
+
+    const ok = await limiter.limit('a')
+    expect(ok).toMatchObject({ success: true, limit: 5, remaining: 4 })
+    expect(store.lastIncrementKey).toBe('x:a')
+    expect(store.lastIncrementOpts?.windowMs).toBe(60000)
+
+    store.record = { totalHits: 99, timeToExpireMs: -1, isBlocked: true, timeToBlockExpireMs: 5000, strikes: 1 }
+    const blocked = await limiter.limit('a')
+    expect(blocked).toMatchObject({ success: false, remaining: 0, resetMs: 5000, retryAfterMs: 5000 })
+  })
+
+  it('reset() delegates to the custom store with the prefixed key', async () => {
+    const store = new FakeStore({
+      totalHits: 0,
+      timeToExpireMs: 1000,
+      isBlocked: false,
+      timeToBlockExpireMs: 0,
+      strikes: 0,
+    })
+    const limiter = new RateLimiter({ limit: 1, window: '1m', store, prefix: 'x:' })
+
+    await limiter.reset('a')
+    expect(store.lastResetKey).toBe('x:a')
   })
 })

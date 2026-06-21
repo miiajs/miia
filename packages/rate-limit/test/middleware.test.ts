@@ -123,4 +123,25 @@ describe('rateLimit middleware', () => {
 
     await app.close()
   })
+
+  it('custom keyGenerator buckets by header, not ip', async () => {
+    const app = await TestApp.create(AppModule)
+      .use(
+        rateLimit({ limit: 1, window: '1m', keyGenerator: (ctx) => ctx.req.headers.get('x-client-id') ?? 'unknown' }),
+      )
+      .compile()
+
+    // First request for 'alice' passes.
+    expect((await app.request('GET', '/ping/', { ip: '1.1.1.1', headers: { 'x-client-id': 'alice' } })).status).toBe(
+      200,
+    )
+    // Same client-id, different ip -> same bucket, blocked.
+    expect((await app.request('GET', '/ping/', { ip: '2.2.2.2', headers: { 'x-client-id': 'alice' } })).status).toBe(
+      429,
+    )
+    // Different client-id -> fresh bucket.
+    expect((await app.request('GET', '/ping/', { ip: '3.3.3.3', headers: { 'x-client-id': 'bob' } })).status).toBe(200)
+
+    await app.close()
+  })
 })
