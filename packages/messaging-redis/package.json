@@ -50,7 +50,7 @@
     "@miiajs/messaging": "^0.2.0"
   },
   "peerDependencies": {
-    "@miiajs/core": "^0.2.0",
+    "@miiajs/core": ">=0.2.0 <1.0.0",
     "ioredis": "^5.0.0"
   },
   "devDependencies": {

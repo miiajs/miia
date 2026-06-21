@@ -47,7 +47,7 @@
     "@miiajs/serve-static": "^0.2.0"
   },
   "peerDependencies": {
-    "@miiajs/core": "^0.2.0",
+    "@miiajs/core": ">=0.2.0 <1.0.0",
     "swagger-ui-dist": "^5.0.0"
   },
   "scripts": {

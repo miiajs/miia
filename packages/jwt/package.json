@@ -46,7 +46,7 @@
     "deno": ">=2.6.1"
   },
   "peerDependencies": {
-    "@miiajs/core": "^0.2.0",
+    "@miiajs/core": ">=0.2.0 <1.0.0",
     "jose": "^6.0.0"
   },
   "scripts": {

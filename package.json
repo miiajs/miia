@@ -26,7 +26,8 @@
     "update": "bun update --filter '*' -i",
     "changeset": "changeset",
     "changeset:status": "changeset status --verbose",
-    "changeset:version": "bun --env-file=.env.local changeset version && bun install --lockfile-only",
+    "align:peer-deps": "bun scripts/align-peer-deps.ts",
+    "changeset:version": "bun --env-file=.env.local changeset version && bun run align:peer-deps && bun install --lockfile-only",
     "release": "bun run clean:dist && bun run build && changeset publish --no-git-tag"
   },
   "devDependencies": {
