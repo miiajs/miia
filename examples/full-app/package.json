@@ -3,10 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "miia dev",
-    "build": "miia build",
-    "start": "miia start",
-    "check": "miia check"
+    "dev": "miia dev --runtime bun",
+    "dev:deno": "miia dev --runtime deno",
+    "dev:node": "SERVER=node miia dev --runtime node",
+    "dev:uws": "SERVER=uws miia dev --runtime node",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@miiajs/auth": "workspace:*",
@@ -14,7 +15,10 @@
     "@miiajs/core": "workspace:*",
     "@miiajs/drizzle": "workspace:*",
     "@miiajs/jwt": "workspace:*",
+    "@miiajs/node-server": "workspace:*",
+    "@miiajs/rate-limit": "workspace:*",
     "@miiajs/serve-static": "workspace:*",
+    "@miiajs/uws-server": "workspace:*",
     "@miiajs/swagger": "workspace:*",
     "@node-rs/argon2": "^2.0.2",
     "drizzle-orm": "^0.45.2",

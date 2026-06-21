@@ -11,6 +11,7 @@ export const envSchema = z.object({
     .string()
     .default('*')
     .transform((val) => (val === '*' ? '*' : val.split(',').map((origin) => origin.trim()))),
+  SERVER: z.string().optional(),
 })
 
 export type Env = z.infer<typeof envSchema>

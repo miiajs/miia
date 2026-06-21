@@ -6,8 +6,10 @@ import { DrizzleModule } from '@miiajs/drizzle'
 import { AuthModule } from './auth/auth.module.js'
 import { UsersModule } from './users/users.module.js'
 import { PostsModule } from './posts/posts.module.js'
+import { LimitsModule } from './limits/limits.module.js'
 import { SwaggerModule } from '@miiajs/swagger'
 import * as schema from './db.schema.js'
+import { RateLimitModule } from '@miiajs/rate-limit'
 
 @Module({
   imports: [
@@ -42,6 +44,11 @@ import * as schema from './db.schema.js'
     AuthModule,
     UsersModule,
     PostsModule,
+    LimitsModule,
+    RateLimitModule.configure({
+      limit: 5,
+      window: '20s',
+    }),
   ],
   prefix: 'api',
 })

@@ -6,8 +6,8 @@ import { LoginSchema } from './schemas/login.schema.js'
 import { AccessTokenResponseSchema } from './schemas/access-token-response.schema.js'
 import { UserResponseSchema } from '../users/schemas/index.js'
 import { AuthGuard } from '@miiajs/auth'
-import { JwtAuth } from './providers/jwt-auth.provider.js'
-import { LocalAuth } from './providers/local-auth.provider.js'
+import { JwtAuth, LocalAuth } from './providers/index.js'
+import { RateLimit } from '@miiajs/rate-limit'
 
 @Controller('auth')
 @ApiTag('Auth')
@@ -34,6 +34,7 @@ export class AuthController {
   @ApiResponse(200, { description: 'Access token envelope.', schema: AccessTokenResponseSchema })
   @ApiResponse(401, { description: 'Invalid credentials.' })
   @UseGuard(AuthGuard(LocalAuth))
+  @RateLimit({ limit: 5, window: '1m', blockDuration: '10s', blockBackoff: 2, maxBlockDuration: '5m' })
   async login(ctx: RequestContext) {
     const accessToken = await this.authService.issueTokenFor(ctx.user!)
     return { accessToken }
