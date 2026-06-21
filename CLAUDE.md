@@ -22,6 +22,7 @@ packages/
   node-server/   - Node.js HTTP server (optimized + native modes)
   uws-server/    - uWebSockets.js HTTP server (optimized + native modes)
   auth/          - Strategy-based auth, JWT (jose), Local
+  rate-limit/    - Fixed-window rate limiting: rateLimit middleware, RateLimitGuard, @RateLimit/@SkipRateLimit, pluggable stores
   drizzle/       - Drizzle ORM integration (postgres/mysql/sqlite)
   papr/          - MongoDB integration via Papr
   mongoose/      - MongoDB integration via Mongoose
@@ -126,6 +127,23 @@ Returns `false` â†’ `ForbiddenException` (403). Execution order: class guards â†
 
 `@SkipGuard(GuardClass)` excludes a guard from a route's pipeline at compile time. It works for **class/method-level guards AND global guards** - if the user registers `app.useGuard(AuthGuard)` and a method has `@SkipGuard(AuthGuard)`, that method bypasses the global guard entirely. Factory-wrapped guards (e.g. `AuthGuard('jwt')`) are unwrapped via the `GUARD_FACTORY` symbol, so skipping by the factory class also skips all its instances.
 
+### Rate limiting: @miiajs/rate-limit
+
+Fixed-window rate limiting on one core (`RateLimiter` with Upstash-style `limit(key) => { success, limit, remaining, resetMs }`). Two layers with distinct roles:
+
+- **Guard flow (primary):** `RateLimitModule.configure({ limit, window, store?, keyGenerator?, headers? })` + `app.useGuard(RateLimitGuard)` for app-wide enforcement, `@RateLimit(policy)` for per-route/per-controller policies, `@SkipRateLimit()` to disable on a route. This is the recommended path for business rate policies.
+- **Perimeter middleware:** `app.use(rateLimit({ limit, window }))` - standalone (no DI required) and the only form that covers 404s/unmatched scans (global guards never run on unmatched routes). Do NOT combine a global `rateLimit()` middleware with the decorators - the two layers know nothing about each other (`@SkipRateLimit` and replacement do not apply to middleware).
+
+`window` accepts ms or `'500ms'`/`'10s'`/`'1m'`/`'1h'`/`'1d'` strings. On exceed both layers throw `TooManyRequestsException` (429) with `details.retryAfter`. Headers default to draft-6 `RateLimit-*` + `Retry-After`; `'legacy'` emits `X-RateLimit-*`; `false` disables (and restores the response fast path - any set header opts out of inline-JSON/LightResponse optimizations). Default key is `ctx.ip ?? 'unknown'` - behind a proxy set `trustProxy` on the app. Storage is pluggable via `RateLimitStore` (`increment()` returns hit count AND block decision atomically - contract is ready for a Redis Lua store); `MemoryStore` ships in the box, no timers, lazy expiry.
+
+Semantics to remember:
+- **Replacement, like `@BodyLimit`:** the most specific policy wins. `@RateLimit` on a method replaces the class-level policy AND the global guard for that route; on a class it replaces the global guard for all routes of the controller. A decorated route does not consume the global quota. Buckets: method = per route, class = shared by the controller's routes, global = one bucket for all matched routes; explicit `prefix` shares a bucket deliberately.
+- **Skip beats specificity (unlike the `@BodyLimit` analogy):** `@SkipRateLimit()` disables rate limiting entirely on its scope - including a `@RateLimit` on the same method, and a class-level skip disables method-level `@RateLimit`s too. Use `@SkipRateLimit()`, not `@SkipGuard(RateLimitGuard)` - the latter only catches the bare global guard and explicit factory guards, not decorator-applied policies (their `GUARD_FACTORY` markers are internal scope sentinels).
+- **Stacking is middleware-only:** an explicit `@UseGuard(RateLimitGuard(policy))` still stacks with the global guard, but any `@RateLimit`/`@SkipRateLimit` on that route disables it; for guaranteed stacked limits use the `rateLimit()` middleware via `@Use`.
+- **Eager construction:** `app.useGuard(RateLimitGuard)` constructs the bare guard at compile time even if every route replaces it - without `RateLimitModule.configure()` the app fails at startup by design.
+- **Ordering:** `RateLimitModule.configure()` must be in the same module tree (`imports`) as the controllers using `@RateLimit` - a separate later `app.register()` constructs the guards before the options provider exists.
+- **`blockDuration`:** once exceeded, the key is blocked for that duration (the triggering request already gets `Retry-After` = blockDuration); after the block expires the client gets a fresh window. Optional geometric backoff (`blockBackoff` > 1 with a required `maxBlockDuration` ceiling, and `strikeReset` grace measured from the end of the block) grows the ban per repeat offence and resets strikes after a quiet period.
+
 ### Validation: @ValidateBody, @ValidateQuery, @ValidateParams
 
 Schema-based validation via `ZodLike` interface (compatible with Zod and any schema with `safeParse()`). `@ValidateBody` internally overrides the cached body so `await ctx.json<T>()` in the handler returns validated (and possibly transformed) data. `@ValidateQuery` / `@ValidateParams` replace `ctx.query` / `ctx.params` in place. Throws `UnprocessableException` (422) with validation issues on failure.
@@ -146,6 +164,10 @@ async create(ctx: RequestContext) {
 
 **Escape hatch.** For streaming, multipart, or binary payloads, use `ctx.req.body` (ReadableStream), `ctx.req.formData()`, or `ctx.req.arrayBuffer()` directly. These are available **only before** the first `ctx.json()` / `ctx.text()` call - once the body is consumed through the helpers, the escape hatch will throw.
 
+### Connection info: ctx.conn, ctx.ip, trustProxy
+
+`ctx.conn: ConnInfo` (`{ remoteAddress?, remotePort?, family? }`) is the transport-level connection info - lazy, cached per request, always the honest socket address. Sources: adapter-injected `_conn` on the Request (node-server/uws-server/TestApp) or the runtime's second fetch argument (Bun `server.requestIP()`, Deno `info.remoteAddr`); empty object when unknown (e.g. serverless). `ctx.ip` is the client IP: with `new Miia({ trustProxy })` it resolves from trusted proxy headers, otherwise equals `conn.remoteAddress`. `trustProxy` forms: `true` = leftmost `x-forwarded-for` (spoofable if the proxy appends rather than overwrites - prefer your edge's vendor header), `'cf-connecting-ip'` = single trusted header, array = priority order. `TestApp.request(method, path, { ip })` fakes the IP in tests.
+
 ### Response: ResponseBuilder
 
 Fluent API available on `ctx.res`:
@@ -162,7 +184,7 @@ Handlers can also return plain objects (auto-serialized to JSON), `Response` ins
 Base `HttpException(statusCode, message, details?)` with `.toJSON()`. Derived classes:
 - `BadRequestException` (400), `UnauthorizedException` (401), `ForbiddenException` (403)
 - `NotFoundException` (404), `ConflictException` (409), `PayloadTooLargeException` (413)
-- `UnprocessableException` (422), `InternalServerException` (500)
+- `UnprocessableException` (422), `TooManyRequestsException` (429), `InternalServerException` (500)
 
 Unhandled errors in handlers are caught, logged, and returned as 500. An `Error` whose `name` is `'PayloadTooLargeError'` (thrown by node-server/uws-server body streams, which do not depend on core) is mapped to `PayloadTooLargeException` (413).
 

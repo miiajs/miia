@@ -79,6 +79,7 @@ await app.listen(3000)
 | `@miiajs/uws-server` | uWebSockets.js HTTP server |
 | `@miiajs/auth` | Strategy primitives, AuthGuard, token extractors |
 | `@miiajs/jwt` | Injectable JWT sign/verify service (jose wrapper) |
+| `@miiajs/rate-limit` | Fixed-window rate limiting: middleware, guard, decorators, pluggable stores |
 | `@miiajs/messaging` | Decorator-driven event bus, retry, DLQ, idempotency, named buses |
 | `@miiajs/messaging-redis` | Redis Streams transport for `@miiajs/messaging` |
 | `@miiajs/drizzle` | Drizzle ORM integration (Postgres, MySQL, SQLite) |
