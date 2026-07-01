@@ -1,24 +1,23 @@
 {
-  "name": "@miiajs/swagger",
+  "name": "@miiajs/testing",
   "version": "0.3.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
-  "description": "OpenAPI 3.1 spec generation and Swagger UI for MiiaJS.",
+  "description": "Testing utilities for MiiaJS applications.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/miiajs/miia.git",
-    "directory": "packages/swagger"
+    "directory": "packages/testing"
   },
-  "homepage": "https://github.com/miiajs/miia/tree/main/packages/swagger#readme",
+  "homepage": "https://github.com/miiajs/miia/tree/main/packages/testing#readme",
   "bugs": {
     "url": "https://github.com/miiajs/miia/issues"
   },
   "keywords": [
     "miiajs",
     "miia",
-    "swagger",
-    "openapi",
-    "documentation"
+    "testing",
+    "test"
   ],
   "publishConfig": {
     "access": "public"
@@ -43,21 +42,14 @@
     "bun": ">=1.3.11",
     "deno": ">=2.6.1"
   },
-  "dependencies": {
-    "@miiajs/serve-static": "^0.3.0"
-  },
   "peerDependencies": {
-    "@miiajs/core": ">=0.3.0 <1.0.0",
-    "swagger-ui-dist": "^5.0.0"
+    "@miiajs/core": ">=0.3.0 <1.0.0"
+  },
+  "devDependencies": {
+    "@miiajs/core": "workspace:*"
   },
   "scripts": {
     "build": "tsc --build",
     "clean": "tsc --build --clean"
-  },
-  "devDependencies": {
-    "@miiajs/core": "workspace:*",
-    "@miiajs/testing": "workspace:*",
-    "swagger-ui-dist": "^5.32.4",
-    "zod": "^4.3.6"
   }
 }

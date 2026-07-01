@@ -1,6 +1,5 @@
-import { Miia } from '../app/app.js'
-import type { Container } from '../di-container.js'
-import type { ConfiguredModule, Constructor, Guard, Middleware, ProviderDefinition } from '../types.js'
+import { Miia } from '@miiajs/core'
+import type { ConfiguredModule, Constructor, Guard, Middleware, ProviderDefinition } from '@miiajs/core'
 
 export class TestApp {
   private app: Miia
@@ -38,22 +37,14 @@ export class TestApp {
   }
 
   async compile(): Promise<TestApp> {
-    const container = (this.app as any).container as Container
-
     // Register overrides first - module loader skips existing tokens
     for (const [token, value] of this.overrides) {
       const factory = typeof value === 'function' && !value.prototype ? (value as () => any) : () => value
-      container.register(token, factory, 'singleton')
+      this.app.provide({ token, factory, scope: 'singleton' })
     }
 
     // Register explicit providers (for unit tests without modules)
-    for (const provider of this.providers) {
-      if (typeof provider === 'function') {
-        container.register(provider, () => new provider(), 'singleton')
-      } else {
-        container.register(provider.token, provider.factory, provider.scope)
-      }
-    }
+    this.app.provide(...this.providers)
 
     // Load modules (if any)
     if (this.modules.length > 0) {

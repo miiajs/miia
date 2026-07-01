@@ -173,6 +173,7 @@
       "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
+        "@miiajs/testing": "workspace:*",
         "zod": "^4.3.6",
       },
       "peerDependencies": {
@@ -182,6 +183,9 @@
     "packages/core": {
       "name": "@miiajs/core",
       "version": "0.3.0",
+      "devDependencies": {
+        "@miiajs/testing": "workspace:*",
+      },
     },
     "packages/drizzle": {
       "name": "@miiajs/drizzle",
@@ -220,6 +224,7 @@
       "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
+        "@miiajs/testing": "workspace:*",
       },
       "peerDependencies": {
         "@miiajs/core": ">=0.3.0 <1.0.0",
@@ -275,6 +280,7 @@
       "version": "0.3.0",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
+        "@miiajs/testing": "workspace:*",
       },
       "peerDependencies": {
         "@miiajs/core": ">=0.3.0 <1.0.0",
@@ -298,12 +304,23 @@
       },
       "devDependencies": {
         "@miiajs/core": "workspace:*",
+        "@miiajs/testing": "workspace:*",
         "swagger-ui-dist": "^5.32.4",
         "zod": "^4.3.6",
       },
       "peerDependencies": {
         "@miiajs/core": ">=0.3.0 <1.0.0",
         "swagger-ui-dist": "^5.0.0",
+      },
+    },
+    "packages/testing": {
+      "name": "@miiajs/testing",
+      "version": "0.3.0",
+      "devDependencies": {
+        "@miiajs/core": "workspace:*",
+      },
+      "peerDependencies": {
+        "@miiajs/core": ">=0.3.0 <1.0.0",
       },
     },
     "packages/uws-server": {
@@ -683,6 +700,8 @@
     "@miiajs/serve-static": ["@miiajs/serve-static@workspace:packages/serve-static"],
 
     "@miiajs/swagger": ["@miiajs/swagger@workspace:packages/swagger"],
+
+    "@miiajs/testing": ["@miiajs/testing@workspace:packages/testing"],
 
     "@miiajs/uws-server": ["@miiajs/uws-server@workspace:packages/uws-server"],
 

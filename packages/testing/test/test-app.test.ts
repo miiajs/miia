@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { Controller, Get, Post, Module, Injectable, UseGuard, ValidateBody, inject } from '../src/index.js'
-import type { CanActivate, RequestContext, Guard, Middleware } from '../src/index.js'
-import { ForbiddenException } from '../src/index.js'
-import { TestApp } from '../src/testing/index.js'
+import { Controller, Get, Post, Module, Injectable, UseGuard, ValidateBody, inject } from '@miiajs/core'
+import type { CanActivate, RequestContext, Guard, Middleware } from '@miiajs/core'
+import { ForbiddenException } from '@miiajs/core'
+import { TestApp } from '@miiajs/testing'
 
 // ─── Test fixtures ───────────────────────────────────────────────
 
