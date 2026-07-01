@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
-import type { ConnInfo, RequestContext } from '../src/index.js'
-import { Controller, Get, Miia, Module } from '../src/index.js'
-import { TestApp } from '../src/testing/index.js'
+import type { ConnInfo, RequestContext } from '@miiajs/core'
+import { Controller, Get, Miia, Module } from '@miiajs/core'
+import { TestApp } from '@miiajs/testing'
 
 // Resolve ctx.conn / ctx.ip for a single request through a real Miia instance.
 // Returns the values captured inside the route handler.

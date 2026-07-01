@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { RequestContext } from '@miiajs/core'
 import { Controller, Get, Module, UseGuard } from '@miiajs/core'
-import { TestApp } from '@miiajs/core/testing'
+import { TestApp } from '@miiajs/testing'
 import { RateLimit, RateLimitGuard, RateLimitModule, SkipRateLimit } from '../src/index.js'
 
 describe('RateLimitGuard', () => {

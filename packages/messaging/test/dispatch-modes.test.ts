@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { Injectable, Module } from '@miiajs/core'
-import { TestApp } from '@miiajs/core/testing'
+import { TestApp } from '@miiajs/testing'
 import { On } from '../src/decorators.js'
 import { MessageBus } from '../src/message-bus.js'
 import { IDEMPOTENCY_STORE } from '../src/idempotency.js'

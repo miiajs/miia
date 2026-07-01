@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { Injectable, Module } from '@miiajs/core'
-import { TestApp } from '@miiajs/core/testing'
+import { TestApp } from '@miiajs/testing'
 import { z } from 'zod'
 import { ConfigModule } from '../src/config.module.js'
 import { ConfigService } from '../src/config.service.js'

@@ -13,8 +13,8 @@ import {
   Router,
   inject,
   pushMeta,
-} from '../src/index.js'
-import { TestApp } from '../src/testing/index.js'
+} from '@miiajs/core'
+import { TestApp } from '@miiajs/testing'
 
 // ─── Container-level tests ──────────────────────────────────────
 

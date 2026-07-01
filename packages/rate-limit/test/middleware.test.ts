@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { RequestContext } from '@miiajs/core'
 import { Controller, Get, Module } from '@miiajs/core'
-import { TestApp } from '@miiajs/core/testing'
+import { TestApp } from '@miiajs/testing'
 import { rateLimit } from '../src/index.js'
 
 @Controller('/ping')

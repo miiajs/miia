@@ -49,8 +49,8 @@ describe('Resolver', () => {
   })
 
   it('Miia auto-registers Resolver so it is injectable', async () => {
-    const { Miia, inject, Injectable, Module } = await import('../src/index.js')
-    const { TestApp } = await import('../src/testing/index.js')
+    const { Miia, inject, Injectable, Module, Resolver } = await import('@miiajs/core')
+    const { TestApp } = await import('@miiajs/testing')
 
     @Injectable()
     class Probe {

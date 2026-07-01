@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { z } from 'zod'
 import type { CanActivate, RequestContext } from '@miiajs/core'
 import { Controller, Get, Module, Post, Status, ValidateBody } from '@miiajs/core'
-import { TestApp } from '@miiajs/core/testing'
+import { TestApp } from '@miiajs/testing'
 import { ApiOperation, ApiTag, SwaggerModule } from '../src/index.js'
 
 const CreateUserSchema = z.object({
