@@ -29,6 +29,7 @@ packages/
   swagger/       - OpenAPI 3.1 spec generation, Swagger UI serving
   messaging/         - Decorator-driven message bus (event-bus pattern), retry, DLQ, idempotency, named buses, W3C tracing
   messaging-redis/   - Redis Streams transport for messaging (consumer groups, ZSET retry)
+  testing/       - TestApp harness for integration tests
   cli/           - Dev CLI: dev, build, start, check, new commands
 examples/
   drizzle-app/   - CRUD with Drizzle + PostgreSQL
@@ -246,7 +247,7 @@ Features: MIME detection (50+ types, customizable), directory traversal protecti
 
 ### Testing: TestApp + bun test
 
-`TestApp` from `@miiajs/core/testing`:
+`TestApp` from `@miiajs/testing`:
 ```ts
 const app = await TestApp.create(AppModule).override('DB', mockDb).compile()
 const res = await app.request('GET', '/users')
