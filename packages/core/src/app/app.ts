@@ -18,6 +18,7 @@ import type {
   HttpMethod,
   ListenAdapter,
   Middleware,
+  ProviderDefinition,
   RequestContext,
   ServerHandle,
 } from '../types.js'
@@ -193,6 +194,18 @@ export class Miia {
 
   register(...modules: (Constructor | ConfiguredModule)[]): this {
     this.moduleLoader.load(...modules)
+    this.compiled = false
+    return this
+  }
+
+  provide(...providers: ProviderDefinition[]): this {
+    for (const provider of providers) {
+      if (typeof provider === 'function') {
+        this.container.register(provider, () => new provider(), 'singleton')
+      } else {
+        this.container.register(provider.token, provider.factory, provider.scope)
+      }
+    }
     this.compiled = false
     return this
   }
