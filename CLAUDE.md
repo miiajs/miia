@@ -180,6 +180,25 @@ Methods: `status()`, `header()`, `json()`, `text()`, `html()`, `redirect()`, `st
 
 Handlers can also return plain objects (auto-serialized to JSON), `Response` instances, or `null`/`undefined` (204 No Content).
 
+### Cookies: ctx.cookies + ResponseBuilder.cookie()
+
+Read incoming cookies and write response cookies. `ctx.cookies` is a lazy jar; writes delegate to `ResponseBuilder`. `serializeCookie`/`parseCookieHeader`/`CookieJar`/`CookieOptions` are public.
+
+```ts
+ctx.res.cookie(name, value, options?)          // append Set-Cookie
+ctx.res.deleteCookie(name, { path?, domain? }) // epoch Expires + Max-Age=0
+ctx.cookies.get(name) / getAll() / has(name)   // read incoming Cookie header
+ctx.cookies.set(name, value, options?) / delete(name, opts?) // delegate to res
+```
+
+Semantics to remember:
+- **Defaults:** `path: '/'` defaults at `ResponseBuilder.cookie()` (NOT in `serializeCookie`); `maxAge` is in **seconds** (unlike Express ms).
+- **Writes:** `cookie()`/`set()` set `_modified` and `append` (multiple `Set-Cookie` headers survive the fast path, even on error responses).
+- **Secure/SameSite:** `sameSite: 'none'` auto-enables `Secure`; `secure: false` + `'none'` throws `TypeError`, as does `partitioned` without a resolved `Secure`.
+- **Raw Response:** returning a native `Response` bypasses `ctx.res` - set cookies on it manually.
+- **Reads:** a write is NOT visible in the same request's `get()` (jar reflects only the incoming header). Parsing: auto-`decodeURIComponent` (raw fallback), first-wins on duplicates, null-proto cache for `get()`/`has()`, `getAll()` returns a plain-object snapshot.
+- **Validation:** `TypeError` on invalid RFC 6265 name, header-injection chars in `path`/`domain`, non-finite `maxAge`, invalid `expires`. `priority` is non-standard (Chromium); `partitioned` is CHIPS.
+
 ### Exceptions: HttpException hierarchy
 
 Base `HttpException(statusCode, message, details?)` with `.toJSON()`. Derived classes:
