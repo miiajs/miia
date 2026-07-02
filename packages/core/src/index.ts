@@ -90,6 +90,10 @@ export { DEFAULT_BODY_LIMIT, countingLimitStream, applyBodyCeiling } from './bod
 // Response
 export { ResponseBuilder } from './response.js'
 
+// Cookies
+export { CookieJar, serializeCookie, parseCookieHeader } from './cookies.js'
+export type { CookieOptions } from './cookies.js'
+
 // Built-in Middleware
 export { cors } from './cors.js'
 

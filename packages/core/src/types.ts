@@ -1,3 +1,4 @@
+import type { CookieJar } from './cookies.js'
 import type { ResponseBuilder } from './response.js'
 import type { LoggerService } from './logger.js'
 
@@ -34,6 +35,12 @@ export interface RequestContext {
    * (see `MiiaOptions.trustProxy`), otherwise falls back to `conn.remoteAddress`.
    */
   readonly ip: string | undefined
+  /**
+   * Cookie accessor, resolved lazily and cached. Reads incoming cookies from the
+   * request `Cookie` header (`get`/`getAll`/`has`) and writes response cookies
+   * (`set`/`delete`) through the `ResponseBuilder`.
+   */
+  readonly cookies: CookieJar
   /**
    * Returns the parsed JSON body, cached per request.
    * After `@ValidateBody` runs, returns the validated (and possibly transformed) data.

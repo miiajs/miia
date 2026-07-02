@@ -8,6 +8,7 @@ import { Resolver } from '../resolver.js'
 import { HttpException, InternalServerException, NotFoundException, PayloadTooLargeException } from '../exceptions.js'
 import type { LoggerConfig, LoggerService } from '../logger.js'
 import { ConsoleLogger, Logger } from '../logger.js'
+import { CookieJar } from '../cookies.js'
 import { ModuleLoader } from './module-loader.js'
 import type {
   CanActivate,
@@ -627,6 +628,7 @@ class Context implements RequestContext {
   private _env: unknown
   private _trustProxy: string[] | false
   private _connInfo: ConnInfo | null = null
+  private _cookieJar: CookieJar | null = null
 
   constructor(req: Request, search: string, env: unknown, trustProxy: string[] | false) {
     this.req = req
@@ -637,6 +639,10 @@ class Context implements RequestContext {
 
   get conn(): ConnInfo {
     return (this._connInfo ??= resolveConn(this.req, this._env))
+  }
+
+  get cookies(): CookieJar {
+    return (this._cookieJar ??= new CookieJar(this.req, this.res))
   }
 
   get ip(): string | undefined {

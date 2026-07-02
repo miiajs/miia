@@ -1,3 +1,6 @@
+import type { CookieOptions } from './cookies.js'
+import { serializeCookie } from './cookies.js'
+
 export class ResponseBuilder {
   private _status = 200
   private _headers: Headers | null = null
@@ -40,6 +43,22 @@ export class ResponseBuilder {
     this.ensureHeaders().set('Content-Type', 'text/html')
     this._body = data
     return this
+  }
+
+  /**
+   * Append a `Set-Cookie` header. Uses `append` (not `set`) so multiple cookies
+   * accumulate, and marks the response modified so the fast path does not drop
+   * headers. Defaults `path` to `'/'`. `options.maxAge` is in **seconds**.
+   */
+  cookie(name: string, value: string, options?: CookieOptions): this {
+    this._modified = true
+    this.ensureHeaders().append('Set-Cookie', serializeCookie(name, value, { path: '/', ...options }))
+    return this
+  }
+
+  /** Expire a cookie by setting an epoch `Expires` and `Max-Age=0`. Defaults `path` to `'/'`. */
+  deleteCookie(name: string, options?: { path?: string; domain?: string }): this {
+    return this.cookie(name, '', { ...options, path: options?.path ?? '/', expires: new Date(0), maxAge: 0 })
   }
 
   redirect(url: string, status = 302): this {
