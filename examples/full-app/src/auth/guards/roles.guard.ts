@@ -8,7 +8,7 @@ import {
   UnauthorizedException,
   UseGuard,
 } from '@miiajs/core'
-import type { User } from '../../users/users.schema.js'
+import type { User } from '../../users/user.table.js'
 
 type Role = User['role']
 

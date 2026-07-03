@@ -1,6 +1,6 @@
 import { ForbiddenException, Injectable } from '@miiajs/core'
-import type { User } from '../users/users.schema.js'
-import type { Post } from './posts.schema.js'
+import type { User } from '../users/user.table.js'
+import type { Post } from './post.table.js'
 
 @Injectable()
 export class PostsPolicy {

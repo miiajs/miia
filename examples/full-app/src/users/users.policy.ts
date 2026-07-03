@@ -1,5 +1,5 @@
 import { ForbiddenException, Injectable } from '@miiajs/core'
-import type { User } from './users.schema.js'
+import type { User } from './user.table.js'
 import type { UpdateUserInput } from './schemas/index.js'
 
 @Injectable()

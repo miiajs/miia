@@ -1,2 +1,2 @@
-export * from './users/users.schema.js'
-export * from './posts/posts.schema.js'
+export * from './users/user.table.js'
+export * from './posts/post.table.js'

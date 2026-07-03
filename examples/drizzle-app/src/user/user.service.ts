@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@miiajs/core'
 import { eq } from 'drizzle-orm'
 import { db } from '../db'
-import { users } from './user.schema'
+import { users } from './user.table'
 
 @Injectable()
 export class UserService {

@@ -36,7 +36,7 @@ curl http://localhost:3000/users
 | `src/app.module.ts` | Root module - configures Drizzle (passes `schema`) and imports feature modules |
 | `src/db.schema.ts` | Schema barrel - re-exports every table for `typeof schema` |
 | `src/db.ts` | `export const db = drizzleDb<PostgresJsDatabase<typeof schema>>()` - typed DI token |
-| `src/user/user.schema.ts` | Drizzle table definition |
+| `src/user/user.table.ts` | Drizzle table definition |
 | `src/user/user.module.ts` | Feature module - exposes controller and service |
 | `src/user/user.service.ts` | Service - uses `inject(db)` for DB access |
 | `src/user/user.controller.ts` | Controller - REST endpoints for `/users` |

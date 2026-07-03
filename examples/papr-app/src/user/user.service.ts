@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@miiajs/core'
 import { paprDb } from '@miiajs/papr'
-import { User } from './user.schema'
+import { User } from './user.model'
 import { ObjectId } from 'mongodb'
 
 @Injectable()

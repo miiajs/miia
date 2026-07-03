@@ -7,7 +7,7 @@ End-to-end [MiiaJS](../../README.md) example: Drizzle + Auth/JWT + Roles + Swagg
 - **Auth** (`src/auth/`) - JWT + Local strategies, register / login / me endpoints, password hashing with `@node-rs/argon2`
 - **Roles guard** (`src/auth/guards/roles.guard.ts`) - custom method decorator `@Roles('admin')` backed by `CanActivate`
 - **Users CRUD** (`src/users/`) - paginated list, get by id, update (with policy), admin-only delete
-- **Drizzle + PostgreSQL** - schema at `src/users/users.schema.ts`, connection via `DrizzleModule.configure`
+- **Drizzle + PostgreSQL** - schema at `src/users/user.table.ts`, connection via `DrizzleModule.configure`
 - **Swagger** - OpenAPI 3.1 spec generated from decorators, UI at `/api/docs/`
 - **Middleware** (`src/common/middleware/`) - `requestLogger`, `responseTime`, plus `cors()` from core
 - **Validation** - Zod schemas via `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
@@ -115,7 +115,7 @@ src/
 │   ├── users.controller.ts - CRUD with Swagger decorators
 │   ├── users.service.ts    - Drizzle queries + onReady() admin seed
 │   ├── users.policy.ts     - authorization rules for update
-│   ├── users.schema.ts     - pgTable definition
+│   ├── user.table.ts     - pgTable definition
 │   └── schemas/            - Zod DTOs
 ├── common/
 │   └── middleware/         - requestLogger, responseTime

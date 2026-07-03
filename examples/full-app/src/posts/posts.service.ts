@@ -1,7 +1,7 @@
 import { inject, Injectable, NotFoundException } from '@miiajs/core'
 import { and, count, desc, eq, type SQL } from 'drizzle-orm'
 import { db } from '../db.js'
-import { type NewPost, posts } from './posts.schema.js'
+import { type NewPost, posts } from './post.table.js'
 import type { ListPostsQuery, UpdatePostInput } from './schemas/index.js'
 
 @Injectable()

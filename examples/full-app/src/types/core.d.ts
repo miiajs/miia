@@ -1,4 +1,4 @@
-import type { User } from '../users/users.schema.js'
+import type { User } from '../users/user.table.js'
 
 declare module '@miiajs/core' {
   interface RequestContext {
