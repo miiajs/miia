@@ -13,6 +13,7 @@ End-to-end [MiiaJS](../../README.md) example: Drizzle + Auth/JWT + Roles + Swagg
 - **Validation** - Zod schemas via `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
 - **Lifecycle hook** - `UsersService.onReady()` seeds a default admin in dev mode
 - **Static files** - `public/index.html` landing served via `@miiajs/serve-static`
+- **Cookies** (`src/cookies/`) - jar reads/writes, fluent multi-cookie chains, raw `serializeCookie`, plus a cookie-based JWT session (`login-cookie` / `me-cookie` / `logout`) in the auth module
 
 ## Quick start
 
@@ -79,10 +80,20 @@ The seed is a no-op when `NODE_ENV=production`.
 | `POST`   | `/api/auth/register`  | Create a user + return JWT          | -     |
 | `POST`   | `/api/auth/login`     | Exchange credentials for a JWT      | -     |
 | `GET`    | `/api/auth/me`        | Current user profile                | JWT   |
+| `POST`   | `/api/auth/login-cookie` | Log in and set a session cookie  | -     |
+| `GET`    | `/api/auth/me-cookie` | Current user via session cookie     | cookie |
+| `POST`   | `/api/auth/logout`    | Clear the session cookie            | -     |
 | `GET`    | `/api/users`          | Paginated user list                 | JWT   |
 | `GET`    | `/api/users/:id`      | Single user                         | JWT   |
 | `PATCH`  | `/api/users/:id`      | Update profile (self or admin)      | JWT   |
 | `DELETE` | `/api/users/:id`      | Delete user                         | admin |
+| `GET`    | `/api/cookies`        | Read all incoming cookies           | -     |
+| `GET`    | `/api/cookies/prefs`  | Read the theme cookie (with default) | -    |
+| `PUT`    | `/api/cookies/prefs`  | Persist a 30-day theme cookie       | -     |
+| `DELETE` | `/api/cookies/prefs`  | Clear the theme cookie              | -     |
+| `GET`    | `/api/cookies/visits` | Increment a visit counter cookie    | -     |
+| `GET`    | `/api/cookies/multi`  | Set multiple cookies fluently       | -     |
+| `GET`    | `/api/cookies/raw`    | Set a cookie on a raw Response       | -     |
 
 ## Architecture
 
