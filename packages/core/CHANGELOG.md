@@ -1,5 +1,19 @@
 # @miiajs/core
 
+## 0.4.0
+
+### Minor Changes
+
+- [`b30ddd3`](https://github.com/miiajs/miia/commit/b30ddd371988dbc27a1c6507c8469bf250ddecac) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Add a cookie API to `@miiajs/core`.
+
+  - Fluent writes via `ctx.res.cookie(name, value, options?)` and `ctx.res.deleteCookie(name, options?)` on `ResponseBuilder`. Cookies are appended (multiple `Set-Cookie` headers supported) and mark the response modified so they survive the optimized fast path on node/uws adapters.
+  - Lazy `ctx.cookies` jar for reading incoming cookies (`get`, `getAll`, `has`) and writing (`set`, `delete`).
+  - New public helpers `serializeCookie`, `parseCookieHeader`, the `CookieJar` class, and the `CookieOptions` type. Supports `httpOnly`, `secure`, `sameSite`, `maxAge` (seconds), `expires`, `domain`, `path`, `priority`, and `partitioned`, with auto-`Secure` for `SameSite=None` and validation on `name`/`path`/`domain` (header injection), `SameSite=None requires Secure`, and `Partitioned requires Secure`.
+
+- [`ef51172`](https://github.com/miiajs/miia/commit/ef511723538e332ca365c47593f4e6e76351b2e2) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Extract `TestApp` into a dedicated `@miiajs/testing` package.
+
+  `TestApp` moved out of `@miiajs/core` (the `@miiajs/core/testing` subpath is removed). Import it from `@miiajs/testing` instead. Core gains a public `Miia.provide(...providers)` method for registering providers without a module.
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,5 +1,12 @@
 # @miiajs/messaging-redis
 
+## 0.4.0
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @miiajs/messaging@0.4.0
+
 ## 0.3.0
 
 ### Patch Changes
