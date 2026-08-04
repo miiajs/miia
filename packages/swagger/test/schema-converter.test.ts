@@ -97,7 +97,7 @@ describe('convertSchema', () => {
     it('should convert nullable', () => {
       const schema = z.string().nullable()
       const result = convertSchema(schema)
-      expect(result.type).toEqual(['string', 'null'])
+      expect(result.anyOf).toEqual([{ type: 'string' }, { type: 'null' }])
     })
 
     it('should extract .describe() descriptions', () => {
@@ -132,6 +132,121 @@ describe('convertSchema', () => {
         },
         required: ['street', 'city'],
       })
+    })
+  })
+
+  describe('native toJSONSchema', () => {
+    it('should default to the input side', () => {
+      const schema = z.object({ role: z.string().default('user') })
+      expect(convertSchema(schema).required).toBeUndefined()
+      expect(convertSchema(schema, { io: 'output' }).required).toEqual(['role'])
+    })
+
+    it('should convert the requested side of a pipe', () => {
+      const schema = z
+        .string()
+        .transform((s) => s.length)
+        .pipe(z.number())
+      expect(convertSchema(schema)).toEqual({ type: 'string' })
+      expect(convertSchema(schema, { io: 'output' })).toEqual({ type: 'number' })
+    })
+
+    it('should merge the output format onto the input schema', () => {
+      const schema = z.object({ email: z.string().trim().pipe(z.email()) })
+      expect(convertSchema(schema).properties!.email).toEqual({ type: 'string', format: 'email' })
+    })
+
+    it('should not merge format when the two sides differ in type', () => {
+      const schema = z.object({ csv: z.string().transform((s) => s.split(',')) })
+      expect(convertSchema(schema).properties!.csv).toEqual({ type: 'string' })
+      expect(convertSchema(schema, { io: 'output' }).properties!.csv).toEqual({})
+    })
+
+    it('should convert literals and unions of literals', () => {
+      expect(convertSchema(z.literal('a'))).toEqual({ type: 'string', const: 'a' })
+      expect(convertSchema(z.union([z.literal('a'), z.literal('b')]))).toEqual({
+        anyOf: [
+          { type: 'string', const: 'a' },
+          { type: 'string', const: 'b' },
+        ],
+      })
+    })
+
+    it('should render unrepresentable types as an open schema', () => {
+      expect(convertSchema(z.object({ d: z.date() })).properties!.d).toEqual({})
+    })
+
+    it('should keep coerced defaults optional', () => {
+      const result = convertSchema(z.object({ page: z.coerce.number().int().min(1).default(1) }))
+      expect(result.properties!.page).toEqual({ type: 'integer', minimum: 1, default: 1 })
+      expect(result.required).toBeUndefined()
+    })
+
+    it('should convert tuple, record, intersection and discriminated union', () => {
+      expect(convertSchema(z.tuple([z.string(), z.number()]))).toEqual({
+        type: 'array',
+        prefixItems: [{ type: 'string' }, { type: 'number' }],
+      })
+      expect(convertSchema(z.record(z.string(), z.number()))).toEqual({
+        type: 'object',
+        propertyNames: { type: 'string' },
+        additionalProperties: { type: 'number' },
+      })
+      expect(
+        convertSchema(z.intersection(z.object({ a: z.string() }), z.object({ b: z.number() }))).allOf,
+      ).toHaveLength(2)
+      const union = z.discriminatedUnion('kind', [
+        z.object({ kind: z.literal('a') }),
+        z.object({ kind: z.literal('b') }),
+      ])
+      expect(convertSchema(union).oneOf).toHaveLength(2)
+    })
+
+    it('should strip $schema and the safe-integer bounds of .int()', () => {
+      const result = convertSchema(z.object({ n: z.number().int() }))
+      expect(result.$schema).toBeUndefined()
+      expect(result.properties!.n).toEqual({ type: 'integer' })
+    })
+
+    it('should drop additionalProperties: false on the output side only', () => {
+      const schema = z.strictObject({ a: z.string() })
+      expect(convertSchema(schema).additionalProperties).toBe(false)
+      expect(convertSchema(schema, { io: 'output' }).additionalProperties).toBeUndefined()
+    })
+
+    it('should drop the pattern of a formatted string but keep a plain .regex()', () => {
+      const result = convertSchema(z.object({ email: z.email(), slug: z.string().regex(/^[a-z]+$/) }))
+      expect(result.properties!.email).toEqual({ type: 'string', format: 'email' })
+      expect(result.properties!.slug).toEqual({ type: 'string', pattern: '^[a-z]+$' })
+    })
+  })
+
+  describe('_def fallback', () => {
+    it('should convert the requested side of a zod 4 pipe', () => {
+      const schema = { _def: { type: 'pipe', in: { _def: { type: 'string' } }, out: { _def: { type: 'number' } } } }
+      expect(convertSchema(schema)).toEqual({ type: 'string' })
+      expect(convertSchema(schema, { io: 'output' })).toEqual({ type: 'number' })
+    })
+
+    it('should read zod 4 literals from def.values', () => {
+      expect(convertSchema({ _def: { type: 'literal', values: ['a'] } })).toEqual({ const: 'a' })
+      expect(convertSchema({ _def: { type: 'literal', values: ['a', 'b'] } })).toEqual({ enum: ['a', 'b'] })
+    })
+
+    it('should render a zod 4 transform as an open schema', () => {
+      expect(convertSchema({ _def: { type: 'transform' } })).toEqual({})
+    })
+
+    it('should convert the requested side of a zod 3 ZodPipeline', () => {
+      const schema = {
+        _def: {
+          typeName: 'ZodPipeline',
+          in: { _def: { typeName: 'ZodString' } },
+          out: { _def: { typeName: 'ZodNumber' } },
+        },
+      }
+      expect(convertSchema(schema)).toEqual({ type: 'string' })
+      expect(convertSchema(schema, { io: 'output' })).toEqual({ type: 'number' })
     })
   })
 
