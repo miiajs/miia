@@ -17,7 +17,7 @@ export class SwaggerService {
 
   async onReady(): Promise<void> {
     const controllers = this.collectControllers()
-    const spec = new SpecBuilder().build(controllers, this.options)
+    const spec = new SpecBuilder().build(controllers, this.options, this.router.globalGuards ?? [])
     const specJson = JSON.stringify(spec)
 
     const specPath = this.options.path ?? '/docs/json'

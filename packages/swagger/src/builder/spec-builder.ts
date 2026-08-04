@@ -1,4 +1,4 @@
-import type { Constructor, RouteDefinition, Guard, ZodLike } from '@miiajs/core'
+import type { Constructor, RouteDefinition, Guard, ZodLike, GuardResponseDeclaration } from '@miiajs/core'
 import {
   getMeta,
   ROUTES,
@@ -8,6 +8,9 @@ import {
   BODY_SCHEMAS,
   QUERY_SCHEMAS,
   PARAMS_SCHEMAS,
+  SKIP_GUARDS,
+  GUARD_FACTORY,
+  GUARD_RESPONSES,
 } from '@miiajs/core'
 
 export interface DiscoveredController {
@@ -39,8 +42,19 @@ import type {
 import { convertSchema } from './schema-converter.js'
 import { toOpenApiPath, extractPathParams } from './path-converter.js'
 
+type Io = 'input' | 'output'
+
 export class SpecBuilder {
-  build(controllers: DiscoveredController[], options: SwaggerSetupOptions): Record<string, any> {
+  /** Component name -> serialized body, for dedup. Reset per `build()`. */
+  private componentNames = new Map<string, string>()
+
+  build(
+    controllers: DiscoveredController[],
+    options: SwaggerSetupOptions,
+    globalGuards: readonly unknown[] = [],
+  ): Record<string, any> {
+    this.componentNames = new Map()
+
     const doc: Record<string, any> = {
       openapi: '3.1.0',
       info: {
@@ -67,7 +81,7 @@ export class SpecBuilder {
     const tagSet = new Set<string>()
 
     for (const { controller, prefix } of controllers) {
-      this.processController(doc, controller, prefix, tagSet)
+      this.processController(doc, controller, prefix, tagSet, globalGuards)
     }
 
     doc.tags = [...tagSet].map((name) => ({ name }))
@@ -80,6 +94,7 @@ export class SpecBuilder {
     controller: Constructor,
     prefix: string,
     tagSet: Set<string>,
+    globalGuards: readonly unknown[],
   ): void {
     // Check exclude
     if (this.isExcluded(controller, '*')) return
@@ -115,6 +130,7 @@ export class SpecBuilder {
       const method = route.method.toLowerCase()
 
       const operation: Record<string, any> = { tags }
+      const namePrefix = `${controller.name}_${route.handlerName}`
 
       // Operation metadata
       const opMeta = operationMap?.get(route.handlerName)
@@ -133,6 +149,8 @@ export class SpecBuilder {
         querySchemaMap?.get(route.handlerName),
         classHeaders,
         methodHeaderMap?.get(route.handlerName),
+        doc,
+        namePrefix,
       )
       if (parameters.length) operation.parameters = parameters
 
@@ -146,7 +164,12 @@ export class SpecBuilder {
           ...(bodyOpts?.description && { description: bodyOpts.description }),
           content: {
             [contentType]: {
-              schema: convertSchema(bodySchema),
+              schema: this.liftRefs(
+                convertSchema(bodySchema, { io: 'input' }),
+                doc,
+                schemaId(bodySchema) ?? `${namePrefix}_Body`,
+                'input',
+              ),
             },
           },
         }
@@ -155,15 +178,21 @@ export class SpecBuilder {
       // Responses
       const customStatus = statusMap?.get(route.handlerName)
       const explicitResponses = responseMap?.get(route.handlerName) ?? []
-      const hasGuards = classGuards.length > 0 || (methodGuardMap?.get(route.handlerName)?.length ?? 0) > 0
+      const skipSet = getSkipSet(controller, route.handlerName)
+      const activeGuards = filterGuards(
+        [...globalGuards, ...classGuards, ...(methodGuardMap?.get(route.handlerName) ?? [])],
+        skipSet,
+      )
       const hasValidation =
         !!bodySchema || !!querySchemaMap?.get(route.handlerName) || !!paramsSchemaMap?.get(route.handlerName)
 
       operation.responses = this.buildResponses(
         customStatus ?? (method === 'post' ? 201 : 200),
         explicitResponses,
-        hasGuards,
+        collectGuardResponses(activeGuards),
         hasValidation,
+        doc,
+        namePrefix,
       )
 
       // Security
@@ -185,6 +214,8 @@ export class SpecBuilder {
     querySchema: ZodLike | undefined,
     classHeaders: ApiHeaderMeta[],
     methodHeaders: ApiHeaderMeta[] | undefined,
+    doc: Record<string, any>,
+    namePrefix: string,
   ): any[] {
     const parameters: any[] = []
     const fullPath = prefix ? `${prefix}/${route.path}` : route.path
@@ -200,12 +231,28 @@ export class SpecBuilder {
         in: 'path',
         required: true,
         ...(param.description && { description: param.description }),
-        schema: param.schema ? convertSchema(param.schema) : { type: 'string' },
+        schema: param.schema
+          ? this.liftRefs(
+              convertSchema(param.schema, { io: 'input' }),
+              doc,
+              schemaId(param.schema) ?? `${namePrefix}_Param_${param.name}`,
+              'input',
+            )
+          : { type: 'string' },
       })
     }
 
     // Auto-infer from schema for non-explicit params
-    const paramsJsonSchema = paramsSchema ? convertSchema(paramsSchema) : null
+    // keepRootInline: the root's `properties` are read below - a root `$ref` would hide them.
+    const paramsJsonSchema = paramsSchema
+      ? this.liftRefs(
+          convertSchema(paramsSchema, { io: 'input' }),
+          doc,
+          schemaId(paramsSchema) ?? `${namePrefix}_Params`,
+          'input',
+          { keepRootInline: true },
+        )
+      : null
     for (const name of pathParamNames) {
       if (explicitParamNames.has(name)) continue
       const propSchema = paramsJsonSchema?.properties?.[name]
@@ -226,13 +273,26 @@ export class SpecBuilder {
         in: 'query',
         ...(query.required && { required: true }),
         ...(query.description && { description: query.description }),
-        schema: query.schema ? convertSchema(query.schema) : { type: 'string' },
+        schema: query.schema
+          ? this.liftRefs(
+              convertSchema(query.schema, { io: 'input' }),
+              doc,
+              schemaId(query.schema) ?? `${namePrefix}_Query_${query.name}`,
+              'input',
+            )
+          : { type: 'string' },
       })
     }
 
-    // Auto-infer query from schema
+    // Auto-infer query from schema (keepRootInline for the same reason as path params)
     if (querySchema) {
-      const queryJsonSchema = convertSchema(querySchema)
+      const queryJsonSchema = this.liftRefs(
+        convertSchema(querySchema, { io: 'input' }),
+        doc,
+        schemaId(querySchema) ?? `${namePrefix}_Query`,
+        'input',
+        { keepRootInline: true },
+      )
       const requiredFields = new Set(queryJsonSchema.required ?? [])
       for (const [name, propSchema] of Object.entries(queryJsonSchema.properties ?? {})) {
         if (explicitQueryNames.has(name)) continue
@@ -263,17 +323,20 @@ export class SpecBuilder {
   private buildResponses(
     defaultStatus: number,
     explicit: ApiResponseMeta[],
-    hasGuards: boolean,
+    guardStatuses: Map<number, string | undefined>,
     hasValidation: boolean,
+    doc: Record<string, any>,
+    namePrefix: string,
   ): Record<string, any> {
     const responses: Record<string, any> = {}
     const explicitStatuses = new Set(explicit.map((r) => r.status))
 
     // Default success response
-    if (!explicitStatuses.has(defaultStatus)) {
+    if (!explicit.some((r) => r.status >= 200 && r.status < 400)) {
+      const hasBody = defaultStatus >= 200 && defaultStatus < 300 && defaultStatus !== 204 && defaultStatus !== 205
       responses[String(defaultStatus)] = {
-        description: defaultStatus === 201 ? 'Created' : 'OK',
-        content: { 'application/json': { schema: {} } },
+        description: statusText(defaultStatus),
+        ...(hasBody && { content: { 'application/json': { schema: {} } } }),
       }
     }
 
@@ -284,15 +347,23 @@ export class SpecBuilder {
       }
       if (res.schema) {
         entry.content = {
-          'application/json': { schema: convertSchema(res.schema) },
+          'application/json': {
+            schema: this.liftRefs(
+              convertSchema(res.schema, { io: 'output' }),
+              doc,
+              schemaId(res.schema) ?? `${namePrefix}_Response_${res.status}`,
+              'output',
+            ),
+          },
         }
       }
       responses[String(res.status)] = entry
     }
 
-    // Auto-add 403 for guards
-    if (hasGuards && !explicitStatuses.has(403)) {
-      responses['403'] = { description: 'Forbidden' }
+    // Guard-declared rejection codes
+    for (const [status, description] of guardStatuses) {
+      if (explicitStatuses.has(status)) continue
+      responses[String(status)] = { description: description ?? statusText(status) }
     }
 
     // Auto-add 422 for validation
@@ -301,6 +372,72 @@ export class SpecBuilder {
     }
 
     return responses
+  }
+
+  /**
+   * Moves `$defs` into `components.schemas` and rewrites the pointers - inlined `#/$defs/...`
+   * and `#` would dangle in an OpenAPI document. `keepRootInline` leaves a self-referential
+   * root in place for callers that enumerate its `.properties`.
+   */
+  private liftRefs(
+    schema: JsonSchema,
+    doc: Record<string, any>,
+    nameHint: string,
+    io: Io,
+    opts?: { keepRootInline?: boolean },
+  ): JsonSchema {
+    if (!schema || typeof schema !== 'object') return schema
+
+    const defs = schema.$defs as Record<string, JsonSchema> | undefined
+    const rootRef = hasRootRef(schema)
+    if (!defs && !rootRef) return schema
+
+    // convertSchema hands back the caller's own object for raw JSON Schema - never mutate it
+    const work: JsonSchema = clone(schema)
+    doc.components ??= {}
+    doc.components.schemas ??= {}
+    delete work.$defs
+
+    const refMap = new Map<string, string>()
+    const finalNames: Record<string, string> = {}
+    for (const [name, body] of Object.entries(defs ?? {})) {
+      finalNames[name] = this.allocateComponent(doc, sanitizeName(name), body, io)
+      refMap.set(`#/$defs/${name}`, `#/components/schemas/${finalNames[name]}`)
+    }
+
+    let rootName: string | undefined
+    if (rootRef) {
+      rootName = this.allocateComponent(doc, sanitizeName(nameHint), work, io)
+      refMap.set('#', `#/components/schemas/${rootName}`)
+    }
+
+    rewriteRefs(work, refMap)
+    for (const [name, finalName] of Object.entries(finalNames)) {
+      const body = clone(defs![name])
+      rewriteRefs(body, refMap)
+      doc.components.schemas[finalName] = body
+    }
+    if (rootName) {
+      doc.components.schemas[rootName] = clone(work)
+      if (!opts?.keepRootInline) return { $ref: `#/components/schemas/${rootName}` }
+    }
+
+    return work
+  }
+
+  private allocateComponent(doc: Record<string, any>, base: string, body: JsonSchema, io: Io): string {
+    const key = JSON.stringify(body)
+    const schemas = doc.components.schemas
+    for (let i = 0; ; i++) {
+      const name = i === 0 ? base : i === 1 ? `${base}_${io === 'output' ? 'Output' : 'Input'}` : `${base}_${i}`
+      if (!(name in schemas)) {
+        this.componentNames.set(name, key)
+        // Reserved now; the body lands after the refs are rewritten
+        schemas[name] = {}
+        return name
+      }
+      if (this.componentNames.get(name) === key) return name
+    }
   }
 
   private buildSecurity(
@@ -334,14 +471,92 @@ function statusText(code: number): string {
   const texts: Record<number, string> = {
     200: 'OK',
     201: 'Created',
+    202: 'Accepted',
     204: 'No Content',
+    302: 'Found',
     400: 'Bad Request',
     401: 'Unauthorized',
     403: 'Forbidden',
     404: 'Not Found',
     409: 'Conflict',
+    413: 'Payload Too Large',
     422: 'Unprocessable Entity',
+    429: 'Too Many Requests',
     500: 'Internal Server Error',
   }
   return texts[code] ?? 'Response'
+}
+
+// ─── Guards ─────────────────────────────────────────────────────
+
+// Kept in sync by hand with router-explorer.ts (getSkipSet/shouldSkip/filterGuards), which core keeps private
+function getSkipSet(controller: Constructor, handlerName: string): Set<any> | null {
+  const map = getMeta<Map<string, Set<any>>>(controller, SKIP_GUARDS)
+  if (!map) return null
+  const methodSet = map.get(handlerName)
+  const classSet = map.get('*')
+  if (!methodSet && !classSet) return null
+  if (methodSet && classSet) return new Set([...classSet, ...methodSet])
+  return methodSet ?? classSet ?? null
+}
+
+function shouldSkip(guard: unknown, skipSet: Set<any>): boolean {
+  if (skipSet.has(guard)) return true
+  const factory = (guard as any)?.[GUARD_FACTORY]
+  return factory != null && skipSet.has(factory)
+}
+
+function filterGuards(guards: unknown[], skipSet: Set<any> | null): unknown[] {
+  if (!skipSet) return guards
+  return guards.filter((g) => !shouldSkip(g, skipSet))
+}
+
+function collectGuardResponses(guards: unknown[]): Map<number, string | undefined> {
+  const statuses = new Map<number, string | undefined>()
+  for (const guard of guards) {
+    const declared = (guard as any)?.[GUARD_RESPONSES] as GuardResponseDeclaration[] | undefined
+    if (!Array.isArray(declared)) continue
+    for (const decl of declared) {
+      const status = typeof decl === 'number' ? decl : decl.status
+      if (statuses.has(status)) continue
+      statuses.set(status, typeof decl === 'number' ? undefined : decl.description)
+    }
+  }
+  return statuses
+}
+
+// ─── $ref lifting ───────────────────────────────────────────────
+
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
+
+const sanitizeName = (name: string): string => name.replace(/[^a-zA-Z0-9._-]/g, '_')
+
+function walkNodes(node: any, fn: (n: Record<string, any>) => void): void {
+  if (Array.isArray(node)) {
+    for (const item of node) walkNodes(item, fn)
+    return
+  }
+  if (!node || typeof node !== 'object') return
+  fn(node)
+  for (const value of Object.values(node)) walkNodes(value, fn)
+}
+
+function hasRootRef(schema: JsonSchema): boolean {
+  let found = false
+  walkNodes(schema, (n) => {
+    if (n.$ref === '#') found = true
+  })
+  return found
+}
+
+function rewriteRefs(schema: JsonSchema, refMap: Map<string, string>): void {
+  walkNodes(schema, (n) => {
+    if (typeof n.$ref === 'string' && refMap.has(n.$ref)) n.$ref = refMap.get(n.$ref)!
+  })
+}
+
+/** Raw JSON Schema may carry a plain `meta` field, hence the callable check. */
+function schemaId(schema: unknown): string | undefined {
+  const meta = typeof (schema as any)?.meta === 'function' ? (schema as any).meta() : undefined
+  return typeof meta?.id === 'string' ? meta.id : undefined
 }
