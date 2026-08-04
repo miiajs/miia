@@ -4,6 +4,7 @@ import {
   ForbiddenException,
   type Guard,
   GUARD_FACTORY,
+  GUARD_RESPONSES,
   type RequestContext,
   UnauthorizedException,
   UseGuard,
@@ -20,6 +21,8 @@ type Role = User['role']
  */
 function rolesGuard(...roles: Role[]): Guard {
   class RolesGuard implements CanActivate {
+    static [GUARD_RESPONSES] = [401, 403]
+
     canActivate(ctx: RequestContext): boolean {
       if (!ctx.user) throw new UnauthorizedException()
       if (!roles.includes(ctx.user.role)) {
