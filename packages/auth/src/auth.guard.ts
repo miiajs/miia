@@ -1,4 +1,4 @@
-import { GUARD_FACTORY, HttpException, UnauthorizedException, inject } from '@miiajs/core'
+import { GUARD_FACTORY, GUARD_RESPONSES, HttpException, UnauthorizedException, inject } from '@miiajs/core'
 import type { CanActivate, Constructor, Guard, RequestContext } from '@miiajs/core'
 import type { AuthProvider } from './provider.js'
 
@@ -20,6 +20,8 @@ export function AuthGuard(first: Constructor<AuthProvider>, ...rest: Constructor
   const providerCtors = [first, ...rest]
 
   class AuthenticationGuard implements CanActivate {
+    static [GUARD_RESPONSES] = [401]
+
     // Eagerly resolve providers in the field initializer - this runs during
     // guard construction, which the framework performs inside an active
     // container context. `canActivate()` runs later during request handling

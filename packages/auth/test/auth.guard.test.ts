@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'bun:test'
 import type { RequestContext } from '@miiajs/core'
-import { Container, ForbiddenException, Injectable, runInContainerContext, UnauthorizedException } from '@miiajs/core'
+import {
+  Container,
+  ForbiddenException,
+  GUARD_RESPONSES,
+  Injectable,
+  runInContainerContext,
+  UnauthorizedException,
+} from '@miiajs/core'
 import { AuthGuard } from '../src/index.js'
 import type { AuthProvider } from '../src/provider.js'
 
@@ -172,5 +179,11 @@ describe('AuthGuard', () => {
     })
 
     expect(secondCalled).toBe(false)
+  })
+
+  it('declares 401 via GUARD_RESPONSES', () => {
+    const GuardCtor = AuthGuard(SuccessProvider)
+
+    expect((GuardCtor as any)[GUARD_RESPONSES]).toEqual([401])
   })
 })
