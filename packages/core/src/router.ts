@@ -74,6 +74,12 @@ export class Router {
    */
   defaultBodyLimit: number | false = DEFAULT_BODY_LIMIT
   private maxRouteBodyLimit = 0
+  private globalGuardClasses: unknown[] = []
+
+  /** Guard classes registered via `app.useGuard()`, captured at compile time. */
+  get globalGuards(): readonly unknown[] {
+    return this.globalGuardClasses
+  }
 
   /**
    * Adapter-level body cap: max(default, all per-route limits); `false` when
@@ -191,6 +197,8 @@ export class Router {
   }
 
   compileAll(globalGuards: GlobalGuardBinding[]): void {
+    this.globalGuardClasses = globalGuards.map((g) => g.guardClass)
+
     for (const route of this.allEntries) {
       const effectiveGuards = route.skipGlobalGuards
         ? []

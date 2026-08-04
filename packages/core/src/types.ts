@@ -72,6 +72,9 @@ export interface CanActivate {
 
 export type Guard = Constructor<CanActivate>
 
+/** A status a guard can reject with, declared on the guard class via `GUARD_RESPONSES`. */
+export type GuardResponseDeclaration = number | { status: number; description?: string }
+
 // ─── DI Providers ────────────────────────────────────────────────
 
 export interface FactoryProvider<T = unknown> {
