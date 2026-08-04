@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { RequestContext } from '@miiajs/core'
-import { Controller, Get, Module, UseGuard } from '@miiajs/core'
+import { Controller, Get, GUARD_RESPONSES, Module, UseGuard } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { RateLimit, RateLimitGuard, RateLimitModule, SkipRateLimit } from '../src/index.js'
 
@@ -449,5 +449,12 @@ describe('RateLimitGuard', () => {
     expect((await app.request('GET', '/kg/', { ip: '3.3.3.3', headers: { 'x-client-id': 'bob' } })).status).toBe(200)
 
     await app.close()
+  })
+
+  it('declares 429 via GUARD_RESPONSES on both the factory product and the bare guard', () => {
+    const factoryGuard = RateLimitGuard({ limit: 1, window: '1m' })
+
+    expect((factoryGuard as any)[GUARD_RESPONSES]).toEqual([429])
+    expect((RateLimitGuard as any)[GUARD_RESPONSES]).toEqual([429])
   })
 })

@@ -1,5 +1,5 @@
 import type { CanActivate, Guard, RequestContext } from '@miiajs/core'
-import { GUARD_FACTORY, injectOptional, TooManyRequestsException } from '@miiajs/core'
+import { GUARD_FACTORY, GUARD_RESPONSES, injectOptional, TooManyRequestsException } from '@miiajs/core'
 import { RATE_LIMIT_OPTIONS } from './constants.js'
 import { setRateLimitHeaders } from './headers.js'
 import { RateLimiter } from './rate-limiter.js'
@@ -57,6 +57,8 @@ export function RATE_LIMIT_METHOD_SCOPE(): void {}
  */
 export function buildGuardClass(overrides?: Partial<RateLimitModuleOptions>, marker: Function = RateLimitGuard): Guard {
   class ScopedRateLimitGuard implements CanActivate {
+    static [GUARD_RESPONSES] = [429]
+
     // Resolve module options eagerly during construction (inside an active
     // container context); merging fails fast if neither layer configured the policy.
     private cfg = mergeOptions(injectOptional<RateLimitModuleOptions>(RATE_LIMIT_OPTIONS), overrides)
@@ -100,3 +102,6 @@ export const RateLimitGuard: Guard & ((policy: RateLimitPolicy & Partial<RateLim
   // factory: @UseGuard(RateLimitGuard(policy))
   return buildGuardClass(policy)
 } as any
+
+// `app.useGuard(RateLimitGuard)` registers the function itself, not a `buildGuardClass` product.
+;(RateLimitGuard as any)[GUARD_RESPONSES] = [429]
