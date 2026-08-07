@@ -128,6 +128,8 @@ Returns `false` â†’ `ForbiddenException` (403). Execution order: class guards â†
 
 `@SkipGuard(GuardClass)` excludes a guard from a route's pipeline at compile time. It works for **class/method-level guards AND global guards** - if the user registers `app.useGuard(AuthGuard)` and a method has `@SkipGuard(AuthGuard)`, that method bypasses the global guard entirely. Factory-wrapped guards (e.g. `AuthGuard('jwt')`) are unwrapped via the `GUARD_FACTORY` symbol, so skipping by the factory class also skips all its instances.
 
+`GUARD_RESPONSES` (symbol from core) is a **static** on the guard class listing the statuses it rejects with: `static [GUARD_RESPONSES] = [401]`, or `[{ status: 403, description: '...' }]` (type `GuardResponseDeclaration`). Documentation-only - `@miiajs/swagger` reads it to emit guard responses per route; zero runtime effect. A guard without the marker contributes nothing to the spec. `AuthGuard` (`@miiajs/auth`) declares 401, rate-limit guards declare 429. `Router.globalGuards` exposes the guard classes captured at `compileAll()` so the spec builder sees `app.useGuard()` registrations too.
+
 ### Rate limiting: @miiajs/rate-limit
 
 Fixed-window rate limiting on one core (`RateLimiter` with Upstash-style `limit(key) => { success, limit, remaining, resetMs }`). Two layers with distinct roles:
@@ -237,7 +239,15 @@ All DB packages (`drizzle`, `papr`, `mongoose`) follow the same pattern:
 
 Decorators: `@ApiTag`, `@ApiOperation`, `@ApiResponse`, `@ApiParam`, `@ApiQuery`, `@ApiSecurity`, `@ApiHeader`, `@ApiExclude`.
 
-`SpecBuilder` auto-infers path params from route patterns, query params from `@ValidateQuery`, and adds 403/422 responses when guards/validation are present. Schema conversion supports Zod 3 and Zod 4.
+`SpecBuilder` auto-infers path params from route patterns, query params from `@ValidateQuery`, request bodies from `@ValidateBody`/`@ApiBody`, and adds a 422 response when validation is present.
+
+Response rules:
+- **Guard responses** come from `GUARD_RESPONSES` on the guard class - global + class + method guards, minus anything `@SkipGuard`/`@SkipRateLimit` removed. No blanket 403; an unmarked guard adds nothing. An explicit `@ApiResponse` of the same status wins.
+- **Default success response** (`@Status(code)`, else 201 for POST / 200 otherwise) is suppressed by any explicit `@ApiResponse` with a 2xx or 3xx status. Description comes from the status table; `content` is attached only for 2xx except 204/205, so redirects and 204 have no phantom JSON body.
+
+Schema conversion prefers the schema's own `toJSONSchema()` (zod 4) / `toJsonSchema()` export, duck-typed - no zod dependency; zod 3 and raw JSON Schema fall back to the manual walker. Bodies/params use `io: 'input'`, responses `io: 'output'`; `format` is merged from the output side so `z.string().trim().pipe(z.email())` keeps `format: email`. `$defs`, `.meta({ id })` schemas, and recursive schemas are lifted into `components.schemas` with refs rewritten (name clashes get `_Input`/`_Output`, then `_2`).
+
+Not in the spec: guards registered via `app.useGuard()` after `app.init()` (the spec is serialized once in `onReady`), and the perimeter `rateLimit()` middleware (middleware has no readable metadata).
 
 Spec served at `{path}` (default `/docs/json`), UI at `{uiPath}/` (default `/docs/`). Only `swagger-initializer.js` is overridden.
 
