@@ -1,7 +1,7 @@
 import { applyBodyCeiling, DEFAULT_BODY_LIMIT } from '../body-limit.js'
 import { Container } from '../di-container.js'
 import { DiscoveryService } from '../discovery/index.js'
-import { type GlobalGuardBinding, type MatchResult, Router } from '../router.js'
+import { type AddRouteOptions, type GlobalGuardBinding, type MatchResult, Router } from '../router.js'
 import { compose, guardToMiddleware } from '../middleware.js'
 import { ResponseBuilder } from '../response.js'
 import { Resolver } from '../resolver.js'
@@ -215,9 +215,9 @@ export class Miia {
     method: HttpMethod,
     path: string,
     handler: (ctx: RequestContext) => unknown,
-    middlewares: Middleware[] = [],
+    options: AddRouteOptions = {},
   ): this {
-    this.router.add(method, path, handler, { middlewares })
+    this.router.add(method, path, handler, options)
     this.compiled = false
     return this
   }

@@ -67,6 +67,7 @@ export {
 
 // Router
 export { Router } from './router.js'
+export type { AddRouteOptions } from './router.js'
 
 // Middleware
 export { compose } from './middleware.js'
