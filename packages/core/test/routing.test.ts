@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'bun:test'
 import type { RequestContext } from '../src/index.js'
-import { Router } from '../src/index.js'
+import { Controller, Get, getMeta, Miia, Module, RESOLVED_PREFIX, Router } from '../src/index.js'
 
 const noop = (_ctx: RequestContext) => {}
+
+function request(app: Miia, method: string, path: string) {
+  return app.fetch(new Request(`http://localhost${path}`, { method }))
+}
 
 describe('Router', () => {
   describe('exact match', () => {
@@ -157,5 +161,222 @@ describe('Router', () => {
       expect(result).not.toBeNull()
       expect(result!.handler).toBe(handler)
     })
+  })
+})
+
+describe('Global prefix', () => {
+  it('should prefix controller routes when set via the constructor option', async () => {
+    @Controller('/users')
+    class UsersController {
+      @Get('/')
+      list(_ctx: RequestContext) {
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [UsersController] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false, globalPrefix: '/api' }).register(AppModule)
+
+    expect((await request(app, 'GET', '/api/users')).status).toBe(200)
+    expect((await request(app, 'GET', '/users')).status).toBe(404)
+  })
+
+  it('should treat bare, leading-slash and trailing-slash forms as the same prefix', () => {
+    for (const prefix of ['api', '/api', '/api/']) {
+      const router = new Router()
+      router.globalPrefix = prefix
+      router.add('GET', '/users', noop)
+
+      expect(router.globalPrefix).toBe('api')
+      expect(router.match('GET', '/api/users')).not.toBeNull()
+      expect(router.match('GET', '/users')).toBeNull()
+    }
+  })
+
+  it('should compose with module and controller prefixes', async () => {
+    @Controller('/users')
+    class UsersController {
+      @Get('/')
+      list(_ctx: RequestContext) {
+        return { ok: true }
+      }
+    }
+
+    @Module({ prefix: 'v1', controllers: [UsersController] })
+    class V1Module {}
+
+    @Module({ imports: [V1Module] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false, globalPrefix: '/api' }).register(AppModule)
+
+    expect((await request(app, 'GET', '/api/v1/users')).status).toBe(200)
+    expect((await request(app, 'GET', '/v1/users')).status).toBe(404)
+  })
+
+  it('should keep named params and wildcards intact under the prefix', async () => {
+    @Controller('/users')
+    class UsersController {
+      @Get('/:id')
+      findOne(ctx: RequestContext) {
+        return { id: ctx.params.id }
+      }
+    }
+
+    @Controller('/files')
+    class FilesController {
+      @Get('/*')
+      serve(ctx: RequestContext) {
+        return { path: ctx.params['*'] }
+      }
+    }
+
+    @Module({ controllers: [UsersController, FilesController] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false, globalPrefix: '/api' }).register(AppModule)
+
+    const byId = await request(app, 'GET', '/api/users/42')
+    expect(byId.status).toBe(200)
+    expect(await byId.json()).toEqual({ id: '42' })
+
+    const file = await request(app, 'GET', '/api/files/docs/readme.md')
+    expect(file.status).toBe(200)
+    expect(await file.json()).toEqual({ path: 'docs/readme.md' })
+  })
+
+  it('should prefix routes registered with addRoute()', async () => {
+    const app = new Miia({ logger: false, globalPrefix: '/api' })
+    app.addRoute('GET', '/health', (_ctx: RequestContext) => ({ status: 'ok' }))
+    app.addRoute('GET', '/', (_ctx: RequestContext) => ({ root: true }))
+
+    expect((await request(app, 'GET', '/api/health')).status).toBe(200)
+    expect((await request(app, 'GET', '/health')).status).toBe(404)
+
+    const root = await request(app, 'GET', '/api')
+    expect(root.status).toBe(200)
+    expect(await root.json()).toEqual({ root: true })
+  })
+
+  it('should throw when the prefix is set after a route is registered', () => {
+    @Controller('/users')
+    class UsersController {
+      @Get('/')
+      list(_ctx: RequestContext) {
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [UsersController] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+
+    const assign = () => {
+      app.get(Router).globalPrefix = '/api'
+    }
+
+    expect(assign).toThrow(/before any route is registered/)
+    // Plain Error, not TypeError - that one is reserved for bad characters.
+    // toThrow(Error) would pass for a TypeError too, so pin the name.
+    let thrown: unknown
+    try {
+      assign()
+    } catch (err) {
+      thrown = err
+    }
+    expect((thrown as Error).constructor).toBe(Error)
+    expect((thrown as Error).name).toBe('Error')
+  })
+
+  it('should reject prefixes containing routing or URL-significant characters', () => {
+    for (const bad of ['*', '/api/*', '/:version', '/api?v=1', '/api#frag', '/api v1']) {
+      expect(() => new Miia({ logger: false, globalPrefix: bad })).toThrow(TypeError)
+    }
+  })
+
+  it('should treat "/" as no prefix at all', async () => {
+    @Controller('/users')
+    class UsersController {
+      @Get('/')
+      list(_ctx: RequestContext) {
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [UsersController] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false, globalPrefix: '/' }).register(AppModule)
+
+    expect(app.get(Router).globalPrefix).toBe('')
+    expect((await request(app, 'GET', '/users')).status).toBe(200)
+  })
+
+  it('should expose the normalized prefix from the getter', () => {
+    const router = new Router()
+    expect(router.globalPrefix).toBe('')
+
+    router.globalPrefix = '/api/v1/'
+    expect(router.globalPrefix).toBe('api/v1')
+  })
+
+  it('should not leak the prefix into RESOLVED_PREFIX', async () => {
+    @Controller('/users')
+    class UsersController {
+      @Get('/')
+      list(_ctx: RequestContext) {
+        return { ok: true }
+      }
+    }
+
+    @Module({ prefix: 'v1', controllers: [UsersController] })
+    class V1Module {}
+
+    @Module({ imports: [V1Module] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false, globalPrefix: '/api' }).register(AppModule)
+
+    expect(getMeta<string>(UsersController, RESOLVED_PREFIX)).toBe('v1/users')
+    expect((await request(app, 'GET', '/api/v1/users')).status).toBe(200)
+  })
+
+  it('should leave addRoute() calls passing skipGlobalPrefix at their literal path', async () => {
+    const app = new Miia({ logger: false, globalPrefix: '/api' })
+    app.addRoute('GET', '/health', (_ctx: RequestContext) => ({ status: 'ok' }), { skipGlobalPrefix: true })
+
+    expect((await request(app, 'GET', '/health')).status).toBe(200)
+    expect((await request(app, 'GET', '/api/health')).status).toBe(404)
+  })
+
+  it('should keep addRoute() routes carrying middlewares prefixed and running their middleware', async () => {
+    const seen: string[] = []
+    const app = new Miia({ logger: false, globalPrefix: '/api' })
+    app.addRoute('GET', '/x', (_ctx: RequestContext) => ({ ok: true }), {
+      middlewares: [
+        async (_ctx, next) => {
+          seen.push('mw')
+          await next()
+        },
+      ],
+    })
+
+    expect((await request(app, 'GET', '/api/x')).status).toBe(200)
+    expect((await request(app, 'GET', '/x')).status).toBe(404)
+    expect(seen).toEqual(['mw'])
+  })
+
+  it('should leave routes added with skipGlobalPrefix unprefixed', () => {
+    const router = new Router()
+    router.globalPrefix = '/api'
+    router.add('GET', '/docs/json', noop, { skipGlobalPrefix: true })
+    router.add('GET', '/users', noop)
+
+    expect(router.match('GET', '/docs/json')).not.toBeNull()
+    expect(router.match('GET', '/api/docs/json')).toBeNull()
+    expect(router.match('GET', '/api/users')).not.toBeNull()
   })
 })

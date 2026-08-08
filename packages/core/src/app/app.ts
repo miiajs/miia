@@ -94,6 +94,21 @@ export interface MiiaOptions {
    * @default false
    */
   trustProxy?: boolean | string | string[]
+  /**
+   * Path prefix prepended to every route the app registers - controllers,
+   * `app.addRoute()`, and `serveStatic()` alike. `'api'`, `'/api'` and `'/api/'`
+   * are equivalent; a route registered as `/users` is then served at `/api/users`.
+   *
+   * The prefix is applied inside the router and never reaches `RESOLVED_PREFIX`,
+   * so `@miiajs/swagger` does not see it: the spec keeps the clean paths
+   * (`/users`), and swagger's own endpoints stay at their configured `path`/
+   * `uiPath`. Put the prefix into `servers` manually if the spec must carry it.
+   *
+   * `register()` and `addRoute()` resolve routes eagerly, so the prefix is baked
+   * into the route table at registration time. Passing it here applies it to
+   * every route the app will ever register.
+   */
+  globalPrefix?: string
 }
 
 const JSON_RESPONSE_INIT = Object.freeze({
@@ -165,6 +180,9 @@ export class Miia {
     // Before any register() call, so every route registration (including
     // programmatic ones like swagger's onReady) resolves against this default.
     this.router.defaultBodyLimit = options?.maxBodySize ?? DEFAULT_BODY_LIMIT
+    // Gated on truthiness, unlike defaultBodyLimit above: an empty string means
+    // no prefix, and skipping the setter keeps it out of validation too.
+    if (options?.globalPrefix) this.router.globalPrefix = options.globalPrefix
     this.moduleLoader = new ModuleLoader(this.router, this.container)
 
     // Auto-register DiscoveryService so any provider can inject it without

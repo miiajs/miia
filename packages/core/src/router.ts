@@ -2,6 +2,7 @@ import { DEFAULT_BODY_LIMIT } from './body-limit.js'
 import { GUARD_FACTORY } from './decorators/metadata.js'
 import { compose } from './middleware.js'
 import type { HttpMethod, Middleware, RequestContext } from './types.js'
+import { joinPaths } from './utils/index.js'
 
 interface RouteEntry {
   method: HttpMethod
@@ -41,6 +42,12 @@ export interface AddRouteOptions {
    * `false` disables the check for this route.
    */
   bodyLimit?: number | false
+  /**
+   * Skip the app-level global prefix for this route. Used by @miiajs/swagger so the UI and
+   * spec endpoints stay at their configured path, and available as an escape hatch for
+   * routes that must live outside the prefix (health checks, probes).
+   */
+  skipGlobalPrefix?: boolean
 }
 
 export interface GlobalGuardBinding {
@@ -75,6 +82,35 @@ export class Router {
   defaultBodyLimit: number | false = DEFAULT_BODY_LIMIT
   private maxRouteBodyLimit = 0
   private globalGuardClasses: unknown[] = []
+  private prefix = ''
+
+  /**
+   * App-level path prefix prepended to every route registered without
+   * `skipGlobalPrefix`. Set by Miia from `MiiaOptions.globalPrefix`; must be
+   * assigned before any route is registered.
+   */
+  get globalPrefix(): string {
+    return this.prefix
+  }
+
+  set globalPrefix(value: string) {
+    if (this.allEntries.length > 0) {
+      throw new Error(
+        '[Miia] The global prefix must be set before any route is registered - routes are ' +
+          'resolved eagerly by register()/addRoute(). Use new Miia({ globalPrefix }) instead.',
+      )
+    }
+
+    // `*` would collapse the whole table onto one wildcard slot - add() returns
+    // early at the wildcard branch and discards the rest of the pattern. `:`
+    // would inject a param segment into every route that RESOLVED_PREFIX - and
+    // therefore the OpenAPI spec - never sees. `?`, `#` and whitespace only
+    // produce routes that can never match.
+    if (/[?#\s*:]/.test(value)) {
+      throw new TypeError(`Invalid global prefix: ${JSON.stringify(value)}`)
+    }
+    this.prefix = joinPaths(value)
+  }
 
   /** Guard classes registered via `app.useGuard()`, captured at compile time. */
   get globalGuards(): readonly unknown[] {
@@ -100,7 +136,8 @@ export class Router {
     if (typeof bodyLimit === 'number' && bodyLimit > this.maxRouteBodyLimit) {
       this.maxRouteBodyLimit = bodyLimit
     }
-    const normalized = normalizePath(pattern)
+    const normalized =
+      this.prefix === '' || options.skipGlobalPrefix ? normalizePath(pattern) : joinPaths(this.prefix, pattern)
     const segments = normalized === '' ? [] : normalized.split('/')
     const entry: RouteEntry = {
       method,

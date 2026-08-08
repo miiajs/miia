@@ -11,7 +11,7 @@ export class RoutesResolver {
   private routerExplorer: RouterExplorer
 
   constructor(
-    router: Router,
+    private router: Router,
     private container: Container,
   ) {
     this.routerExplorer = new RouterExplorer(router, container)
@@ -26,7 +26,7 @@ export class RoutesResolver {
     const prefix = getMeta<string>(controller, PREFIX) ?? ''
     const fullPrefix = joinPaths(modulePrefix, prefix)
 
-    this.logger.log(`${controller.name} {/${fullPrefix}}`)
+    this.logger.log(`${controller.name} {/${joinPaths(this.router.globalPrefix, fullPrefix)}}`)
 
     this.routerExplorer.explore(instance, controller, fullPrefix)
   }

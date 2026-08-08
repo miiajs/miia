@@ -33,6 +33,7 @@ export class RouterExplorer {
     const guardMap = getMeta<Map<string, Guard[]>>(controller, METHOD_GUARDS)
     const statusMap = getMeta<Map<string, number>>(controller, STATUSES)
     const bodyLimitMap = getMeta<Map<string, number>>(controller, BODY_LIMITS)
+    const logPrefix = this.router.globalPrefix
 
     for (const route of routes) {
       const fullPath = joinPaths(controllerPrefix, route.path)
@@ -63,7 +64,7 @@ export class RouterExplorer {
         bodyLimit,
       })
 
-      this.logger.log(`Mapped {/${fullPath}, ${route.method}} route`)
+      this.logger.log(`Mapped {/${joinPaths(logPrefix, fullPath)}, ${route.method}} route`)
     }
   }
 

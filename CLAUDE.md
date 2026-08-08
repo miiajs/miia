@@ -98,6 +98,8 @@ HTTP method decorators: `@Get`, `@Post`, `@Put`, `@Patch`, `@Delete`, `@Head`, `
 
 `@Status(code)` sets default HTTP status for successful responses.
 
+**Global prefix.** `new Miia({ globalPrefix: '/api' })` - the only form - prepends a segment to every route registered through the router: controllers, `app.addRoute()`, `serveStatic()`. `'api'` / `'/api'` / `'/api/'` are equivalent; `*`, `:`, `?`, `#`, whitespace throw `TypeError`. It must be set **before** any route is registered (routes resolve eagerly at `register()`/`addRoute()`, not at `listen()`) - a later assignment throws. There is deliberately no `Miia.setGlobalPrefix()` method: the constructor has no ordering to get wrong, and the name would collide with Nest's, which is read at listen instead. (`TestApp` does have `setGlobalPrefix()` - it is built through a builder, not a constructor.) The ordering check lives in the `Router.globalPrefix` setter, so every path into it is guarded. Applied in `Router.add()` only, so it never reaches `RESOLVED_PREFIX` and stays out of the OpenAPI spec (unlike `@Module({ prefix })`). Opt out per route with `app.addRoute(..., { skipGlobalPrefix: true })` - the fourth argument is an `AddRouteOptions` object (`middlewares`, `bodyLimit`, `skipGlobalGuards`, `skipGlobalPrefix`), the same options `router.add()` takes for routes registered from a provider's `onReady` the way `@miiajs/swagger` does. `serveStatic()` forwards `skipGlobalPrefix` from its own options. Start-up route logs show the prefixed path.
+
 ### Middleware: Koa onion model
 
 Single `compose()` function wraps middleware array into a pipeline. Two registration points with different scopes:
