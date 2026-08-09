@@ -30,11 +30,15 @@ import { RateLimitModule } from '@miiajs/rate-limit'
       title: 'Full App',
       version: '1.0.0',
       description: 'API documentation',
+      // Swagger registers its routes with `skipGlobalPrefix: true`, so these paths are
+      // taken literally: the docs stay at /api/docs even though the app's globalPrefix
+      // is '/api'. The generated spec is prefix-free too, hence the '/api' on the server
+      // URL below - without it "Try it out" would call /users instead of /api/users.
       path: '/api/docs/json',
       uiPath: '/api/docs',
       servers: [
         {
-          url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('PUBLIC_URL'),
+          url: `${resolve<ConfigService<Env>>(ConfigService).getOrThrow('PUBLIC_URL')}/api`,
           description: 'Current',
         },
       ],
@@ -52,6 +56,5 @@ import { RateLimitModule } from '@miiajs/rate-limit'
       window: '20s',
     }),
   ],
-  prefix: 'api',
 })
 export class AppModule {}

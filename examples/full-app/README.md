@@ -9,6 +9,7 @@ End-to-end [MiiaJS](../../README.md) example: Drizzle + Auth/JWT + Roles + Swagg
 - **Users CRUD** (`src/users/`) - paginated list, get by id, update (with policy), admin-only delete
 - **Drizzle + PostgreSQL** - schema at `src/users/user.table.ts`, connection via `DrizzleModule.configure`
 - **Swagger** - OpenAPI 3.1 spec generated from decorators, UI at `/api/docs/`
+- **Global prefix** - the `/api` prefix comes from `new Miia({ globalPrefix: '/api' })` in `main.ts`, not from a module `prefix`, which is why the generated spec documents clean paths (`/users`, not `/api/users`). The landing redirect, the static mount and the docs endpoints opt out via `skipGlobalPrefix`, so they keep serving `/`, `/static/*` and `/api/docs/`
 - **Middleware** (`src/common/middleware/`) - `requestLogger`, `responseTime`, plus `cors()` from core
 - **Validation** - Zod schemas via `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
 - **Lifecycle hook** - `UsersService.onReady()` seeds a default admin in dev mode
@@ -64,7 +65,7 @@ The seed is a no-op when `NODE_ENV=production`.
 | `NODE_ENV`     | no       | `development`            | Disables admin seed when `production`        |
 | `HOST`         | yes      | -                        | Bind host for the HTTP server                |
 | `PORT`         | yes      | -                        | Bind port                                    |
-| `PUBLIC_URL`   | no       | `http://localhost:3030`  | Advertised in OpenAPI `servers[]`            |
+| `PUBLIC_URL`   | no       | `http://localhost:3030`  | Advertised in OpenAPI `servers[]` + `/api`   |
 | `JWT_SECRET`   | yes      | -                        | HMAC secret for JWT sign/verify              |
 | `DATABASE_URL` | yes      | -                        | Postgres connection string                   |
 | `CORS_ORIGIN`  | no       | `*`                      | CORS origin (string, comma-list, or `*`)     |
@@ -100,7 +101,7 @@ The seed is a no-op when `NODE_ENV=production`.
 ```
 src/
 ├── app.module.ts           - root module, wires ConfigModule/JwtModule/DrizzleModule/SwaggerModule
-├── main.ts                 - bootstrap, global middleware, static files, redirect
+├── main.ts                 - bootstrap, global prefix, global middleware, static files, redirect
 ├── env.schema.ts           - Zod env contract
 ├── auth/
 │   ├── auth.module.ts

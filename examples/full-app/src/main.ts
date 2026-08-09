@@ -6,7 +6,9 @@ import { serveStatic } from '@miiajs/serve-static'
 import { requestId, requestLogger, responseTime } from './common/middleware/index.js'
 import { rateLimit, RateLimitGuard } from '@miiajs/rate-limit'
 
-const app = new Miia().register(AppModule)
+// The '/api' prefix lives on the app, not on the root module: the router applies it
+// while RESOLVED_PREFIX stays clean, so the OpenAPI spec documents /users, not /api/users.
+const app = new Miia({ globalPrefix: '/api' }).register(AppModule)
 
 const configService = app.get<ConfigService<Env>>(ConfigService)
 const corsOrigin = configService.get('CORS_ORIGIN')
@@ -28,8 +30,10 @@ app.use(
   }),
 )
 
-serveStatic(app, '/static', './public')
-app.addRoute('GET', '/', () => Response.redirect('/static', 302))
+// Both opt out of the global prefix: assets stay at /static and the landing redirect
+// stays at /, instead of moving under /api.
+serveStatic(app, '/static', './public', { skipGlobalPrefix: true })
+app.addRoute('GET', '/', () => Response.redirect('/static', 302), { skipGlobalPrefix: true })
 
 const port = configService.get('PORT')
 const host = configService.get('HOST')
