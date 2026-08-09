@@ -17,6 +17,9 @@ let noIndexApp: Miia
 let dotfilesApp: Miia
 let fallbackApp: Miia
 let dotfilesFallbackApp: Miia
+let prefixedApp: Miia
+let spaOutsidePrefixApp: Miia
+let prefixedWildcard: string | undefined
 let spaRoot: string
 
 async function makeApp(root: string, options?: ServeStaticOptions): Promise<Miia> {
@@ -69,6 +72,19 @@ beforeAll(async () => {
   dotfilesApp = await makeApp(tmpRoot, { dotfiles: true })
   fallbackApp = await makeApp(spaRoot, { fallback: 'index.html' })
   dotfilesFallbackApp = await makeApp(tmpRoot, { fallback: 'index.html' })
+
+  prefixedApp = new Miia({ logger: false, globalPrefix: '/api' })
+  prefixedApp.use(async (ctx, next) => {
+    await next()
+    prefixedWildcard = ctx.params['*']
+  })
+  serveStatic(prefixedApp, '/static', tmpRoot)
+  await prefixedApp.init()
+
+  spaOutsidePrefixApp = new Miia({ logger: false, globalPrefix: '/api' })
+  spaOutsidePrefixApp.addRoute('GET', '/users', () => ({ ok: true }))
+  serveStatic(spaOutsidePrefixApp, '/', spaRoot, { fallback: 'index.html', skipGlobalPrefix: true })
+  await spaOutsidePrefixApp.init()
 })
 
 afterAll(async () => {
@@ -80,6 +96,8 @@ afterAll(async () => {
     dotfilesApp?.destroy(),
     fallbackApp?.destroy(),
     dotfilesFallbackApp?.destroy(),
+    prefixedApp?.destroy(),
+    spaOutsidePrefixApp?.destroy(),
   ])
   try {
     rmSync(base, { recursive: true, force: true })
@@ -418,6 +436,34 @@ describe('serve-static - Dotfiles', () => {
       const tmp = new Miia({ logger: false })
       serveStatic(tmp, '/x', tmpRoot, { fallback: '.well-known/foo.html' })
     }).toThrow(/dotfile/)
+  })
+})
+
+describe('serve-static - global prefix', () => {
+  it('serves under the app-level global prefix without touching the wildcard param', async () => {
+    const res = await prefixedApp.fetch(new Request('http://localhost/api/static/hello.txt'))
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('hello world')
+    expect(prefixedWildcard).toBe('hello.txt')
+
+    const unprefixed = await prefixedApp.fetch(new Request('http://localhost/static/hello.txt'))
+    expect(unprefixed.status).toBe(404)
+  })
+
+  it('keeps the mount at the root with skipGlobalPrefix while the API stays prefixed', async () => {
+    const root = await spaOutsidePrefixApp.fetch(new Request('http://localhost/'))
+    expect(root.status).toBe(200)
+    expect(await root.text()).toContain('<title>spa</title>')
+
+    const deepLink = await spaOutsidePrefixApp.fetch(
+      new Request('http://localhost/about', { headers: { Accept: 'text/html' } }),
+    )
+    expect(deepLink.status).toBe(200)
+    expect(await deepLink.text()).toContain('<title>spa</title>')
+
+    const api = await spaOutsidePrefixApp.fetch(new Request('http://localhost/api/users'))
+    expect(api.status).toBe(200)
+    expect(await api.json()).toEqual({ ok: true })
   })
 })
 

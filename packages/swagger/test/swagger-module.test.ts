@@ -157,6 +157,34 @@ describe('SwaggerModule', () => {
     await app.close()
   })
 
+  it('keeps its own endpoints and the spec paths outside the app-level global prefix', async () => {
+    const app = await TestApp.create(AppModule).setGlobalPrefix('/api').compile()
+
+    const specRes = await app.request('GET', '/docs/json')
+    expect(specRes.status).toBe(200)
+
+    const uiRes = await app.request('GET', '/docs/')
+    expect(uiRes.status).toBe(200)
+
+    // Body check, not just status: without skipGlobalPrefix this path falls through
+    // to the `${uiPath}/*` wildcard, which still answers 200 with swagger-ui-dist's
+    // stock initializer pointed at petstore.swagger.io.
+    const initRes = await app.request('GET', '/docs/swagger-initializer.js')
+    expect(initRes.status).toBe(200)
+    const initJs = await initRes.text()
+    expect(initJs).toContain('/docs/json')
+
+    const spec = await specRes.json()
+    expect(spec.paths['/users']).toBeDefined()
+    expect(spec.paths['/api/users']).toBeUndefined()
+
+    // The spec stays clean, but the route itself lives under the prefix
+    const usersRes = await app.request('GET', '/api/users')
+    expect(usersRes.status).toBe(200)
+
+    await app.close()
+  })
+
   it('generates spec paths with the module-level prefix applied to controllers', async () => {
     @Module({ prefix: '/api/v1', controllers: [UserController] })
     class ApiModule {}

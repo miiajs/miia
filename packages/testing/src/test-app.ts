@@ -1,4 +1,4 @@
-import { Miia } from '@miiajs/core'
+import { Miia, Router } from '@miiajs/core'
 import type { ConfiguredModule, Constructor, Guard, Middleware, ProviderDefinition } from '@miiajs/core'
 
 export class TestApp {
@@ -33,6 +33,11 @@ export class TestApp {
 
   useGuard(...guards: Guard[]): this {
     this.app.useGuard(...guards)
+    return this
+  }
+
+  setGlobalPrefix(prefix: string): this {
+    this.app.get(Router).globalPrefix = prefix
     return this
   }
 

@@ -249,11 +249,11 @@ Response rules:
 
 Schema conversion prefers the schema's own `toJSONSchema()` (zod 4) / `toJsonSchema()` export, duck-typed - no zod dependency; zod 3 and raw JSON Schema fall back to the manual walker. Bodies/params use `io: 'input'`, responses `io: 'output'`; `format` is merged from the output side so `z.string().trim().pipe(z.email())` keeps `format: email`. `$defs`, `.meta({ id })` schemas, and recursive schemas are lifted into `components.schemas` with refs rewritten (name clashes get `_Input`/`_Output`, then `_2`).
 
-Not in the spec: guards registered via `app.useGuard()` after `app.init()` (the spec is serialized once in `onReady`), and the perimeter `rateLimit()` middleware (middleware has no readable metadata).
+Not in the spec: guards registered via `app.useGuard()` after `app.init()` (the spec is serialized once in `onReady`), the perimeter `rateLimit()` middleware (middleware has no readable metadata), and the app-level `globalPrefix` (applied in `Router.add()`, never in `RESOLVED_PREFIX`) - paths stay clean, so the base URL including the prefix must be written into `servers` by hand or Swagger UI "Try it out" 404s.
 
 Spec served at `{path}` (default `/docs/json`), UI at `{uiPath}/` (default `/docs/`). Only `swagger-initializer.js` is overridden.
 
-Swagger routes register themselves with `{ skipGlobalGuards: true }` so the UI stays reachable even when the app has a global `AuthGuard` via `app.useGuard()`. Global middleware from `app.use()` (CORS, logging, request-id) still applies to swagger endpoints - only guards are opted out.
+Swagger routes register themselves with `{ skipGlobalGuards: true, skipGlobalPrefix: true }` so the UI stays reachable even when the app has a global `AuthGuard` via `app.useGuard()`, and stays at its configured `path`/`uiPath` under a `globalPrefix`. Global middleware from `app.use()` (CORS, logging, request-id) still applies to swagger endpoints - only guards are opted out.
 
 ### Server: app.listen() with runtime auto-detection
 
@@ -276,6 +276,8 @@ Swagger routes register themselves with `{ skipGlobalGuards: true }` so the UI s
 
 Features: MIME detection (50+ types, customizable), directory traversal protection, `Cache-Control`, index file with trailing slash redirect, file streaming via `node:fs`.
 
+The mount sits under the app's `globalPrefix` like any other route; `skipGlobalPrefix: true` pins it to `prefix` instead - the SPA-at-`/` in front of a prefixed API case. That flag lives on `ServeStaticMountOptions` (what `serveStatic()` takes, extends `ServeStaticOptions`), not on `ServeStaticOptions` itself, which `createStaticHandler()` takes and which owns no mount.
+
 ### Testing: TestApp + bun test
 
 `TestApp` from `@miiajs/testing`:
@@ -285,7 +287,7 @@ const res = await app.request('GET', '/users')
 await app.close()
 ```
 
-Methods: `provide()`, `override()`, `use()`, `useGuard()`, `compile()`, `request()`, `resolve()`, `close()`.
+Methods: `provide()`, `override()`, `use()`, `useGuard()`, `setGlobalPrefix()` (the builder form `Miia` deliberately lacks), `compile()`, `request()`, `resolve()`, `close()`.
 
 Tests use `bun test` with explicit imports: `import { describe, it, expect } from 'bun:test'`.
 

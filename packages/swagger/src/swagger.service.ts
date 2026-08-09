@@ -31,11 +31,15 @@ export class SwaggerService {
     // safety net: if the user later calls app.addRoute() (flipping compiled=false),
     // a subsequent compilePipelines() re-runs compileAll across all entries, and
     // this flag ensures global auth guards still don't graft onto swagger endpoints.
+    //
+    // `skipGlobalPrefix: true` keeps the docs endpoints outside the app's global
+    // prefix: `path` and `uiPath` are already the absolute URLs the user configured,
+    // and the spec never carries the prefix either, so the two stay consistent.
     this.router.add(
       'GET',
       specPath,
       () => new Response(specJson, { headers: { 'Content-Type': 'application/json' } }),
-      { skipGlobalGuards: true },
+      { skipGlobalGuards: true, skipGlobalPrefix: true },
     )
 
     if (this.options.ui !== false) {
@@ -44,10 +48,11 @@ export class SwaggerService {
         'GET',
         `${uiPath}/swagger-initializer.js`,
         () => new Response(initializer, { headers: { 'Content-Type': 'application/javascript' } }),
-        { skipGlobalGuards: true },
+        { skipGlobalGuards: true, skipGlobalPrefix: true },
       )
       this.router.add('GET', `${uiPath}/*`, createStaticHandler(swaggerUiDistPath, { maxAge: 3600 }), {
         skipGlobalGuards: true,
+        skipGlobalPrefix: true,
       })
     }
   }

@@ -219,6 +219,21 @@ describe('TestApp', () => {
     })
   })
 
+  describe('setGlobalPrefix()', () => {
+    it('should prefix every route of the app', async () => {
+      const app = await TestApp.create(AppModule).setGlobalPrefix('/api').compile()
+
+      const prefixed = await app.request('GET', '/api/users/')
+      expect(prefixed.status).toBe(200)
+      expect(await prefixed.json()).toEqual([{ id: 1, name: 'Real User' }])
+
+      const unprefixed = await app.request('GET', '/users/')
+      expect(unprefixed.status).toBe(404)
+
+      await app.close()
+    })
+  })
+
   describe('close()', () => {
     it('should cleanup without errors', async () => {
       const app = await TestApp.create(AppModule).compile()

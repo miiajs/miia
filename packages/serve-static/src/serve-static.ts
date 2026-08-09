@@ -24,6 +24,11 @@ export interface ServeStaticOptions {
   fallback?: string | false
 }
 
+export interface ServeStaticMountOptions extends ServeStaticOptions {
+  /** Keep the mount at `prefix` when the app runs under a `globalPrefix` (default: false) */
+  skipGlobalPrefix?: boolean
+}
+
 function containsDotSegment(path: string): boolean {
   return path.split(/[/\\]/).some((seg) => seg.length > 0 && seg.startsWith('.'))
 }
@@ -208,6 +213,8 @@ export function createStaticHandler(
   }
 }
 
-export function serveStatic(app: Miia, prefix: string, root: string, options?: ServeStaticOptions): void {
-  app.addRoute('GET', `${prefix}/*`, createStaticHandler(root, options))
+export function serveStatic(app: Miia, prefix: string, root: string, options?: ServeStaticMountOptions): void {
+  app.addRoute('GET', `${prefix}/*`, createStaticHandler(root, options), {
+    skipGlobalPrefix: options?.skipGlobalPrefix,
+  })
 }
