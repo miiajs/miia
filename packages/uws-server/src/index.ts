@@ -15,7 +15,10 @@ import type { us_listen_socket } from 'uWebSockets.js'
  * uWS HttpRequest is only valid synchronously - method, url, and headers
  * must be read before any async gap. Small bodies are accumulated natively
  * in C++ via res.collectBody(). Large bodies arrive via res.onData() and
- * are bridged to a ReadableStream for true streaming.
+ * are bridged to a ReadableStream for true streaming: once the stream's
+ * queue passes bodyHighWaterMark the socket is paused with res.pause() and
+ * resumed from the stream's pull(), so the client uploads at the handler's
+ * pace instead of filling memory.
  *
  * ## Modes
  *
@@ -34,6 +37,8 @@ import type { us_listen_socket } from 'uWebSockets.js'
  * ## Known Limitations (optimized mode)
  *
  * - Body can only be consumed once (matches Web API spec).
+ * - Ending the response disposes an unread request body - the stream is
+ *   errored, so a body read that was started and never awaited rejects.
  * - clone() returns a GlobalResponse, not LightResponse.
  * - Multiple serve instances: second close() restores GlobalResponse,
  *   which may break a still-running first instance.
@@ -47,6 +52,7 @@ const CACHE = Symbol('responseCache')
 const textDecoder = new TextDecoder()
 const EMPTY_U8 = new Uint8Array(0)
 const DEFAULT_BUFFER_THRESHOLD = 102_400 // 100KB
+const DEFAULT_BODY_HIGH_WATER_MARK = 262_144 // 256KB
 const DEFAULT_MAX_BODY_SIZE = 1_048_576 // 1MB
 
 // ─── Lightweight Headers Proxy (optimized mode) ─────────────
@@ -421,6 +427,10 @@ export interface ServeOptions {
   /** Bodies with Content-Length <= threshold are buffered as Promise<Uint8Array> for fast path.
    *  Larger or without Content-Length → ReadableStream. @default 102400 (100KB) */
   bufferThreshold?: number
+  /** Bytes a streamed request body may queue before the socket is paused; it resumes as the
+   *  handler drains the stream. Very small values trade memory for pause/resume churn.
+   *  @default 262144 (256KB) */
+  bodyHighWaterMark?: number
   /** Max request body size in bytes. A larger declared Content-Length gets an immediate
    *  413 response (handler never runs); chunked bodies error mid-stream past the cap
    *  (the body stream rejects with an Error named 'PayloadTooLargeError', which
@@ -437,9 +447,16 @@ export const serve = async ({
   fetch: handler,
   mode = 'optimized',
   bufferThreshold = DEFAULT_BUFFER_THRESHOLD,
+  bodyHighWaterMark = DEFAULT_BODY_HIGH_WATER_MARK,
   maxBodySize = DEFAULT_MAX_BODY_SIZE,
   logger = console,
 }: ServeOptions): Promise<{ close(): Promise<void> }> => {
+  // Must run before the globalThis.Response swap below - throwing after it would leave
+  // LightResponse installed with no close() to restore it.
+  if (!Number.isInteger(bodyHighWaterMark) || bodyHighWaterMark < 1) {
+    throw new TypeError(`[uws-server] bodyHighWaterMark must be an integer >= 1, got ${bodyHighWaterMark}`)
+  }
+
   const native = mode === 'native'
   let listenSocket: us_listen_socket | null = null
 
@@ -484,8 +501,8 @@ export const serve = async ({
 
     // ── Early 413: declared Content-Length over the cap, handler never runs ──
     // Fully synchronous - no async gap yet, so no onAborted registration is
-    // needed. uWS closes the connection itself when a response ends before
-    // the request body was consumed.
+    // needed. No onData handler is registered on this path, so uWS discards
+    // the incoming body itself and the connection stays reusable.
     if (maxBodySize !== false && hasBody && contentLength > maxBodySize) {
       res.cork(() => {
         res.writeStatus('413')
@@ -500,6 +517,8 @@ export const serve = async ({
     let body: ReadableStream<Uint8Array> | undefined
     let bodyController: ReadableStreamDefaultController<Uint8Array> | undefined
     let bodyClosed = false
+    let bodyPaused = false
+    let responseEnded = false
     let bodyPromise: Promise<Uint8Array> | null = null
     let bodyReject: ((err: Error) => void) | null = null
 
@@ -528,38 +547,55 @@ export const serve = async ({
       // which both the early 413 and `< 0` are false.
       const streamLimit = maxBodySize !== false && !(contentLength >= 0) ? maxBodySize : -1
       let received = 0
-      body = new ReadableStream<Uint8Array>({
-        start(controller) {
-          bodyController = controller
-          res.onData((chunk: ArrayBuffer, isLast: boolean) => {
-            if (bodyClosed) return // already errored on limit - ignore remaining chunks
-            if (streamLimit >= 0) {
-              received += chunk.byteLength
-              if (received > streamLimit) {
-                // Set BEFORE controller.error: the onAborted handlers guard on
-                // !bodyClosed, so this prevents a double-error on the controller.
-                bodyClosed = true
-                const err = new Error(`Request body exceeded ${streamLimit} byte limit`)
-                err.name = 'PayloadTooLargeError' // mapped to 413 by @miiajs/core
-                try {
-                  controller.error(err)
-                } catch {
-                  /* already closed */
+      body = new ReadableStream<Uint8Array>(
+        {
+          start(controller) {
+            bodyController = controller
+            res.onData((chunk: ArrayBuffer, isLast: boolean) => {
+              if (bodyClosed) return // already errored on limit - ignore remaining chunks
+              if (streamLimit >= 0) {
+                received += chunk.byteLength
+                if (received > streamLimit) {
+                  // Set BEFORE controller.error: the onAborted handlers guard on
+                  // !bodyClosed, so this prevents a double-error on the controller.
+                  bodyClosed = true
+                  const err = new Error(`Request body exceeded ${streamLimit} byte limit`)
+                  err.name = 'PayloadTooLargeError' // mapped to 413 by @miiajs/core
+                  try {
+                    controller.error(err)
+                  } catch {
+                    /* already closed */
+                  }
+                  return
                 }
-                return
               }
+              if (chunk.byteLength > 0) {
+                // Must copy - uWS reuses the underlying ArrayBuffer memory
+                controller.enqueue(new Uint8Array(chunk.slice(0)))
+              }
+              if (isLast) {
+                // uWS delivers isLast out of its own buffer even after pause()
+                if (bodyPaused) {
+                  bodyPaused = false
+                  if (!aborted) res.resume()
+                }
+                bodyClosed = true
+                controller.close()
+              } else if (!bodyPaused && !aborted && !responseEnded && (controller.desiredSize ?? 1) <= 0) {
+                bodyPaused = true
+                res.pause()
+              }
+            })
+          },
+          pull() {
+            if (bodyPaused && !bodyClosed && !aborted && !responseEnded) {
+              bodyPaused = false
+              res.resume()
             }
-            if (chunk.byteLength > 0) {
-              // Must copy - uWS reuses the underlying ArrayBuffer memory
-              controller.enqueue(new Uint8Array(chunk.slice(0)))
-            }
-            if (isLast) {
-              bodyClosed = true
-              controller.close()
-            }
-          })
+          },
         },
-      })
+        new ByteLengthQueuingStrategy({ highWaterMark: bodyHighWaterMark }),
+      )
     }
 
     // ── 3. Create request + register onAborted (BEFORE dispatch!) ─
@@ -582,6 +618,7 @@ export const serve = async ({
         aborted = true
         ac.abort(new Error('Client connection closed'))
         if (bodyController && !bodyClosed) {
+          bodyClosed = true
           try {
             bodyController.error(new Error('Request aborted'))
           } catch {
@@ -604,6 +641,7 @@ export const serve = async ({
         }
         // Stream path
         if (bodyController && !bodyClosed) {
+          bodyClosed = true
           try {
             bodyController.error(new Error('Request aborted'))
           } catch {
@@ -615,13 +653,38 @@ export const serve = async ({
 
     // ── 4. Response helpers (close over res, aborted) ────────
 
+    // A socket paused for backpressure must not stay paused once the response is
+    // out - the keep-alive connection wedges (measured). Ending with uWS's
+    // closeConnection flag is not the answer either: it races the response onto
+    // the wire and loses it about a third of the time (measured). Dispose of the
+    // body and resume instead, so onData's bodyClosed early-return drops the
+    // remainder. The body still reaches its end, so the connection stays reusable
+    // and needs no Connection: close.
+    const releaseBody = () => {
+      responseEnded = true
+      if (bodyController && !bodyClosed) {
+        bodyClosed = true
+        // error, not close: a body cut off mid-flight must never look complete
+        try {
+          bodyController.error(new Error('Response ended before the request body was read'))
+        } catch {
+          /* already closed */
+        }
+      }
+      if (bodyPaused) {
+        bodyPaused = false
+        if (!aborted) res.resume()
+      }
+    }
+
     const sendError = (error: unknown) => {
-      if (aborted) return
+      if (aborted || responseEnded) return
       logger.error(
         'Unhandled error',
         error instanceof Error ? (error.stack ?? error.message) : String(error),
         'UwsServer',
       )
+      releaseBody()
       res.cork(() => {
         res.writeStatus('500')
         res.writeHeader('content-type', 'application/json')
@@ -643,6 +706,7 @@ export const serve = async ({
       const cached = (response as any)[CACHE]
       if (cached) {
         const [status, body, headers] = cached
+        releaseBody()
         res.cork(() => {
           res.writeStatus(`${status}`)
           if (headers) {
@@ -659,6 +723,7 @@ export const serve = async ({
 
       // No body (e.g. native mode 204)
       if (!response.body) {
+        releaseBody()
         res.cork(() => {
           res.writeStatus(`${response.status}`)
           response.headers.forEach((v: string, k: string) => res.writeHeader(k, v))
@@ -691,6 +756,7 @@ export const serve = async ({
         reader.releaseLock()
       }
 
+      releaseBody()
       if (!aborted) res.cork(() => res.end())
     }
 

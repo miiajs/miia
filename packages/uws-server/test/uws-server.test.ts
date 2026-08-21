@@ -1,6 +1,9 @@
 import { afterEach, describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { once } from 'node:events'
 import * as http from 'node:http'
+import * as net from 'node:net'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { serve } from '../dist/index.js'
 
 function request(
@@ -27,6 +30,82 @@ function request(
     if (options.body) req.write(options.body)
     req.end()
   })
+}
+
+type RawResponse = { status: number; headers: Record<string, string>; body: string; consumed: number }
+
+/** Parses one HTTP/1.1 response (Content-Length or chunked) out of `buf`; null when incomplete. */
+function parseResponse(buf: Buffer): RawResponse | null {
+  const sep = buf.indexOf('\r\n\r\n')
+  if (sep === -1) return null
+  const lines = buf.subarray(0, sep).toString('latin1').split('\r\n')
+  const status = Number(lines[0].split(' ')[1])
+  const headers: Record<string, string> = {}
+  for (const line of lines.slice(1)) {
+    const colon = line.indexOf(':')
+    headers[line.slice(0, colon).toLowerCase()] = line.slice(colon + 1).trim()
+  }
+  const start = sep + 4
+  if (headers['transfer-encoding'] === 'chunked') {
+    let offset = start
+    let body = ''
+    while (true) {
+      const eol = buf.indexOf('\r\n', offset)
+      if (eol === -1) return null
+      const size = Number.parseInt(buf.subarray(offset, eol).toString('latin1'), 16)
+      if (Number.isNaN(size)) throw new Error('malformed chunk size in response')
+      if (buf.length < eol + 4 + size) return null
+      body += buf.subarray(eol + 2, eol + 2 + size).toString()
+      offset = eol + 4 + size
+      if (size === 0) return { status, headers, body, consumed: offset }
+    }
+  }
+  const length = Number(headers['content-length'] ?? 0)
+  if (buf.length - start < length) return null
+  return { status, headers, body: buf.subarray(start, start + length).toString(), consumed: start + length }
+}
+
+/** Raw keep-alive client - the backpressure cases need control over write pacing and framing. */
+async function connectRaw(port: number) {
+  const socket = net.connect(port, '127.0.0.1')
+  await once(socket, 'connect')
+
+  let buf = Buffer.alloc(0)
+  let failure: Error | null = null
+  let notify: (() => void) | null = null
+  const wake = () => notify?.()
+
+  socket.on('data', (chunk: Buffer) => {
+    buf = Buffer.concat([buf, chunk])
+    wake()
+  })
+  socket.on('error', (err: Error) => {
+    failure ??= err
+    wake()
+  })
+  socket.on('close', () => {
+    failure ??= new Error('socket closed before a full response')
+    wake()
+  })
+
+  const readResponse = async (): Promise<RawResponse> => {
+    while (true) {
+      const parsed = parseResponse(buf)
+      if (parsed) {
+        buf = buf.subarray(parsed.consumed)
+        return parsed
+      }
+      if (failure) throw failure
+      await new Promise<void>((resolve) => {
+        notify = () => {
+          notify = null
+          resolve()
+        }
+      })
+    }
+  }
+
+  return { socket, readResponse }
 }
 
 let nextPort = 19234
@@ -832,6 +911,298 @@ describe('uws-server', () => {
       assert.ok(looksLikeLoopback(conn.remoteAddress), `unexpected remoteAddress: ${conn.remoteAddress}`)
       assert.equal(conn.family, conn.remoteAddress.includes(':') ? 'IPv6' : 'IPv4')
       assert.ok(typeof conn.remotePort === 'number' && conn.remotePort > 0, `unexpected remotePort: ${conn.remotePort}`)
+    })
+  })
+
+  // ── Body backpressure ─────────────────────────────────────
+  //
+  // Every case takes an explicit timeout and destroys its socket in a finally:
+  // node:test defaults to no timeout and a wedged connection yields no response
+  // at all, so a regression would hang the run instead of failing it.
+
+  describe('body backpressure', () => {
+    it('should throttle the socket to the consumer pace', { timeout: 5000 }, async () => {
+      const port = nextPort++
+      let release = () => {}
+      const stall = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      server = await serve({
+        port,
+        maxBodySize: false,
+        fetch: async (req) => {
+          const reader = req.body!.getReader()
+          await reader.read()
+          await stall
+          return new Response('done')
+        },
+      })
+
+      const { socket } = await connectRaw(port)
+      try {
+        socket.write('POST /slow HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n')
+
+        const frame = Buffer.from(`10000\r\n${'x'.repeat(0x10000)}\r\n`)
+        const total = frame.length * 512 // ~32MB
+        let queued = 0
+        let stalled = false
+        const deadline = Date.now() + 1500
+        while (queued < total && Date.now() < deadline) {
+          const flushed = socket.write(frame)
+          queued += frame.length
+          if (!flushed) {
+            stalled = true
+            const drained = await Promise.race([
+              once(socket, 'drain').then(
+                () => true,
+                () => false,
+              ),
+              sleep(250, false),
+            ])
+            if (!drained) break
+          }
+        }
+
+        const accepted = queued - socket.writableLength
+        assert.ok(stalled, 'the write loop never stalled - the socket swallowed the whole body')
+        assert.ok(accepted < total / 2, `expected an early stall, the socket accepted ${accepted} of ${total} bytes`)
+      } finally {
+        release()
+        socket.destroy()
+      }
+    })
+
+    it('should finish a paused body and keep the connection usable', { timeout: 5000 }, async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        bodyHighWaterMark: 4096,
+        maxBodySize: false,
+        fetch: async (req) => {
+          if (!req.body) return new Response('second')
+          const reader = req.body.getReader()
+          let received = 0
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            received += value.byteLength
+          }
+          return new Response(String(received))
+        },
+      })
+
+      const { socket, readResponse } = await connectRaw(port)
+      try {
+        // One write: completion-while-paused must not depend on read-buffer luck
+        socket.write(
+          'POST /paused HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n' +
+            `1000\r\n${'z'.repeat(4096)}\r\n`.repeat(3) +
+            '0\r\n\r\n',
+        )
+        const first = await readResponse()
+        assert.equal(first.status, 200)
+        assert.equal(first.body, String(4096 * 3))
+
+        socket.write('GET /again HTTP/1.1\r\nHost: localhost\r\n\r\n')
+        const second = await readResponse()
+        assert.equal(second.status, 200)
+        assert.equal(second.body, 'second')
+      } finally {
+        socket.destroy()
+      }
+    })
+
+    it('should not throw when the response ends before the pause threshold', { timeout: 5000 }, async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        bodyHighWaterMark: 4096,
+        maxBodySize: false,
+        fetch: () => new Response('ignored'),
+      })
+
+      const { socket, readResponse } = await connectRaw(port)
+      let uploading = true
+      let pump: Promise<void> = Promise.resolve()
+      try {
+        socket.write('POST /ignored HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n')
+        const frame = Buffer.from(`10000\r\n${'q'.repeat(0x10000)}\r\n`)
+        pump = (async () => {
+          while (uploading) {
+            if (socket.write(frame)) await sleep(0)
+            else
+              await Promise.race([
+                once(socket, 'drain').then(
+                  () => true,
+                  () => false,
+                ),
+                sleep(50, false),
+              ])
+          }
+        })()
+
+        const res = await readResponse()
+        assert.equal(res.status, 200)
+        assert.equal(res.body, 'ignored')
+        await sleep(200) // let onData fire again after the response ended
+      } finally {
+        uploading = false
+        await pump.catch(() => {})
+        socket.destroy()
+      }
+    })
+
+    it('should deliver the response while the client is still uploading', { timeout: 5000 }, async () => {
+      const port = nextPort++
+      server = await serve({ port, maxBodySize: false, fetch: () => new Response('early') })
+
+      const { socket, readResponse } = await connectRaw(port)
+      let uploading = true
+      let responded = false
+      let acceptedAfterResponse = 0
+      let pump: Promise<void> = Promise.resolve()
+      try {
+        socket.write('POST /early HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n')
+        const frame = Buffer.from(`10000\r\n${'w'.repeat(0x10000)}\r\n`)
+        pump = (async () => {
+          while (uploading) {
+            const flushed = socket.write(frame)
+            if (flushed && responded) acceptedAfterResponse += frame.length
+            if (flushed) await sleep(0)
+            else
+              await Promise.race([
+                once(socket, 'drain').then(
+                  () => true,
+                  () => false,
+                ),
+                sleep(50, false),
+              ])
+          }
+        })()
+
+        const res = await readResponse()
+        responded = true
+        assert.equal(res.status, 200)
+        assert.equal(res.body, 'early')
+        await sleep(200)
+        assert.ok(acceptedAfterResponse > 0, 'the client could not upload any further once the response was out')
+      } finally {
+        uploading = false
+        await pump.catch(() => {})
+        socket.destroy()
+      }
+    })
+
+    it('should keep the connection reusable after an unread body', { timeout: 5000 }, async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        maxBodySize: false,
+        fetch: (req) => new Response(req.method === 'GET' ? 'second' : 'first'),
+      })
+
+      const { socket, readResponse } = await connectRaw(port)
+      try {
+        socket.write('POST /ignored HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n')
+        socket.write(`10000\r\n${'v'.repeat(0x10000)}\r\n`)
+        const first = await readResponse()
+        assert.equal(first.status, 200)
+        assert.equal(first.body, 'first')
+
+        // Terminate the first body, otherwise the follow-up is eaten as body data
+        socket.write('0\r\n\r\n')
+        socket.write('GET /again HTTP/1.1\r\nHost: localhost\r\n\r\n')
+        const second = await readResponse()
+        assert.equal(second.status, 200)
+        assert.equal(second.body, 'second')
+      } finally {
+        socket.destroy()
+      }
+    })
+
+    it('should deliver a limit error raised while paused', { timeout: 5000 }, async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        bodyHighWaterMark: 4096,
+        maxBodySize: 6000,
+        fetch: async (req) => {
+          if (!req.body) return new Response('after')
+          try {
+            const reader = req.body.getReader()
+            while (!(await reader.read()).done) {
+              /* drain */
+            }
+            return new Response('should not get here', { status: 500 })
+          } catch (e) {
+            return new Response((e as Error).name, { status: 413 })
+          }
+        },
+      })
+
+      const { socket, readResponse } = await connectRaw(port)
+      try {
+        // Pause on piece 1, pieces 2-3 arrive paused and cross the cap
+        socket.write(
+          'POST /capped HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n' +
+            `1000\r\n${'p'.repeat(4096)}\r\n`.repeat(3) +
+            '0\r\n\r\n',
+        )
+        const first = await readResponse()
+        assert.equal(first.status, 413)
+        assert.equal(first.body, 'PayloadTooLargeError')
+
+        socket.write('GET /after HTTP/1.1\r\nHost: localhost\r\n\r\n')
+        const second = await readResponse()
+        assert.equal(second.status, 200)
+        assert.equal(second.body, 'after')
+      } finally {
+        socket.destroy()
+      }
+    })
+
+    it('should stream a response while the request body goes unread', { timeout: 5000 }, async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        bodyHighWaterMark: 4096,
+        maxBodySize: false,
+        fetch: () => {
+          const encoder = new TextEncoder()
+          const stream = new ReadableStream({
+            start(controller) {
+              controller.enqueue(encoder.encode('part1'))
+              controller.enqueue(encoder.encode('part2'))
+              controller.close()
+            },
+          })
+          return new Response(stream, { headers: { 'Content-Type': 'text/plain' } })
+        },
+      })
+
+      const { socket, readResponse } = await connectRaw(port)
+      try {
+        socket.write(
+          'POST /streamed HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n' +
+            `2000\r\n${'s'.repeat(0x2000)}\r\n`,
+        )
+        const res = await readResponse()
+        assert.equal(res.status, 200)
+        assert.equal(res.body, 'part1part2')
+      } finally {
+        socket.destroy()
+      }
+    })
+
+    it('should reject an invalid bodyHighWaterMark', { timeout: 5000 }, async () => {
+      await assert.rejects(() => serve({ port: nextPort++, bodyHighWaterMark: 0, fetch: () => new Response('ok') }), {
+        name: 'TypeError',
+        message: /bodyHighWaterMark/,
+      })
+      await assert.rejects(() => serve({ port: nextPort++, bodyHighWaterMark: 1.5, fetch: () => new Response('ok') }), {
+        name: 'TypeError',
+        message: /bodyHighWaterMark/,
+      })
     })
   })
 })
