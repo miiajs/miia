@@ -71,10 +71,11 @@ export interface MiiaOptions {
    * disables the default limit and the adapter-level cap.
    *
    * Declared Content-Length is checked in core after route matching against
-   * the per-route limit. Chunked bodies (no Content-Length) are capped by the
-   * adapter ceiling - `max(maxBodySize, all @BodyLimit values)` - enforced
-   * natively on Bun (`maxRequestBodySize`), via a counting stream wrapper on
-   * Deno, and by the node-server/uws-server adapters.
+   * the per-route limit. A chunked body is counted as it arrives: core hands
+   * the matched route's limit to whichever adapter owns the stream, and only
+   * an adapter without that slot falls back to the ceiling,
+   * `max(maxBodySize, all @BodyLimit values)` - enforced natively on Bun
+   * (`maxRequestBodySize`) and via a counting stream wrapper on Deno.
    *
    * @default 1_048_576 (1 MiB)
    */
@@ -591,12 +592,28 @@ export class Miia {
     return typeof (value as LoggerService).log === 'function'
   }
 
+  /**
+   * Rejects a body that declares too much, and hands the route's limit to the
+   * adapter for one that declares nothing.
+   *
+   * A chunked body has no length to check, so the limit can only be enforced
+   * as the bytes arrive - and only by whoever owns the stream. Adapters that
+   * build the body themselves expose a `_bodyLimit` slot for exactly that;
+   * the write narrows what they already hold, never widens it. A runtime whose
+   * request is a real `Request` has no slot, and keeps the adapter ceiling.
+   */
   private checkBodyLimit(req: Request, limit: number): PayloadTooLargeException | null {
     const cl = req.headers.get('content-length')
-    // NaN comparisons are false: a malformed Content-Length falls through to
-    // the adapter ceiling rather than producing a spurious 413.
-    if (cl !== null && +cl > limit) {
+    // NaN comparisons are false, so a malformed Content-Length is not rejected
+    // on its face - it falls through to the byte count below.
+    const declared = cl === null ? Number.NaN : +cl
+    if (declared > limit) {
       return new PayloadTooLargeException(`Request body of ${cl} bytes exceeds the ${limit} byte limit`)
+    }
+
+    if (!(declared >= 0) && '_bodyLimit' in req && !req.bodyUsed) {
+      const owned = req as Request & { _bodyLimit: number | null }
+      owned._bodyLimit = Math.min(owned._bodyLimit ?? Number.POSITIVE_INFINITY, limit)
     }
     return null
   }

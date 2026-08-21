@@ -789,6 +789,12 @@ function createOptimizedListener(
         // bodies are bounded by Node's parser and were pre-checked above.
         // `!(cl >= 0)`, not `cl < 0`: a malformed header yields cl = NaN, for
         // which both the early 413 and `cl < 0` are false.
+        //
+        // This is the ceiling, not the last word: @miiajs/core narrows the same
+        // slot to the matched route's own limit once routing has happened, and
+        // `_getReal()` reads it when the body is first materialized. Keep the
+        // write here and the read there - a caller outside this package depends
+        // on the slot staying assignable between the two.
         if (maxBodySize !== false && !(cl >= 0)) req._bodyLimit = maxBodySize
         ensureCloseListener()
       } else {

@@ -316,6 +316,133 @@ describe('body limit - adapter error contract', () => {
   })
 })
 
+describe('body limit - narrowing the adapter slot on a chunked body', () => {
+  // Stands in for node-server/uws-server, whose request objects own the body
+  // stream and expose `_bodyLimit` for the limit to be written into.
+  function adapterRequest(path: string, options: { contentLength?: string; consume?: boolean } = {}) {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('x'.repeat(64)))
+        controller.close()
+      },
+    })
+    const headers: Record<string, string> = {}
+    if (options.contentLength !== undefined) headers['content-length'] = options.contentLength
+    const req = new Request(`http://localhost${path}`, {
+      method: 'POST',
+      body: stream,
+      headers,
+      duplex: 'half',
+    } as RequestInit) as Request & { _bodyLimit: number | null }
+    req._bodyLimit = null
+    return req
+  }
+
+  @Controller('/')
+  class Ctrl {
+    @Post('/tight')
+    @BodyLimit(4096)
+    tight() {
+      return { ok: true }
+    }
+
+    @Post('/default')
+    plain() {
+      return { ok: true }
+    }
+  }
+  @Module({ controllers: [Ctrl] })
+  class M {}
+
+  const build = () => new Miia({ logger: false }).register(M)
+
+  it("writes the route's limit into the slot", async () => {
+    const req = adapterRequest('/tight')
+    await build().fetch(req)
+    expect(req._bodyLimit).toBe(4096)
+  })
+
+  it('writes the app default for a route without @BodyLimit', async () => {
+    const req = adapterRequest('/default')
+    await build().fetch(req)
+    expect(req._bodyLimit).toBe(DEFAULT_BODY_LIMIT)
+  })
+
+  it('narrows a stricter cap the adapter already set, never widens it', async () => {
+    const req = adapterRequest('/tight')
+    req._bodyLimit = 512
+    await build().fetch(req)
+    expect(req._bodyLimit).toBe(512)
+  })
+
+  it('leaves the slot alone when the body declares a length', async () => {
+    const req = adapterRequest('/tight', { contentLength: '64' })
+    await build().fetch(req)
+    expect(req._bodyLimit).toBeNull()
+  })
+
+  it('still rejects an oversized declared length', async () => {
+    const req = adapterRequest('/tight', { contentLength: '99999' })
+    const res = await build().fetch(req)
+    expect(res.status).toBe(413)
+  })
+
+  it('narrows a malformed Content-Length, which cannot be checked on its face', async () => {
+    const req = adapterRequest('/tight', { contentLength: 'not-a-number' })
+    await build().fetch(req)
+    expect(req._bodyLimit).toBe(4096)
+  })
+
+  it('leaves the slot alone once the body has been read', async () => {
+    const req = adapterRequest('/tight')
+    await req.text()
+    await build().fetch(req)
+    expect(req._bodyLimit).toBeNull()
+  })
+
+  it('touches nothing on a runtime whose request has no slot', async () => {
+    const req = new Request('http://localhost/tight', {
+      method: 'POST',
+      body: new ReadableStream<Uint8Array>({
+        start(c) {
+          c.close()
+        },
+      }),
+      duplex: 'half',
+    } as RequestInit)
+    const res = await build().fetch(req)
+    expect(res.status).toBe(200)
+    expect('_bodyLimit' in req).toBe(false)
+  })
+
+  it('does not narrow when the app disables the limit', async () => {
+    @Controller('/')
+    class Free {
+      @Post('/any')
+      any() {
+        return { ok: true }
+      }
+    }
+    @Module({ controllers: [Free] })
+    class FreeModule {}
+
+    const req = adapterRequest('/any')
+    await new Miia({ logger: false, maxBodySize: false }).register(FreeModule).fetch(req)
+    expect(req._bodyLimit).toBeNull()
+  })
+
+  it('narrows through the global middleware pipeline too', async () => {
+    const passthrough: Middleware = async (_ctx, next) => {
+      await next()
+    }
+    const req = adapterRequest('/tight')
+    const app = new Miia({ logger: false }).register(M)
+    app.use(passthrough)
+    await app.fetch(req)
+    expect(req._bodyLimit).toBe(4096)
+  })
+})
+
 describe('countingLimitStream', () => {
   it('errors with PayloadTooLargeException once the limit is exceeded', async () => {
     const source = new ReadableStream<Uint8Array>({

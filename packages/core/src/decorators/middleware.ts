@@ -61,9 +61,10 @@ export const SkipGuard = createDecorator<[first: Guard | Function, ...rest: (Gua
  * the app-wide `maxBodySize` option. A declared Content-Length above the limit
  * yields a 413 PayloadTooLargeException before the handler runs.
  *
- * Chunked bodies (no Content-Length) are capped by the adapter-level ceiling
- * (max of all limits), not the per-route value - the body is read independently
- * of route matching.
+ * A chunked body (no Content-Length) has nothing to check up front, so the
+ * limit is handed to the adapter after routing and counted as the bytes
+ * arrive. `@miiajs/node-server` honours it; a runtime whose request is a real
+ * `Request` - Bun, Deno, `app.fetch` - keeps the adapter ceiling instead.
  */
 export const BodyLimit = createDecorator<[bytes: number]>((context, bytes) => {
   if (typeof bytes !== 'number' || !Number.isFinite(bytes) || bytes < 0) {

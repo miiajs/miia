@@ -132,6 +132,10 @@ export interface ListenInfo {
    * Adapter-level body cap computed by Miia: max(app `maxBodySize`, all
    * `@BodyLimit` values), or `false` when limits are disabled. Adapters fall
    * back to their own 1 MiB default when undefined (standalone serve() usage).
+   *
+   * It is a ceiling, not the last word: for a body with no declared length,
+   * core narrows an adapter's `_bodyLimit` to the matched route's own limit
+   * once routing has happened, and never widens what the adapter already set.
    */
   maxBodySize?: number | false
 }
