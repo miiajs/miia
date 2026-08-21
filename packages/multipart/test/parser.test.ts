@@ -263,6 +263,42 @@ describe('createPartStream - iteration control', () => {
     await expect(part.bytes()).rejects.toThrow(/abandoned/)
   })
 
+  it('errors an abandoned part whose bytes had all arrived already', async () => {
+    // The chunking is what makes this different from the test above: delivered
+    // whole, the part is complete inside its stream's own queue by the time the
+    // iterator moves on. It has to be errored anyway, or the contract would
+    // hold for a 4000-byte upload and quietly not hold for a 200-byte one.
+    for (const size of [10, 200, 4000, 20000]) {
+      const form = new FormData()
+      form.append('file', new File(['x'.repeat(size)], 'small.txt', { type: 'text/plain' }))
+      form.append('after', 'done')
+      const { contentType, body } = await serialize(form)
+
+      const iterator = createPartStream(chunkedRequest(contentType, [body]))
+      const part = (await iterator.next()).value as FilePart
+      expect(part.type).toBe('file')
+      await iterator.next()
+
+      await expect(part.bytes()).rejects.toThrow(/abandoned/)
+    }
+  })
+
+  it('leaves a part the consumer read to the end alone', async () => {
+    const form = new FormData()
+    form.append('file', new File(['x'.repeat(200)], 'small.txt', { type: 'text/plain' }))
+    form.append('after', 'done')
+    const { contentType, body } = await serialize(form)
+
+    const iterator = createPartStream(chunkedRequest(contentType, [body]))
+    const part = (await iterator.next()).value as FilePart
+    const bytes = await part.bytes()
+    expect(bytes.length).toBe(200)
+
+    // Advancing must not retroactively spoil what was already handed over.
+    await iterator.next()
+    expect(await part.bytes()).toBe(bytes)
+  })
+
   it('refuses a second next() while the first is still in flight', async () => {
     const form = new FormData()
     form.append('file', new File(['x'.repeat(300)], 'a.txt', { type: 'text/plain' }))

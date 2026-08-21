@@ -58,6 +58,7 @@ interface FileState {
   size: number
   counted: boolean
   gate: Gate
+  controller: ReadableStreamDefaultController<Uint8Array> | null
 }
 
 interface PendingEntry {
@@ -169,6 +170,7 @@ export function createPartStream(req: Request, options: MultipartOptions = {}): 
     if (file.error) return
     file.error = error
     file.chunks.length = 0
+    file.controller?.error(error)
     file.gate.wake()
   }
 
@@ -253,6 +255,7 @@ export function createPartStream(req: Request, options: MultipartOptions = {}): 
       size: 0,
       counted: false,
       gate: createGate(),
+      controller: null,
     }
     liveFiles.add(file)
     pending.push({ part: createFilePart(info, meta, file), file })
@@ -419,6 +422,9 @@ export function createPartStream(req: Request, options: MultipartOptions = {}): 
 
   function createFilePart(info: MP.PartInfo, meta: PartMeta, file: FileState): FilePart {
     const stream = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        file.controller = controller
+      },
       pull: async (controller) => {
         for (;;) {
           if (file.error) throw file.error
@@ -465,12 +471,16 @@ export function createPartStream(req: Request, options: MultipartOptions = {}): 
    * Moving on abandons whatever is left of the previous part. The stream is
    * errored, not closed: a closed stream would hand the consumer a silently
    * truncated file.
+   *
+   * Every part the consumer did not read to the end is errored, including one
+   * whose bytes had all arrived already - a small part delivered in a single
+   * chunk sits complete in the stream's queue, and letting that one through
+   * would make the contract depend on how the body happened to be split.
    */
   function discardCurrent(): void {
     const file = currentFile
     currentFile = null
     if (!file || file.discarded || file.error) return
-    if (file.finished && file.chunks.length === 0) return
 
     file.discarded = true
     liveFiles.delete(file)
