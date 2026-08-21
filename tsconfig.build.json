@@ -12,6 +12,7 @@
     { "path": "packages/auth" },
     { "path": "packages/jwt" },
     { "path": "packages/rate-limit" },
+    { "path": "packages/multipart" },
     { "path": "packages/swagger" },
     { "path": "packages/mongoose" },
     { "path": "packages/messaging" },

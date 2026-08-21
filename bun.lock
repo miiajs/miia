@@ -66,6 +66,7 @@
         "@miiajs/core": "workspace:*",
         "@miiajs/drizzle": "workspace:*",
         "@miiajs/jwt": "workspace:*",
+        "@miiajs/multipart": "workspace:*",
         "@miiajs/node-server": "workspace:*",
         "@miiajs/rate-limit": "workspace:*",
         "@miiajs/serve-static": "workspace:*",
@@ -255,6 +256,20 @@
       "peerDependencies": {
         "@miiajs/core": ">=0.5.0 <1.0.0",
         "mongoose": "^9.4.1",
+      },
+    },
+    "packages/multipart": {
+      "name": "@miiajs/multipart",
+      "version": "0.5.0",
+      "dependencies": {
+        "multipasta": "^0.2.8",
+      },
+      "devDependencies": {
+        "@miiajs/core": "workspace:*",
+        "@miiajs/node-server": "workspace:*",
+      },
+      "peerDependencies": {
+        "@miiajs/core": ">=0.5.0 <1.0.0",
       },
     },
     "packages/node-server": {
@@ -690,6 +705,8 @@
     "@miiajs/messaging-redis": ["@miiajs/messaging-redis@workspace:packages/messaging-redis"],
 
     "@miiajs/mongoose": ["@miiajs/mongoose@workspace:packages/mongoose"],
+
+    "@miiajs/multipart": ["@miiajs/multipart@workspace:packages/multipart"],
 
     "@miiajs/node-server": ["@miiajs/node-server@workspace:packages/node-server"],
 
@@ -2341,6 +2358,8 @@
 
     "muggle-string": ["muggle-string@0.4.1", "", {}, "sha512-VNTrAak/KhO2i8dqqnqnAHOa3cYBwXEZe9h+D5h/1ZqFSTEFHdM65lR7RoIqq3tBBYavsOXV84NoHXZ0AkPyqQ=="],
 
+    "multipasta": ["multipasta@0.2.8", "", {}, "sha512-ZPWuMKyv0cSO29f7hozp+k6+crZbQijV8ipMvxNxRf2SwtYGTX1ZX89Kd20VV4H9Znonx+EQn+iy1wGQsJ+b+Q=="],
+
     "nanoid": ["nanoid@3.3.12", "", { "bin": { "nanoid": "bin/nanoid.cjs" } }, "sha512-ZB9RH/39qpq5Vu6Y+NmUaFhQR6pp+M2Xt76XBnEwDaGcVAqhlvxrl3B2bKS5D3NH3QR76v3aSrKaF/Kiy7lEtQ=="],
 
     "nanotar": ["nanotar@0.3.0", "", {}, "sha512-Kv2JYYiCzt16Kt5QwAc9BFG89xfPNBx+oQL4GQXD9nLqPkZBiNaqaCWtwnbk/q7UVsTYevvM1b0UF8zmEI4pCg=="],
@@ -3134,6 +3153,8 @@
     "@manypkg/get-packages/@changesets/types": ["@changesets/types@4.1.0", "", {}, "sha512-LDQvVDv5Kb50ny2s25Fhm3d9QSZimsoUGBsUioj6MC3qbMUCuC8GPIvk/M6IvXx3lYhAs0lwWUQLb+VIEUCECw=="],
 
     "@manypkg/get-packages/fs-extra": ["fs-extra@8.1.0", "", { "dependencies": { "graceful-fs": "^4.2.0", "jsonfile": "^4.0.0", "universalify": "^0.1.0" } }, "sha512-yhlQgA6mnOJUKOsRUFsgJdQCvkKhcz8tlZG5HBQfReYZy46OwLcY+Zia0mtdHsOo9y/hP+CxMN0TU9QxoOtG4g=="],
+
+    "@miiajs/uws-server/uWebSockets.js": ["uWebSockets.js@github:uNetworking/uWebSockets.js#6249877", {}, "uNetworking-uWebSockets.js-6249877", "sha512-v3uosx395ESYX2RQyPUPbhjdRFJbSjvzcg1DKx7hzL0qcD0xuq2fgBJBEJt1i2bHwh79lJzj27/R1RUaTJmmHQ=="],
 
     "@nuxt/content/zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
 

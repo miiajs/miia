@@ -1,0 +1,62 @@
+{
+  "name": "@miiajs/multipart",
+  "version": "0.5.0",
+  "author": "Ruslan Matiushev",
+  "license": "MIT",
+  "description": "Streaming multipart/form-data for MiiaJS - backpressured part iterator, per-file and per-form limits, buffered form helper.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miiajs/miia.git",
+    "directory": "packages/multipart"
+  },
+  "homepage": "https://github.com/miiajs/miia/tree/main/packages/multipart#readme",
+  "bugs": {
+    "url": "https://github.com/miiajs/miia/issues"
+  },
+  "keywords": [
+    "miiajs",
+    "miia",
+    "multipart",
+    "form-data",
+    "file-upload",
+    "streaming",
+    "http"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22.22.1",
+    "bun": ">=1.3.11",
+    "deno": ">=2.6.1"
+  },
+  "dependencies": {
+    "multipasta": "^0.2.8"
+  },
+  "peerDependencies": {
+    "@miiajs/core": ">=0.5.0 <1.0.0"
+  },
+  "devDependencies": {
+    "@miiajs/core": "workspace:*",
+    "@miiajs/node-server": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  }
+}
