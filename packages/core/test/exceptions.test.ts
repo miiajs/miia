@@ -6,6 +6,7 @@ import {
   ForbiddenException,
   NotFoundException,
   ConflictException,
+  UnsupportedMediaTypeException,
   UnprocessableException,
   TooManyRequestsException,
   InternalServerException,
@@ -95,6 +96,16 @@ describe('Built-in exceptions', () => {
     expect(err.details).toEqual({ id: 1 })
   })
 
+  it('UnsupportedMediaTypeException → 415', () => {
+    const err = new UnsupportedMediaTypeException('Media type text/plain is not allowed', {
+      mediaType: 'text/plain',
+      allowed: ['image/png'],
+    })
+    expect(err.statusCode).toBe(415)
+    expect(err.toJSON().error).toBe('Unsupported Media Type')
+    expect(err.details).toEqual({ mediaType: 'text/plain', allowed: ['image/png'] })
+  })
+
   it('UnprocessableException → 422', () => {
     const err = new UnprocessableException()
     expect(err.statusCode).toBe(422)
@@ -121,6 +132,7 @@ describe('Built-in exceptions', () => {
       new ForbiddenException(),
       new NotFoundException(),
       new ConflictException(),
+      new UnsupportedMediaTypeException(),
       new UnprocessableException(),
       new TooManyRequestsException(),
       new InternalServerException(),

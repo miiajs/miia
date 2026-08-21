@@ -6,6 +6,7 @@ const STATUS_TEXT: Record<number, string> = {
   405: 'Method Not Allowed',
   409: 'Conflict',
   413: 'Payload Too Large',
+  415: 'Unsupported Media Type',
   422: 'Unprocessable Entity',
   429: 'Too Many Requests',
   500: 'Internal Server Error',
@@ -66,6 +67,12 @@ export class ConflictException extends HttpException {
 export class PayloadTooLargeException extends HttpException {
   constructor(message = 'Payload Too Large', details?: unknown) {
     super(413, message, details)
+  }
+}
+
+export class UnsupportedMediaTypeException extends HttpException {
+  constructor(message = 'Unsupported Media Type', details?: unknown) {
+    super(415, message, details)
   }
 }
 

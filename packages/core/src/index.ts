@@ -81,6 +81,7 @@ export {
   NotFoundException,
   ConflictException,
   PayloadTooLargeException,
+  UnsupportedMediaTypeException,
   UnprocessableException,
   TooManyRequestsException,
   InternalServerException,
