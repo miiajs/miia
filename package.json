@@ -38,7 +38,7 @@
     "@miiajs/cli": "workspace:*",
     "@types/bun": "^1.4.0",
     "@types/deno": "^2.5.0",
-    "@types/node": "^24.12.2",
+    "@types/node": "^24.13.3",
     "lefthook": "^2.1.6",
     "postgres": "^3.4.8",
     "tsx": "^4.21.0",
@@ -46,7 +46,7 @@
     "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.69.0"
   },
   "engines": {
-    "node": ">=22.22.1",
+    "node": ">=24.18.1",
     "bun": ">=1.4.0",
     "deno": ">=2.6.1"
   },

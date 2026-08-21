@@ -6,7 +6,7 @@ Demonstrates module configuration, schema definition, type-safe injection via `i
 
 ## Prerequisites
 
-- Bun >=1.4.0 (or Node.js >=22.22.1)
+- Bun >=1.4.0 (or Node.js >=24.18.1)
 - A running PostgreSQL instance
 - **Monorepo packages built** - run once from the repo root:
   ```sh
