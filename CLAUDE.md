@@ -23,6 +23,7 @@ packages/
   uws-server/    - uWebSockets.js HTTP server (optimized + native modes)
   auth/          - Strategy-based auth, JWT (jose), Local
   rate-limit/    - Fixed-window rate limiting: rateLimit middleware, RateLimitGuard, @RateLimit/@SkipRateLimit, pluggable stores
+  multipart/     - Streaming multipart/form-data: @Multipart, ctx.parts, ctx.form(), @ValidateForm
   drizzle/       - Drizzle ORM integration (postgres/mysql/sqlite)
   papr/          - MongoDB integration via Papr
   mongoose/      - MongoDB integration via Mongoose
@@ -35,7 +36,7 @@ examples/
   drizzle-app/   - CRUD with Drizzle + PostgreSQL
   papr-app/      - CRUD with Papr + MongoDB
   mongoose-app/  - CRUD with Mongoose + MongoDB
-  full-app/      - Full stack example using auth, drizzle, jwt, swagger, serve-static
+  full-app/      - Full stack example using auth, drizzle, jwt, swagger, serve-static, multipart
   messaging-app/ - Event-driven orders flow with @miiajs/messaging + Redis Streams transport
   uws-app/       - Minimal CRUD on @miiajs/uws-server (Node-only)
 apps/
@@ -169,6 +170,25 @@ async create(ctx: RequestContext) {
 
 **Escape hatch.** For streaming, multipart, or binary payloads, use `ctx.req.body` (ReadableStream), `ctx.req.formData()`, or `ctx.req.arrayBuffer()` directly. These are available **only before** the first `ctx.json()` / `ctx.text()` call - once the body is consumed through the helpers, the escape hatch will throw.
 
+### Multipart uploads: @miiajs/multipart
+
+`@Multipart(options?)` is the method decorator that opens a `multipart/form-data` route. It attaches two members to the context, both typed by the exported `MultipartContext` (the package does not augment `RequestContext` globally - same call as `ctx.user` in auth, annotate the handler parameter by hand):
+
+- **`ctx.parts` - streaming.** Async iterator of `FilePart | FieldPart`; a file part carries `stream` (`ReadableStream`) and `bytes()`. Backpressure is real - the source is read only when every queue the consumer can still drain is empty; how far that reaches back towards the socket is the server adapter's call and differs between them.
+- **`ctx.form<T>()` - buffered.** One pass over the whole body into `{ files: Record<string, File[]>, fields: Record<string, string> }` (repeated fields: last wins), cached per request like `ctx.json()`. `@ValidateForm(schema)` validates a **flat** object - text fields next to files under their own names, a `File` or a `File[]` - the way OpenAPI describes a multipart body, and replaces the cache, so `ctx.form<T>()` afterwards returns the schema's data. Failure -> `UnprocessableException` (422).
+
+The package writes nothing to disk and has no `node:*` import anywhere - the contract is standard web types (`ReadableStream`, `File`), so where the bytes go is the application's call; the `uploads` module in `examples/full-app` shows one local-disk path.
+
+Parsing runs on `multipasta` (a `dependency`, not a peer) behind our own Web Streams bridge; limit errors map to `PayloadTooLargeException` (413), malformed or non-`multipart/form-data` bodies to `BadRequestException` (400).
+
+Semantics to remember:
+- **Body budget resolution:** explicit `bodyLimit` -> derived `maxFileSize × maxFiles + fieldsBudget` when both are finite -> `@BodyLimit` on the method or the controller -> nothing but the adapter ceiling. The winner is written into `BODY_LIMITS`, so `@Multipart` and `@BodyLimit` on the same method fight over one slot (last decorator applied wins) - do not combine them. Whatever the route ends up with also raises `Router.adapterBodyCeiling` for the **whole app** (`max(default, all route limits)`), so a generous upload route quietly lifts the 1MB default for every other route.
+- **Decorator order does not matter:** `@Multipart` and `@ValidateForm` both call the same idempotent `ensureState()` and read options from `context.metadata` at request time, not from the closure, so whichever middleware ends up outside builds the state.
+- **One part at a time:** advancing the iterator abandons the previous part and **errors** its stream rather than closing it - a half-read upload can never look complete. Collecting parts into an array and reading them later does not work.
+- **The body is consumed once:** `@Multipart` is incompatible with `@ValidateBody` / `ctx.json()` / `ctx.text()` on the same route. A non-multipart request is rejected with 400 before the handler runs, whether or not it touches `ctx.parts`.
+- **Spec is written by hand:** `@ApiBody(schema, { contentType: 'multipart/form-data' })`. `@ValidateForm` deliberately does not write `BODY_SCHEMAS` (that is `@ApiBody`'s slot), so the spec's request body and its 422 come from `@ApiBody` alone.
+- **`allowedTypes`** gates **file** parts by media type - exact (`image/png`) or subtype wildcard (`image/*`), list and header both trimmed and lower-cased. Checked at the head of a part, before its body is read, so an oversized upload is refused on its header; failure is `UnsupportedMediaTypeException` (415) with `details: { mediaType, allowed }`. Fields are never checked - a part with no `Content-Type` is `text/plain` per RFC 7578 and would fail an image list; a file with none is compared as `application/octet-stream`. The header is client-supplied, so this is early refusal, not a content check.
+
 ### Connection info: ctx.conn, ctx.ip, trustProxy
 
 `ctx.conn: ConnInfo` (`{ remoteAddress?, remotePort?, family? }`) is the transport-level connection info - lazy, cached per request, always the honest socket address. Sources: adapter-injected `_conn` on the Request (node-server/uws-server/TestApp) or the runtime's second fetch argument (Bun `server.requestIP()`, Deno `info.remoteAddr`); empty object when unknown (e.g. serverless). `ctx.ip` is the client IP: with `new Miia({ trustProxy })` it resolves from trusted proxy headers, otherwise equals `conn.remoteAddress`. `trustProxy` forms: `true` = leftmost `x-forwarded-for` (spoofable if the proxy appends rather than overwrites - prefer your edge's vendor header), `'cf-connecting-ip'` = single trusted header, array = priority order. `TestApp.request(method, path, { ip })` fakes the IP in tests.
@@ -208,7 +228,8 @@ Semantics to remember:
 Base `HttpException(statusCode, message, details?)` with `.toJSON()`. Derived classes:
 - `BadRequestException` (400), `UnauthorizedException` (401), `ForbiddenException` (403)
 - `NotFoundException` (404), `ConflictException` (409), `PayloadTooLargeException` (413)
-- `UnprocessableException` (422), `TooManyRequestsException` (429), `InternalServerException` (500)
+- `UnsupportedMediaTypeException` (415), `UnprocessableException` (422), `TooManyRequestsException` (429)
+- `InternalServerException` (500)
 
 Unhandled errors in handlers are caught, logged, and returned as 500. An `Error` whose `name` is `'PayloadTooLargeError'` (thrown by node-server/uws-server body streams, which do not depend on core) is mapped to `PayloadTooLargeException` (413).
 

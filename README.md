@@ -80,6 +80,7 @@ await app.listen(3000)
 | `@miiajs/auth` | Strategy primitives, AuthGuard, token extractors |
 | `@miiajs/jwt` | Injectable JWT sign/verify service (jose wrapper) |
 | `@miiajs/rate-limit` | Fixed-window rate limiting: middleware, guard, decorators, pluggable stores |
+| `@miiajs/multipart` | Streaming `multipart/form-data`: part iterator, buffered form, `@ValidateForm` |
 | `@miiajs/messaging` | Decorator-driven event bus, retry, DLQ, idempotency, named buses |
 | `@miiajs/messaging-redis` | Redis Streams transport for `@miiajs/messaging` |
 | `@miiajs/drizzle` | Drizzle ORM integration (Postgres, MySQL, SQLite) |
