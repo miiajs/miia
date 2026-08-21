@@ -3,3 +3,4 @@ dist/
 *.tsbuildinfo
 .env
 public/avatars/
+public/uploads/

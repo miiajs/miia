@@ -15,6 +15,7 @@
     "@miiajs/core": "workspace:*",
     "@miiajs/drizzle": "workspace:*",
     "@miiajs/jwt": "workspace:*",
+    "@miiajs/multipart": "workspace:*",
     "@miiajs/node-server": "workspace:*",
     "@miiajs/rate-limit": "workspace:*",
     "@miiajs/serve-static": "workspace:*",

@@ -8,6 +8,7 @@ import { UsersModule } from './users/users.module.js'
 import { PostsModule } from './posts/posts.module.js'
 import { LimitsModule } from './limits/limits.module.js'
 import { CookiesModule } from './cookies/cookies.module.js'
+import { UploadsModule } from './uploads/uploads.module.js'
 import { SwaggerModule } from '@miiajs/swagger'
 import * as schema from './db.schema.js'
 import { RateLimitModule } from '@miiajs/rate-limit'
@@ -51,6 +52,7 @@ import { RateLimitModule } from '@miiajs/rate-limit'
     PostsModule,
     LimitsModule,
     CookiesModule,
+    UploadsModule,
     RateLimitModule.configure({
       limit: 5,
       window: '20s',
