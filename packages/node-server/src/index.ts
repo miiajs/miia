@@ -537,6 +537,21 @@ function sendError(nodeRes: ServerResponse, error: unknown, logger: LoggerLike):
   nodeRes.end(JSON.stringify({ statusCode: 500, error: 'Internal Server Error', message: 'Internal Server Error' }))
 }
 
+/**
+ * RFC 9112 section 9.6: a response written while the request body is still
+ * unread leaves those bytes on the socket, so the connection cannot carry
+ * another request. Node keeps advertising keep-alive and tears the socket down
+ * anyway, which strands whatever a pooled client sends next.
+ *
+ * `hasBody` is needed as well as the flags: on a GET with nothing to read
+ * `readableEnded` and `complete` are both false too.
+ */
+function closeIfBodyUnread(incoming: IncomingMessage, nodeRes: ServerResponse, hasBody: boolean): void {
+  if (!hasBody || incoming.readableEnded || incoming.destroyed) return
+  if (nodeRes.headersSent || nodeRes.closed || nodeRes.writableEnded) return
+  nodeRes.setHeader('Connection', 'close')
+}
+
 function send413(nodeRes: ServerResponse): void {
   if (nodeRes.headersSent || nodeRes.closed) return
   nodeRes.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
@@ -805,10 +820,17 @@ function createOptimizedListener(
 
       if (result instanceof Promise) {
         result.then(
-          (res) => sendResponse(nodeRes, res),
-          (err) => sendError(nodeRes, err, logger),
+          (res) => {
+            closeIfBodyUnread(nodeReq, nodeRes, hasBody)
+            sendResponse(nodeRes, res)
+          },
+          (err) => {
+            closeIfBodyUnread(nodeReq, nodeRes, hasBody)
+            sendError(nodeRes, err, logger)
+          },
         )
       } else {
+        closeIfBodyUnread(nodeReq, nodeRes, hasBody)
         sendResponse(nodeRes, result)
       }
     } catch (error) {
@@ -842,6 +864,7 @@ function createNativeListener(
       }
       const request = toWebRequest(nodeReq, port, hostname, maxBodySize)
       const response = await handler(request)
+      closeIfBodyUnread(nodeReq, nodeRes, method !== 'GET' && method !== 'HEAD')
       await sendFullResponse(nodeRes, response)
     } catch (error) {
       sendError(nodeRes, error, logger)

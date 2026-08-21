@@ -625,6 +625,48 @@ describe('node-server', () => {
     })
   })
 
+  // ── connection reuse ──────────────────────────────────────
+
+  describe('connection reuse', () => {
+    it('closes the connection when the handler left the request body unread', async () => {
+      const port = nextPort++
+      server = await serve({ port, fetch: () => new Response('ok') })
+
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: 'x'.repeat(200_000),
+      })
+      expect(res.status).toBe(200)
+      // RFC 9112 section 9.6 - unread bytes are still on the socket, so the
+      // connection cannot carry the next request.
+      expect(res.headers.connection).toBe('close')
+    })
+
+    it('keeps the connection when the handler consumed the body', async () => {
+      const port = nextPort++
+      server = await serve({
+        port,
+        fetch: async (req) => new Response(String((await req.text()).length)),
+      })
+
+      const res = await request(`http://localhost:${port}/upload`, {
+        method: 'POST',
+        body: 'x'.repeat(200_000),
+      })
+      expect(res.body).toBe('200000')
+      expect(res.headers.connection).not.toBe('close')
+    })
+
+    it('keeps the connection on a GET, which has nothing to read', async () => {
+      const port = nextPort++
+      server = await serve({ port, fetch: () => new Response('ok') })
+
+      const res = await request(`http://localhost:${port}/`)
+      expect(res.status).toBe(200)
+      expect(res.headers.connection).not.toBe('close')
+    })
+  })
+
   // ── maxBodySize ───────────────────────────────────────────
 
   describe('maxBodySize', () => {
