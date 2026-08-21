@@ -395,8 +395,9 @@ export class Miia {
     // Unregister signal listeners we added so repeated listen()+destroy() in
     // tests does not leak. Idempotent - no-op if registerShutdownHandlers
     // was never called or shutdownHooks: false.
+    const emitter: NodeJS.EventEmitter = process
     for (const { signal, listener } of this.registeredShutdownHandlers) {
-      process.off(signal, listener)
+      emitter.off(signal, listener)
     }
     this.registeredShutdownHandlers = []
     // Allow re-registration on subsequent listen() (rare reload patterns).
