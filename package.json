@@ -43,7 +43,7 @@
     "postgres": "^3.4.8",
     "tsx": "^4.21.0",
     "typescript": "^6.0.2",
-    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.68.0"
+    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.69.0"
   },
   "engines": {
     "node": ">=22.22.1",

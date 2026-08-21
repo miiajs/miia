@@ -16,7 +16,7 @@
         "postgres": "^3.4.8",
         "tsx": "^4.21.0",
         "typescript": "^6.0.2",
-        "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.68.0",
+        "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.69.0",
       },
     },
     "apps/website": {
@@ -342,12 +342,12 @@
       "name": "@miiajs/uws-server",
       "version": "0.5.0",
       "dependencies": {
-        "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.68.0",
+        "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.69.0",
       },
     },
   },
   "overrides": {
-    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.68.0",
+    "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.69.0",
   },
   "packages": {
     "@alloc/quick-lru": ["@alloc/quick-lru@5.2.0", "", {}, "sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw=="],
@@ -2926,7 +2926,7 @@
 
     "typescript": ["typescript@6.0.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-y2TvuxSZPDyQakkFRPZHKFm+KKVqIisdg9/CZwm9ftvKXLP8NRWj38/ODjNbr43SsoXqNuAisEf1GdCxqWcdBw=="],
 
-    "uWebSockets.js": ["uWebSockets.js@github:uNetworking/uWebSockets.js#6249877", {}, "uNetworking-uWebSockets.js-6249877", "sha512-v3uosx395ESYX2RQyPUPbhjdRFJbSjvzcg1DKx7hzL0qcD0xuq2fgBJBEJt1i2bHwh79lJzj27/R1RUaTJmmHQ=="],
+    "uWebSockets.js": ["uWebSockets.js@github:uNetworking/uWebSockets.js#dddd8ff", {}, "uNetworking-uWebSockets.js-dddd8ff", "sha512-fDaDQQEj+Jn8LsDXGGE629Nna1MGnRS8j9kxsaqtPHBMq3pBDIbKs2sGxk1QMWpQ78+o4F9jV/tuBZZqfanBWQ=="],
 
     "ufo": ["ufo@1.6.4", "", {}, "sha512-JFNbkD1Svwe0KvGi8GOeLcP4kAWQ609twvCdcHxq1oSL8svv39ZuSvajcD8B+5D0eL4+s1Is2D/O6KN3qcTeRA=="],
 
