@@ -6,7 +6,7 @@ Demonstrates module configuration, model registration via `defineModel()`, and t
 
 ## Prerequisites
 
-- Bun >=1.3.11 (or Node.js >=22.22.1)
+- Bun >=1.4.0 (or Node.js >=22.22.1)
 - A running MongoDB instance
 - **Monorepo packages built** - run once from the repo root:
   ```sh

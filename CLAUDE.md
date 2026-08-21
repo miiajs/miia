@@ -174,7 +174,7 @@ async create(ctx: RequestContext) {
 
 `@Multipart(options?)` is the method decorator that opens a `multipart/form-data` route. It attaches two members to the context, both typed by the exported `MultipartContext` (the package does not augment `RequestContext` globally - same call as `ctx.user` in auth, annotate the handler parameter by hand):
 
-- **`ctx.parts` - streaming.** Async iterator of `FilePart | FieldPart`; a file part carries `stream` (`ReadableStream`) and `bytes()`. Backpressure is real - the source is read only when every queue the consumer can still drain is empty; how far that reaches back towards the socket is the server adapter's call and differs between them.
+- **`ctx.parts` - streaming.** Async iterator of `FilePart | FieldPart`; a file part carries `stream` (`ReadableStream`) and `bytes()`. Backpressure is real - the source is read only when every queue the consumer can still drain is empty (reaches the socket on Bun/Deno/node-server, not on uws-server).
 - **`ctx.form<T>()` - buffered.** One pass over the whole body into `{ files: Record<string, File[]>, fields: Record<string, string> }` (repeated fields: last wins), cached per request like `ctx.json()`. `@ValidateForm(schema)` validates a **flat** object - text fields next to files under their own names, a `File` or a `File[]` - the way OpenAPI describes a multipart body, and replaces the cache, so `ctx.form<T>()` afterwards returns the schema's data. Failure -> `UnprocessableException` (422).
 
 The package writes nothing to disk and has no `node:*` import anywhere - the contract is standard web types (`ReadableStream`, `File`), so where the bytes go is the application's call; the `uploads` module in `examples/full-app` shows one local-disk path.

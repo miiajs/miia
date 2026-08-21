@@ -91,7 +91,7 @@ await app.listen(3000)
 
 ## Requirements
 
-- Node.js >= 22.22.1, Bun >= 1.3.11, or Deno >= 2.6.1
+- Node.js >= 22.22.1, Bun >= 1.4.0, or Deno >= 2.6.1
 - TypeScript >= 5.7
 
 ## Documentation

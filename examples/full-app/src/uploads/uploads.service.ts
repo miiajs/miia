@@ -63,8 +63,6 @@ export class UploadsService {
     const tmp = join(UPLOAD_DIR, `.${randomUUID()}.tmp`)
     const sink = createWriteStream(tmp)
     try {
-      // Readable.from, not Readable.fromWeb: on Bun 1.3.12 the latter never
-      // settles once the web stream errors.
       await pipeline(Readable.from(part.stream, { objectMode: false }), sink)
       await rename(tmp, target)
     } catch (error) {

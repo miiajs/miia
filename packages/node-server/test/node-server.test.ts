@@ -671,6 +671,7 @@ describe('node-server', () => {
       const res = await request(`http://localhost:${port}/upload`, {
         method: 'POST',
         body: 'x'.repeat(5000),
+        headers: { 'content-length': '5000' },
       })
       expect(res.status).toBe(413)
       expect(JSON.parse(res.body)).toEqual({
@@ -745,6 +746,7 @@ describe('node-server', () => {
       const res = await request(`http://localhost:${port}/upload`, {
         method: 'POST',
         body: 'x'.repeat(2_000_000),
+        headers: { 'content-length': '2000000' },
       })
       expect(res.status).toBe(413)
     })
@@ -765,6 +767,7 @@ describe('node-server', () => {
       const res = await request(`http://localhost:${port}/upload`, {
         method: 'POST',
         body: 'x'.repeat(5000),
+        headers: { 'content-length': '5000' },
       })
       expect(res.status).toBe(413)
       expect(handlerCalled).toBe(false)
