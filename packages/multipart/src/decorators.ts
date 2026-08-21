@@ -35,7 +35,10 @@ function metadataOf(context: ClassMethodDecoratorContext, decorator: string): Me
 }
 
 interface MultipartState {
+  /** The bridge's own iterator - what `collectForm` drains and cleanup returns. */
   parts: AsyncIterableIterator<MultipartPart>
+  /** Whether the handler walked `ctx.parts` itself. */
+  partsUsed: boolean
   form: Promise<unknown> | null
   /** Replaces the cached form, so `ctx.form<T>()` hands back validated data. */
   setForm(data: unknown): void
@@ -152,15 +155,49 @@ function createState(target: StatefulContext, options: MultipartOptions): Multip
   const parts = createPartStream(target.req, options)
   const state: MultipartState = {
     parts,
+    partsUsed: false,
     form: null,
     setForm(data) {
       state.form = Promise.resolve(data)
     },
   }
   target[MULTIPART_STATE] = state
-  target.parts = parts
-  target.form = <T = FormResult>(): Promise<T> => (state.form ??= collectForm(parts)) as Promise<T>
+  target.parts = trackParts(state)
+  target.form = <T = FormResult>(): Promise<T> => {
+    if (state.form === null && state.partsUsed) {
+      return Promise.reject(
+        new TypeError('ctx.form() cannot run after ctx.parts - the body is consumed once, in one of the two ways'),
+      )
+    }
+    return (state.form ??= collectForm(state.parts)) as Promise<T>
+  }
   return state
+}
+
+/**
+ * `ctx.parts`, wrapped so the two ways of reading the body cannot be mixed.
+ *
+ * Both read the same source, so whichever runs second finds it spent. Left
+ * alone that surfaces as an empty form or an empty loop - the shape of failure
+ * that looks like a working request with no data in it.
+ */
+function trackParts(state: MultipartState): AsyncIterableIterator<MultipartPart> {
+  const tracked: AsyncIterableIterator<MultipartPart> = {
+    [Symbol.asyncIterator]() {
+      return tracked
+    },
+    next() {
+      if (state.form !== null) {
+        return Promise.reject(
+          new TypeError('ctx.parts cannot run after ctx.form() - the body is consumed once, in one of the two ways'),
+        )
+      }
+      state.partsUsed = true
+      return state.parts.next()
+    },
+    return: () => state.parts.return?.() ?? Promise.resolve({ value: undefined, done: true as const }),
+  }
+  return tracked
 }
 
 /**

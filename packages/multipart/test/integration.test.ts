@@ -114,6 +114,100 @@ describe('@Multipart - ctx.parts', () => {
   })
 })
 
+describe('@Multipart - the two readers are exclusive', () => {
+  const body = () =>
+    buildBody('bnd', [
+      { headers: ['content-disposition: form-data; name="title"'], body: 'hello' },
+      {
+        headers: ['content-disposition: form-data; name="f"; filename="a.txt"', 'content-type: text/plain'],
+        body: 'payload',
+      },
+    ])
+
+  const post = (Ctrl: any, path: string) => {
+    const b = body()
+    return bootstrap(Ctrl).fetch(
+      new Request(`http://localhost${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'multipart/form-data; boundary=bnd', 'content-length': String(b.byteLength) },
+        body: b as Uint8Array<ArrayBuffer>,
+      }),
+    )
+  }
+
+  it('rejects ctx.form() after the handler walked ctx.parts', async () => {
+    @Controller('/upload')
+    class Ctrl {
+      @Post('/both')
+      @Multipart()
+      async both(ctx: MultipartContext) {
+        for await (const _part of ctx.parts) {
+          // drain
+        }
+        // Used to answer { files: {}, fields: {} } - an empty form that looks parsed.
+        return await ctx.form()
+      }
+    }
+
+    const res = await post(Ctrl, '/upload/both')
+    expect(res.status).toBe(500)
+  })
+
+  it('rejects ctx.parts after the handler called ctx.form()', async () => {
+    @Controller('/upload')
+    class Ctrl {
+      @Post('/both')
+      @Multipart()
+      async both(ctx: MultipartContext) {
+        await ctx.form()
+        const names: string[] = []
+        for await (const part of ctx.parts) names.push(part.name)
+        return { names }
+      }
+    }
+
+    const res = await post(Ctrl, '/upload/both')
+    expect(res.status).toBe(500)
+  })
+
+  it('still caches ctx.form() across repeated calls', async () => {
+    @Controller('/upload')
+    class Ctrl {
+      @Post('/twice')
+      @Multipart()
+      async twice(ctx: MultipartContext) {
+        const a = await ctx.form()
+        const b = await ctx.form()
+        return { same: a === b, fields: (a as any).fields }
+      }
+    }
+
+    const res = await post(Ctrl, '/upload/twice')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ same: true, fields: { title: 'hello' } })
+  })
+
+  it('lets @ValidateForm hand its data to the handler without tripping the guard', async () => {
+    const schema = {
+      safeParse: (value: any) => ({ success: true as const, data: { ...value, checked: true } }),
+    }
+
+    @Controller('/upload')
+    class Ctrl {
+      @Post('/validated')
+      @Multipart()
+      @ValidateForm(schema)
+      async validated(ctx: MultipartContext) {
+        return await ctx.form<any>()
+      }
+    }
+
+    const res = await post(Ctrl, '/upload/validated')
+    expect(res.status).toBe(200)
+    expect((await res.json()).checked).toBe(true)
+  })
+})
+
 describe('@Multipart - ctx.form()', () => {
   it('buffers files and fields, last value wins per field name', async () => {
     @Controller('/upload')
