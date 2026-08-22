@@ -17,5 +17,6 @@ export interface EnvConfig {
   label: string
   description: string
   icon: string
+  date: string
   specs: string[]
 }

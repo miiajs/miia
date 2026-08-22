@@ -80,7 +80,7 @@ function formatNum(n: number) {
           <UTabs v-model="env" :items="envTabs" variant="link" :content="false" />
         </div>
         <p class="text-center text-sm text-muted p-1">
-          {{ activeEnv.description }}
+          {{ activeEnv.description }} · measured {{ activeEnv.date }}
         </p>
       </div>
 
@@ -234,7 +234,7 @@ function formatNum(n: number) {
         <div class="rounded-xl border border-primary/20 bg-primary/5 p-6 text-center">
           <p class="text-base text-toned">
             <strong>The takeaway:</strong> MiiaJS delivers the throughput of a bare router with the architecture of a full
-            framework. In realistic API tests, it matches Elysia and outperforms Hono, Fastify, and NestJS on Bun - while
+            framework. In realistic API tests, it edges out Elysia and outperforms Hono, Fastify, and NestJS on Bun - while
             offering DI, guards, and middleware they lack or bolt on.
           </p>
         </div>
@@ -441,6 +441,7 @@ function formatNum(n: number) {
               <h4 class="font-semibold text-sm mb-2">{{ e.label }}</h4>
               <ul class="text-sm text-muted space-y-1">
                 <li v-for="spec in e.specs" :key="spec">{{ spec }}</li>
+                <li class="italic">Measured {{ e.date }}</li>
               </ul>
             </div>
           </div>
@@ -451,32 +452,29 @@ function formatNum(n: number) {
           <UTable
             :columns="[
               { accessorKey: 'framework', header: 'Framework' },
+              { accessorKey: 'version', header: 'Version' },
               { accessorKey: 'type', header: 'Type' },
               { accessorKey: 'runtimes', header: 'Runtimes' }
             ]"
             :data="[
-              { framework: 'MiiaJS', type: 'Decorator-driven, DI, guards, middleware', runtimes: 'Bun, Deno, Node (+ uWS adapter)' },
-              { framework: 'Hono', type: 'Lightweight multi-runtime router', runtimes: 'Bun, Deno, Node (+ uWS adapter)' },
-              { framework: 'Elysia', type: 'Bun-native framework', runtimes: 'Bun' },
-              { framework: 'Fastify', type: 'Plugin-based Node.js framework', runtimes: 'Bun, Node' },
-              { framework: 'NestJS+Fastify', type: 'Enterprise decorator framework', runtimes: 'Bun, Node' }
+              { framework: 'MiiaJS', version: '0.6.0', type: 'Decorator-driven, DI, guards, middleware', runtimes: 'Bun, Deno, Node (+ uWS adapter)' },
+              { framework: 'Hono', version: '4.13.3', type: 'Lightweight multi-runtime router', runtimes: 'Bun, Deno, Node (+ uWS adapter)' },
+              { framework: 'Elysia', version: '1.4.29', type: 'Bun-native framework', runtimes: 'Bun' },
+              { framework: 'Fastify', version: '5.12.1', type: 'Plugin-based Node.js framework', runtimes: 'Bun, Node' },
+              { framework: 'NestJS+Fastify', version: '11.2.1', type: 'Enterprise decorator framework', runtimes: 'Bun, Node' }
             ]"
           />
 
           <p class="text-xs text-muted mt-4 italic">
-            * Hono uWS uses the same @miiajs/uws-server adapter - the difference is pure framework overhead.
-          </p>
-
-          <p class="text-sm text-muted mt-4">
-            Last updated: June 10, 2026.
+            * Hono uWS uses the same @miiajs/uws-server adapter (uWebSockets.js 20.69.0) - the difference is pure framework overhead.
           </p>
         </section>
 
         <!-- ====== NODE.JS CALLOUT ====== -->
         <div class="rounded-xl border border-[color:var(--ui-border)] bg-[color:var(--ui-bg-muted)] p-6">
           <p class="text-base text-toned">
-            <strong>Node.js:</strong> MiiaJS with the uWS adapter outperforms Hono uWS by up to 45% and NestJS+Fastify by
-            up to 34% in realistic API tests on M1 Pro. Same transport - the difference is pure framework overhead.
+            <strong>Node.js:</strong> MiiaJS with the uWS adapter outperforms Hono uWS by up to 44% and NestJS+Fastify by
+            up to 23% in realistic API tests on M1 Pro. Same transport - the difference is pure framework overhead.
           </p>
         </div>
 

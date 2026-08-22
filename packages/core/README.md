@@ -15,7 +15,7 @@ Build structured, type-safe APIs with decorators, dependency injection, and midd
 
 ## Performance
 
-Up to **17% faster** than Hono | Up to **31% faster** than NestJS+Fastify \*
+Up to **9% faster** than Hono | Up to **33% faster** than NestJS+Fastify \*
 
 > \* Realistic API benchmarks on Bun. Results vary by runtime. [See full benchmarks →](https://miiajs.com/benchmarks)
 
