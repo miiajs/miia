@@ -120,6 +120,14 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
 
+/**
+ * A backoff level as an integer. Redis rejects a fractional `IDLE`, which any non-integral `backoffMultiplier`
+ * produces, and the horizon has to round the same way or it can land below the largest idle a park asks for.
+ */
+function backoffLevelMs(attempt: number, retry: RetryConfig): number {
+  return Math.ceil(nextBackoffMs(attempt, retry))
+}
+
 // Signatures for the Lua commands registered via ioredis defineCommand().
 // TS doesn't learn those dynamically, so we keep them as a narrow cast target.
 interface LuaCommands {
@@ -245,7 +253,7 @@ export class RedisStreamsTransport implements MessageTransport {
     // below 1 is not validated upstream. Levels stop one short of `maxAttempts` - that attempt is DLQ'd, never parked.
     let horizon = this.minIdleMs
     for (let attempt = 1; attempt < this.retry.maxAttempts; attempt++) {
-      horizon = Math.max(horizon, nextBackoffMs(attempt, this.retry))
+      horizon = Math.max(horizon, backoffLevelMs(attempt, this.retry))
     }
     if (!Number.isFinite(horizon) || horizon <= 0 || horizon > MAX_HORIZON_MS) {
       throw new Error(
@@ -661,7 +669,9 @@ export class RedisStreamsTransport implements MessageTransport {
       if (envelope.meta.lastError === undefined) {
         envelope = { ...envelope, meta: { ...envelope.meta, attempt } }
       } else {
-        attempt = envelope.meta.attempt
+        // A record replayed by hand can carry anything as `attempt`; a non-numeric one would reach `IDLE` as NaN.
+        const declared = envelope.meta.attempt
+        attempt = Number.isInteger(declared) && declared >= 1 ? declared : 1
       }
 
       let result: HandlerResult
@@ -700,7 +710,7 @@ export class RedisStreamsTransport implements MessageTransport {
       return
     }
 
-    const backoff = nextBackoffMs(attempt, this.retry)
+    const backoff = backoffLevelMs(attempt, this.retry)
     // Unreachable for a normal envelope (the horizon covers every level); it guards a DLQ envelope replayed under a
     // different retry config, whose level can exceed our horizon.
     const idle = Math.max(0, this.horizonMs - backoff)

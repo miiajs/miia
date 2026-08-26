@@ -232,6 +232,79 @@ d('RedisStreamsTransport retry', () => {
     expect(attempts).toEqual([1, 2, 3])
   })
 
+  it('honours a fractional backoff level instead of collapsing it onto the horizon', async () => {
+    const probe = new Redis(REDIS_URL!)
+    const tp = `miia-test:retry-fractional:${randomUUID()}`
+    const horizon = HORIZON_MS * 2
+    // 45 * 1.5 = 67.5, and Redis rejects a fractional `IDLE`: an unrounded park is refused and the entry ages out at
+    // the horizon instead. The attempt sequence looks identical either way, so only the gap tells them apart.
+    const t = new RedisStreamsTransport({
+      client: new Redis(REDIS_URL!),
+      retry: { backoffMs: 45, backoffMultiplier: 1.5, maxAttempts: 4 },
+      retryIntervalMs: 20,
+      minIdleMs: horizon,
+      blockMs: 100,
+    })
+    await t.onInit?.()
+
+    const stamps: number[] = []
+    try {
+      await t.subscribe(
+        tp,
+        async (e): Promise<HandlerResult> => {
+          stamps.push(Date.now())
+          if (e.meta.attempt < 3) return { status: 'nack', error: new Error('transient') }
+          return { status: 'ack' }
+        },
+        { group: 'g' },
+      )
+      await wait(50)
+
+      await t.publish(envelope(tp))
+      await waitFor(() => stamps.length === 3, 'three attempts')
+
+      // Attempt 2 -> 3 is the fractional level: it waits out its own backoff, nowhere near `minIdleMs`.
+      const gap = stamps[2]! - stamps[1]!
+      expect(gap).toBeGreaterThanOrEqual(45)
+      expect(gap).toBeLessThan(horizon / 2)
+    } finally {
+      await t.onDestroy?.()
+      try {
+        await drainKeys(probe, tp)
+      } finally {
+        await probe.quit()
+      }
+    }
+  })
+
+  it('treats a non-numeric attempt on a replayed DLQ record as the first attempt', async () => {
+    const logs = captureLogs(transport)
+    const seen: number[] = []
+    await transport.subscribe(
+      topic,
+      async (e): Promise<HandlerResult> => {
+        seen.push(e.meta.attempt)
+        if (seen.length === 1) return { status: 'nack', error: new Error('transient') }
+        return { status: 'ack' }
+      },
+      { group: 'g' },
+    )
+    await wait(50)
+
+    // `lastError` makes the transport read `attempt` off the envelope, and a record replayed by hand can carry
+    // anything there - unguarded it reaches Redis as `IDLE NaN` and the park is refused.
+    const replayed = {
+      id: randomUUID(),
+      topic,
+      payload: {},
+      meta: { timestamp: Date.now(), attempt: 'boom', lastError: 'earlier' },
+    }
+    await client.xadd(topic, '*', 'data', JSON.stringify(replayed))
+    await waitFor(() => seen.length === 2, 'the retry')
+
+    expect(logs.errors.filter((e) => e.includes('Delivery failed'))).toEqual([])
+  })
+
   it('moves message to <topic>.dlq after maxAttempts', async () => {
     const dlqReceived: MessageEnvelope[] = []
 
