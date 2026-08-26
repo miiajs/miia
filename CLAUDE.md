@@ -29,7 +29,7 @@ packages/
   mongoose/      - MongoDB integration via Mongoose
   swagger/       - OpenAPI 3.1 spec generation, Swagger UI serving
   messaging/         - Decorator-driven message bus (event-bus pattern), retry, DLQ, idempotency, named buses, W3C tracing
-  messaging-redis/   - Redis Streams transport for messaging (consumer groups, ZSET retry)
+  messaging-redis/   - Redis Streams transport for messaging (consumer groups, PEL-backed retry)
   testing/       - TestApp harness for integration tests
   cli/           - Dev CLI: dev, build, start, check, new commands
 examples/

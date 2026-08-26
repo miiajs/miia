@@ -108,11 +108,12 @@ curl -s -X POST http://localhost:3000/orders/charge \
 `FlakyPaymentHandler` throws on every attempt. Configured `maxAttempts: 2, backoffMs: 500, multiplier: 2`, so:
 
 ```
-attempt #1  → throws → ZSET retry (delay 500ms)
-attempt #2  → throws → ZSET retry (delay 1000ms)
-attempt #3  → throws → exhausted → republished to payment.charge.dlq
+attempt #1  → throws → stays pending in the group's PEL, re-parked for 500ms
+attempt #2  → throws → budget spent → XACK + XADD payment.charge.dlq
 PaymentDlqHandler [redis/dlq] payment ... exhausted retries: Payment gateway unreachable...
 ```
+
+The retry is never re-published to the stream: it waits in the pending entries list of the consumer group that read it, and the transport's housekeeping pass claims it back once its backoff has elapsed. Handler invocations equal `maxAttempts` exactly.
 
 ### 4. Inspect aggregated state
 
@@ -128,16 +129,22 @@ Returns analytics counters from `OrderAnalyticsHandler` plus the recorded DLQ fa
 docker exec -it messaging-app-redis redis-cli
 
 > KEYS *
-1) "miia:stream:order.placed"
-2) "miia:retry:payment.charge"
-3) "miia:stream:payment.charge.dlq"
+1) "order.placed"
+2) "payment.charge"
+3) "payment.charge.dlq"
 4) "messaging-app:idem:inventory:..."
 
-> XINFO STREAM miia:stream:order.placed
-> XINFO GROUPS miia:stream:order.placed     # see analytics + inventory
-> XLEN miia:stream:payment.charge.dlq       # count of dead-lettered payments
-> ZRANGE miia:retry:payment.charge 0 -1 WITHSCORES   # pending retries with delivery timestamps
+> XINFO STREAM order.placed
+> XINFO GROUPS order.placed                 # see analytics + inventory
+> XLEN payment.charge.dlq                   # count of dead-lettered payments
+
+# Retries live in the group's PEL, not in a separate key. Extended-form XPENDING
+# gives id, owning consumer, idle ms and delivery count per entry:
+> XPENDING payment.charge <group> - + 10
+> XINFO GROUPS payment.charge               # group name for the command above
 ```
+
+A parked retry shows an idle time below the transport's retry horizon and climbs toward it; when it crosses, the next housekeeping pass claims and redelivers it. The delivery count in the same row is the attempt counter.
 
 ## File layout
 

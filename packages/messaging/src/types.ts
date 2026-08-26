@@ -129,7 +129,7 @@ export const DEFAULT_RETRY: RetryConfig = {
  * - Future: NATS, RabbitMQ, Kafka
  *
  * Retry/DLQ logic lives INSIDE each transport - different brokers have
- * different primitives (Redis ZSET scheduler, RabbitMQ DLX, NATS max_deliver).
+ * different primitives (Redis Streams PEL, RabbitMQ DLX, NATS max_deliver).
  * Handlers simply return ack/nack; transport decides what to do next.
  */
 export interface MessageTransport {

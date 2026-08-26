@@ -120,7 +120,7 @@ export const On = createMethodDecorator<
  *
  * When applied to an `@On` handler, MessageBus claims an idempotency key in the
  * configured `IdempotencyStore` before invoking the handler. If the claim
- * already exists (duplicate delivery from XAUTOCLAIM, network blip, etc.),
+ * already exists (broker redelivery after a crash, network blip, etc.),
  * the handler is silently skipped and the message is acked.
  *
  * Default key is `${envelope.id}:${ClassName}.${methodName}` - per-handler
