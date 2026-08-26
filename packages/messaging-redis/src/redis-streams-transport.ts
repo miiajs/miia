@@ -21,6 +21,8 @@ import {
   DEFAULT_MIN_IDLE_MS,
   DEFAULT_RETRY_INTERVAL_MS,
   DRAIN_BATCH,
+  FAILURE_LOG_BURST,
+  FAILURE_LOG_WINDOW_MS,
   HEARTBEAT_BATCH,
   LEGACY_DRAIN_INTERVAL_MS,
   LEGACY_DRAIN_MAX_INTERVAL_MS,
@@ -80,6 +82,20 @@ interface LegacyDrain {
   intervalMs: number
   /** The drain currently in flight, if any. Never rejects. */
   running?: Promise<void>
+}
+
+/** Failure run of one housekeeping channel: an unbroken streak of failures, and what it has already been let say. */
+interface FailureRun {
+  /** The cause being suppressed right now. A different one is news, so it earns a line of its own. */
+  detail: string
+  /** Failures since the run began, whatever the cause - what the recovery line reports. */
+  count: number
+  /** Failures carrying the current `detail`, so no line ever reports one cause's streak against another. */
+  causeCount: number
+  /** Start of the current log window: both the periodic line and the burst budget refresh from here. */
+  windowStartedAt: number
+  /** Lines already emitted in this window, capped at `FAILURE_LOG_BURST`. */
+  logsInWindow: number
 }
 
 interface ActiveSub {
@@ -178,6 +194,11 @@ export class RedisStreamsTransport implements MessageTransport {
   private inFlight = new Map<string, Map<string, Map<string, string>>>()
   /** `topic -> legacy drain schedule`. One per topic, however many groups subscribe to it. */
   private legacyDrains = new Map<string, LegacyDrain>()
+  /**
+   * `channel -> current failure run`, one entry per unit that can fail on its own: each (topic, group) sweep, the
+   * heartbeat, each topic's legacy drain. Only ever read back whole, so the key doubles as the channel's log name.
+   */
+  private failures = new Map<string, FailureRun>()
 
   constructor(options: RedisStreamsTransportOptions) {
     if (!options.client && !options.url) {
@@ -264,7 +285,10 @@ export class RedisStreamsTransport implements MessageTransport {
       // Skip rather than queue: overlapping passes would only contend on the same PEL window.
       if (this.retryPass || this.stopping) return
       const pass = this.runRetryPass()
-        .catch((err) => this.logger.error('retry pass failed', String(err)))
+        .then(
+          () => this.reportSuccess('retry pass'),
+          (err) => this.reportFailure('retry pass', 'retry pass failed', String(err)),
+        )
         .finally(() => {
           if (this.retryPass === pass) this.retryPass = undefined
         })
@@ -273,7 +297,10 @@ export class RedisStreamsTransport implements MessageTransport {
     this.heartbeatTimer = setInterval(() => {
       if (this.heartbeatTick) return
       const tick = this.runHeartbeat()
-        .catch((err) => this.logger.error('heartbeat failed', String(err)))
+        .then(
+          () => this.reportSuccess('heartbeat'),
+          (err) => this.reportFailure('heartbeat', 'heartbeat failed', String(err)),
+        )
         .finally(() => {
           if (this.heartbeatTick === tick) this.heartbeatTick = undefined
         })
@@ -325,6 +352,8 @@ export class RedisStreamsTransport implements MessageTransport {
         /* swallow quit errors - connection already closing */
       })
     }
+    // Last, so a channel that recovered during the drain still gets to say so.
+    this.failures.clear()
   }
 
   /**
@@ -367,6 +396,46 @@ export class RedisStreamsTransport implements MessageTransport {
         .catch((err) => this.logger.warn(`orphan cleanup failed for ${groupName}: ${String(err)}`))
       this.logger.log(`Cleaned up orphaned broadcast group ${groupName} on ${topic}`)
     }
+  }
+
+  /**
+   * A housekeeping channel failed. The first failure of a run logs verbatim, then the channel goes quiet apart from
+   * one line per `FAILURE_LOG_WINDOW_MS` carrying the running count: a dead Redis fails every channel every tick, and
+   * the hundredth copy of one cause says nothing the first did not. A *changed* cause is a different matter - a sweep
+   * that stops saying `Connection is closed` and starts saying `NOGROUP` is news, and waiting out the window would
+   * bury it - so it skips the wait, up to `FAILURE_LOG_BURST` lines per window in case the detail never repeats.
+   */
+  private reportFailure(channel: string, message: string, detail: string): void {
+    const now = Date.now()
+    const run = this.failures.get(channel)
+    if (!run) {
+      this.failures.set(channel, { detail, count: 1, causeCount: 1, windowStartedAt: now, logsInWindow: 1 })
+      this.logger.error(message, detail)
+      return
+    }
+    run.count++
+    if (now - run.windowStartedAt >= FAILURE_LOG_WINDOW_MS) {
+      run.windowStartedAt = now
+      run.logsInWindow = 0
+    }
+    const changed = detail !== run.detail
+    // The count follows the cause, so the line a changed one prints counts that cause alone and starts at 1.
+    run.causeCount = changed ? 1 : run.causeCount + 1
+    run.detail = detail
+    // An unchanged cause is worth the window's one periodic line and nothing more; a changed one jumps that queue.
+    if (!changed && run.logsInWindow > 0) return
+    if (run.logsInWindow >= FAILURE_LOG_BURST) return
+    run.logsInWindow++
+    this.logger.error(run.causeCount > 1 ? `${message} (${run.causeCount} consecutive failures)` : message, detail)
+  }
+
+  /** A housekeeping channel worked. Ends the run, announcing it if anything was suppressed. */
+  private reportSuccess(channel: string): void {
+    const run = this.failures.get(channel)
+    if (!run) return
+    this.failures.delete(channel)
+    // Suppression is only safe because of this line: silence alone reads the same as a fix and as a worsening outage.
+    if (run.count > 1) this.logger.log(`${channel} recovered after ${run.count} consecutive failures`)
   }
 
   /** Await `work`, giving up at `deadline`. Returns false on timeout. */
@@ -462,6 +531,11 @@ export class RedisStreamsTransport implements MessageTransport {
         if (idx >= 0) {
           this.subs.splice(idx, 1)
           this.stopLegacyDrain(topic)
+          // One sweep serves every subscription on the pair, so only the last one out drops the run: leaving it would
+          // grow the map with every subscription that comes and goes, dropping it early would reset a live count.
+          if (!this.subs.some((s) => s.topic === topic && s.group === group)) {
+            this.failures.delete(`retry sweep ${topic}/${group}`)
+          }
         }
         // Sync in ioredis 5: tears the socket so each lane's in-flight BLOCK rejects and the loop exits via `aborted`.
         for (const lane of sub.lanes) lane.client.disconnect()
@@ -695,6 +769,7 @@ export class RedisStreamsTransport implements MessageTransport {
     if (--state.refs > 0) return
     if (state.timer) clearTimeout(state.timer)
     this.legacyDrains.delete(topic)
+    this.failures.delete(`legacy retry drain ${topic}`)
   }
 
   private scheduleLegacyDrain(topic: string, state: LegacyDrain): void {
@@ -717,10 +792,16 @@ export class RedisStreamsTransport implements MessageTransport {
 
   /** Never rejects: a failed migration probe must not take down the schedule or the subscribe that started it. */
   private drainLegacy(topic: string): Promise<number> {
-    return this.lua.drainRetry(topic, `${topic}:retry`, Date.now(), DRAIN_BATCH).catch((err) => {
-      this.logger.error(`legacy retry drain failed for ${topic}`, String(err))
-      return 0
-    })
+    return this.lua.drainRetry(topic, `${topic}:retry`, Date.now(), DRAIN_BATCH).then(
+      (moved) => {
+        this.reportSuccess(`legacy retry drain ${topic}`)
+        return moved
+      },
+      (err) => {
+        this.reportFailure(`legacy retry drain ${topic}`, `legacy retry drain failed for ${topic}`, String(err))
+        return 0
+      },
+    )
   }
 
   /** One housekeeping pass: a PEL sweep per subscribed (topic, group) pair. */
@@ -741,8 +822,14 @@ export class RedisStreamsTransport implements MessageTransport {
       if (this.stopping) return
       for (const sub of byGroup.values()) {
         if (this.stopping || sub.abort.signal.aborted) continue
-        await this.sweepPending(sub).catch((err) =>
-          this.logger.error(`retry sweep failed for ${topic}/${sub.group}`, String(err)),
+        await this.sweepPending(sub).then(
+          () => this.reportSuccess(`retry sweep ${topic}/${sub.group}`),
+          (err) =>
+            this.reportFailure(
+              `retry sweep ${topic}/${sub.group}`,
+              `retry sweep failed for ${topic}/${sub.group}`,
+              String(err),
+            ),
         )
       }
     }

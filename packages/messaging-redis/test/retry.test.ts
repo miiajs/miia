@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { LoggerService } from '@miiajs/core'
 import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
 import { Redis } from 'ioredis'
+import { FAILURE_LOG_BURST } from '../src/constants.js'
 import { RedisStreamsTransport, type RedisStreamsTransportOptions } from '../src/redis-streams-transport.js'
 
 const REDIS_URL = process.env.REDIS_TEST_URL
@@ -86,24 +87,100 @@ async function takeAsDeadConsumer(client: Redis, topic: string, group: string, c
 
 interface CapturedLogs {
   errors: string[]
+  /** Second argument of each `error()` call, by the same index: the cause a failure line carries. */
+  errorDetails: string[]
   warns: string[]
+  logs: string[]
 }
 
 /** `dlq: false` drops the message; the log line is the only trace it leaves, so the test has to read the logger. */
 function captureLogs(transport: RedisStreamsTransport): CapturedLogs {
-  const captured: CapturedLogs = { errors: [], warns: [] }
+  const captured: CapturedLogs = { errors: [], errorDetails: [], warns: [], logs: [] }
   const recorder: LoggerService = {
-    log: () => {},
+    log: (message) => {
+      captured.logs.push(message)
+    },
     warn: (message) => {
       captured.warns.push(message)
     },
-    error: (message) => {
+    error: (message, trace) => {
       captured.errors.push(message)
+      captured.errorDetails.push(trace ?? '')
     },
     debug: () => {},
   }
   ;(transport as unknown as { logger: LoggerService }).logger = recorder
   return captured
+}
+
+/** One failure line of a housekeeping channel: the message carries the count, the detail carries the cause. */
+interface SweepLine {
+  message: string
+  detail: string
+}
+
+/** The failure lines of `topic`'s sweep, message and detail paired back up by position. */
+function sweepLines(logs: CapturedLogs, topic: string): SweepLine[] {
+  return logs.errors
+    .map((message, i) => ({ message, detail: logs.errorDetails[i] ?? '' }))
+    .filter((line) => line.message.includes(`retry sweep failed for ${topic}/`))
+}
+
+interface SweepHarness {
+  transport: RedisStreamsTransport
+  logs: CapturedLogs
+  topic: string
+  /** Make every following sweep round trip reject with a fresh `cause()`. */
+  fail(cause: () => Error): void
+  /** Hand the real command back, so the next sweep succeeds. */
+  heal(): void
+  close(): Promise<void>
+}
+
+/**
+ * A transport ticking fast enough to make log suppression observable, with the sweep's first round trip under the
+ * test's control. Rejecting one command beats tearing the connection down: the failure lands on exactly one channel,
+ * on every tick, with no reconnect timing to make the line count flaky.
+ */
+async function sweepHarness(): Promise<SweepHarness> {
+  const probe = new Redis(REDIS_URL!)
+  const busClient = new Redis(REDIS_URL!)
+  const tp = `miia-test:retry-log:${randomUUID()}`
+  const transport = new RedisStreamsTransport({
+    client: busClient,
+    retry: { backoffMs: 50, maxAttempts: 3 },
+    retryIntervalMs: 20,
+    minIdleMs: HORIZON_MS,
+    blockMs: 100,
+  })
+  const logs = captureLogs(transport)
+  await transport.onInit?.()
+
+  const raw = busClient as unknown as { xpending: (...args: unknown[]) => Promise<unknown> }
+  const xpending = raw.xpending.bind(raw)
+  const heal = () => {
+    raw.xpending = xpending
+  }
+
+  return {
+    transport,
+    logs,
+    topic: tp,
+    fail: (cause) => {
+      raw.xpending = () => Promise.reject(cause())
+    },
+    heal,
+    close: async () => {
+      // Before the drain, so `onDestroy()` gets a working client whatever the test left behind.
+      heal()
+      await transport.onDestroy?.()
+      try {
+        await drainKeys(probe, tp)
+      } finally {
+        await Promise.all([probe.quit(), busClient.quit()])
+      }
+    },
+  }
 }
 
 d('RedisStreamsTransport retry', () => {
@@ -654,6 +731,119 @@ d('RedisStreamsTransport retry', () => {
       }
     }
   })
+
+  it('logs a failing housekeeping channel once, not once per tick, and announces its recovery', async () => {
+    const h = await sweepHarness()
+    const sweeps = () => sweepLines(h.logs, h.topic)
+    try {
+      await h.transport.subscribe(h.topic, async () => ({ status: 'ack' }), { group: 'g' })
+
+      h.fail(() => new Error('redis is gone'))
+
+      await waitFor(() => sweeps().length > 0, 'the first failure to be logged')
+      // Wording is load-bearing: log-based alerts match on it, so the first line of a run stays verbatim.
+      expect(sweeps()[0].message).toBe(`retry sweep failed for ${h.topic}/g`)
+
+      // ~50 more ticks. One line per tick is the behaviour this replaces; the window is 60s, so nothing else is due.
+      await wait(1000)
+      expect(sweeps()).toHaveLength(1)
+
+      h.heal()
+      await waitFor(() => h.logs.logs.some((m) => m.includes('recovered')), 'the recovery line')
+
+      const recovery = h.logs.logs.find((m) => m.includes('recovered'))!
+      expect(recovery).toContain(`retry sweep ${h.topic}/g`)
+      // The suppressed failures are counted rather than lost, so the line says how bad it was.
+      const failures = Number(/after (\d+) consecutive failures/.exec(recovery)?.[1])
+      expect(failures).toBeGreaterThan(10)
+      expect(sweeps()).toHaveLength(1)
+    } finally {
+      await h.close()
+    }
+  }, 15_000)
+
+  it('logs a changed cause at once instead of burying it in the run it interrupts', async () => {
+    const h = await sweepHarness()
+    const sweeps = () => sweepLines(h.logs, h.topic)
+    try {
+      await h.transport.subscribe(h.topic, async () => ({ status: 'ack' }), { group: 'g' })
+
+      h.fail(() => new Error('Connection is closed'))
+      await waitFor(() => sweeps().length > 0, 'the first failure to be logged')
+      // ~15 ticks of the one cause, all swallowed by the window.
+      await wait(300)
+      expect(sweeps()).toHaveLength(1)
+
+      // The connection came back, but the group did not: a different and actionable cause, and the window has 60s left
+      // to run - so it has to arrive on its own merit.
+      h.fail(() => new Error('NOGROUP No such key or consumer group'))
+      await waitFor(() => sweeps().length > 1, 'the changed cause to be logged')
+
+      const [first, second] = sweeps()
+      expect(first.detail).toContain('Connection is closed')
+      expect(second.detail).toContain('NOGROUP')
+      // Not conflated: the count follows the cause, so NOGROUP's first line carries none of the run before it.
+      expect(second.message).toBe(`retry sweep failed for ${h.topic}/g`)
+
+      // ~25 ticks of the new cause. Being news bought it one line, not an exemption.
+      await wait(500)
+      expect(sweeps()).toHaveLength(2)
+    } finally {
+      await h.close()
+    }
+  }, 15_000)
+
+  it('bounds a cause that never repeats to a burst per window, not a line per tick', async () => {
+    const h = await sweepHarness()
+    const sweeps = () => sweepLines(h.logs, h.topic)
+    try {
+      await h.transport.subscribe(h.topic, async () => ({ status: 'ack' }), { group: 'g' })
+
+      // Pathological detail: a fresh id on every failure, so every tick looks like a changed cause.
+      h.fail(() => new Error(`NOSCRIPT No matching script ${randomUUID()}`))
+      await waitFor(() => sweeps().length >= FAILURE_LOG_BURST, `${FAILURE_LOG_BURST} failure lines`)
+
+      // ~50 more ticks, none of them a repeat. The window still has 60s to run and its budget is spent.
+      await wait(1000)
+      expect(sweeps()).toHaveLength(FAILURE_LOG_BURST)
+      // Distinct causes throughout, so the cap is what held the count down and not some accidental deduplication.
+      expect(new Set(sweeps().map((line) => line.detail)).size).toBe(FAILURE_LOG_BURST)
+    } finally {
+      await h.close()
+    }
+  }, 15_000)
+
+  it('keeps a shared sweep run alive when one of its subscriptions unsubscribes', async () => {
+    const h = await sweepHarness()
+    const sweeps = () => sweepLines(h.logs, h.topic)
+    const handler = async (): Promise<HandlerResult> => ({ status: 'ack' })
+    try {
+      // One explicit group, two subscriptions: competing consumers served by a single sweep, and so a single run.
+      const first = await h.transport.subscribe(h.topic, handler, { group: 'shared' })
+      await h.transport.subscribe(h.topic, handler, { group: 'shared' })
+
+      h.fail(() => new Error('redis is gone'))
+      await waitFor(() => sweeps().length > 0, 'the first failure to be logged')
+      await wait(1000)
+
+      await first.unsubscribe()
+      // ~7 more ticks. The pair is still swept by the surviving subscription, so a second line here would mean the
+      // unsubscribe had cleared a run it does not own.
+      await wait(150)
+      expect(sweeps()).toHaveLength(1)
+
+      h.heal()
+      await waitFor(() => h.logs.logs.some((m) => m.includes('recovered')), 'the recovery line')
+
+      const recovery = h.logs.logs.find((m) => m.includes('recovered'))!
+      expect(recovery).toContain(`retry sweep ${h.topic}/shared`)
+      // The count spans the whole streak, both sides of the unsubscribe, rather than restarting at it.
+      const failures = Number(/after (\d+) consecutive failures/.exec(recovery)?.[1])
+      expect(failures).toBeGreaterThan(15)
+    } finally {
+      await h.close()
+    }
+  }, 15_000)
 
   it('drains a legacy retry ZSET entry and delivers it with a fresh attempt budget', async () => {
     const probe = new Redis(REDIS_URL!)
