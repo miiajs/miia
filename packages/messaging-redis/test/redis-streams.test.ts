@@ -7,6 +7,13 @@ import { RedisStreamsTransport } from '../src/redis-streams-transport.js'
 const REDIS_URL = process.env.REDIS_TEST_URL
 const d = REDIS_URL ? describe : describe.skip
 
+/**
+ * Housekeeping cadence parked far past the lifetime of a test. The tests using it measure publish latency, shutdown
+ * timing or dispatch ordering, and a retry pass landing mid-measurement would show up as noise in the numbers rather
+ * than as a failure anyone could read. Retry behaviour itself lives in `retry.test.ts`.
+ */
+const NO_HOUSEKEEPING = 60_000
+
 function envelope(topic: string, payload: unknown = {}): MessageEnvelope {
   return {
     id: randomUUID(),
@@ -36,8 +43,7 @@ d('RedisStreamsTransport', () => {
     transport = new RedisStreamsTransport({
       client,
       retry: { backoffMs: 50, maxAttempts: 3 },
-      retrySchedulerIntervalMs: 50,
-      reclaimIntervalMs: 60_000,
+      retryIntervalMs: 50,
       blockMs: 200,
     })
     await transport.onInit?.()
@@ -74,56 +80,6 @@ d('RedisStreamsTransport', () => {
     expect(received[0]?.meta.attempt).toBe(1)
   })
 
-  it('retries nacked messages with exponential backoff via the retry ZSET', async () => {
-    const attempts: number[] = []
-    await transport.subscribe(
-      topic,
-      async (e): Promise<HandlerResult> => {
-        attempts.push(e.meta.attempt)
-        if (e.meta.attempt < 3) {
-          return { status: 'nack', error: new Error('transient') }
-        }
-        return { status: 'ack' }
-      },
-      { group: 'g' },
-    )
-    await wait(50)
-
-    await transport.publish(envelope(topic))
-    // attempt delays: 50ms + 100ms = 150ms + scheduler tick (50ms each)
-    await wait(800)
-
-    expect(attempts).toEqual([1, 2, 3])
-  })
-
-  it('moves message to <topic>.dlq after maxAttempts', async () => {
-    const dlqReceived: MessageEnvelope[] = []
-
-    await transport.subscribe(
-      topic,
-      async (): Promise<HandlerResult> => ({ status: 'nack', error: new Error('permanent fail') }),
-      { group: 'g' },
-    )
-    await transport.subscribe(
-      `${topic}.dlq`,
-      async (e) => {
-        dlqReceived.push(e)
-        return { status: 'ack' }
-      },
-      { group: 'dlq' },
-    )
-    await wait(50)
-
-    await transport.publish(envelope(topic, { id: 42 }))
-    // delays: 50 + 100 + 200 = 350ms + scheduler ticks
-    await wait(1200)
-
-    expect(dlqReceived).toHaveLength(1)
-    expect(dlqReceived[0]?.topic).toBe(`${topic}.dlq`)
-    expect(dlqReceived[0]?.payload).toEqual({ id: 42 })
-    expect(dlqReceived[0]?.meta.lastError).toBe('permanent fail')
-  })
-
   it('load-balances within the same consumer group', async () => {
     // Two subscribers joining the SAME group should split deliveries.
     // Use a second transport so each has its own consumer name.
@@ -131,7 +87,7 @@ d('RedisStreamsTransport', () => {
     const other = new RedisStreamsTransport({
       client: otherClient,
       retry: { backoffMs: 50, maxAttempts: 3 },
-      retrySchedulerIntervalMs: 50,
+      retryIntervalMs: 50,
       blockMs: 200,
     })
     await other.onInit?.()
@@ -218,8 +174,7 @@ d('RedisStreamsTransport', () => {
     const t = new RedisStreamsTransport({
       client: client2,
       retry: { backoffMs: 50, maxAttempts: 3 },
-      retrySchedulerIntervalMs: 50,
-      reclaimIntervalMs: 60_000,
+      retryIntervalMs: 50,
       blockMs: 100,
       drainTimeoutMs: 2000,
     })
@@ -258,11 +213,6 @@ d('RedisStreamsTransport', () => {
     }
   })
 
-  // Idle reclaim requires simulating a dead consumer + waiting for
-  // min-idle-time. Non-trivial to write reliably in a short test - revisit
-  // when we have a real flake to reproduce.
-  it.todo('survives consumer crash via XAUTOCLAIM')
-
   describe('connection isolation', () => {
     // Each test below builds its own standalone transport because the shared
     // beforeEach uses blockMs: 200, which would mask the contention these
@@ -274,8 +224,7 @@ d('RedisStreamsTransport', () => {
       const t = new RedisStreamsTransport({
         client: c,
         retry: { backoffMs: 50, maxAttempts: 3 },
-        retrySchedulerIntervalMs: 60_000,
-        reclaimIntervalMs: 60_000,
+        retryIntervalMs: NO_HOUSEKEEPING,
         blockMs: 5000,
       })
       await t.onInit?.()
@@ -318,8 +267,7 @@ d('RedisStreamsTransport', () => {
       const t = new RedisStreamsTransport({
         client: c,
         retry: { backoffMs: 50, maxAttempts: 3 },
-        retrySchedulerIntervalMs: 60_000,
-        reclaimIntervalMs: 60_000,
+        retryIntervalMs: NO_HOUSEKEEPING,
         blockMs: 30_000,
       })
       await t.onInit?.()
@@ -353,8 +301,7 @@ d('RedisStreamsTransport', () => {
       const t = new RedisStreamsTransport({
         client: c,
         retry: { backoffMs: 50, maxAttempts: 3 },
-        retrySchedulerIntervalMs: 60_000,
-        reclaimIntervalMs: 60_000,
+        retryIntervalMs: NO_HOUSEKEEPING,
         blockMs: 30_000,
         drainTimeoutMs: 5000,
       })
@@ -430,8 +377,7 @@ d('RedisStreamsTransport', () => {
       const t = new RedisStreamsTransport({
         client: c,
         retry: { backoffMs: 50, maxAttempts: 3 },
-        retrySchedulerIntervalMs: 60_000,
-        reclaimIntervalMs: 60_000,
+        retryIntervalMs: NO_HOUSEKEEPING,
         blockMs: 100,
       })
       await t.onInit?.()
@@ -483,8 +429,7 @@ d('RedisStreamsTransport', () => {
       const t = new RedisStreamsTransport({
         client: c,
         retry: { backoffMs: 50, maxAttempts: 3 },
-        retrySchedulerIntervalMs: 60_000,
-        reclaimIntervalMs: 60_000,
+        retryIntervalMs: NO_HOUSEKEEPING,
         blockMs: 100,
       })
       await t.onInit?.()
