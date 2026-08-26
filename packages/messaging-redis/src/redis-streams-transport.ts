@@ -14,7 +14,21 @@ import {
   type Subscription,
 } from '@miiajs/messaging'
 import { Redis } from 'ioredis'
-import { DLQ_SCRIPT, DRAIN_RETRY_SCRIPT, RETRY_SCHEDULE_SCRIPT } from './retry-queue.js'
+import {
+  CONSUMER_ERROR_BACKOFF_MS,
+  DEFAULT_BLOCK_MS,
+  DEFAULT_DRAIN_TIMEOUT_MS,
+  DEFAULT_MIN_IDLE_MS,
+  DEFAULT_RETRY_INTERVAL_MS,
+  DRAIN_BATCH,
+  HEARTBEAT_BATCH,
+  LEGACY_DRAIN_INTERVAL_MS,
+  LEGACY_DRAIN_MAX_INTERVAL_MS,
+  MAX_HORIZON_MS,
+  MIN_HEARTBEAT_INTERVAL_MS,
+  PENDING_PAGE,
+} from './constants.js'
+import { DLQ_SCRIPT, DRAIN_RETRY_SCRIPT, PARK_RETRY_SCRIPT } from './retry-queue.js'
 import { parseEnvelopeFromFields } from './serialization.js'
 
 export interface RedisStreamsTransportOptions {
@@ -23,66 +37,49 @@ export interface RedisStreamsTransportOptions {
   /** Pre-built ioredis instance. Takes precedence over `url`. */
   client?: Redis
   retry?: Partial<RetryConfig>
-  /** How often to drain the retry ZSET back into the main stream. Default 1000ms. */
+  /** Housekeeping cadence, and so the granularity of backoff timing and crash detection. Default 1000ms. */
+  retryIntervalMs?: number
+  /** @deprecated Renamed to `retryIntervalMs`. Still honored, below it and above `reclaimIntervalMs`. */
   retrySchedulerIntervalMs?: number
-  /**
-   * How often the idle-reclaim timer fires. Default 30000ms.
-   *
-   * Inert in this version: the timer still ticks, but `reclaimIdle()` is a
-   * no-op, so this value changes nothing observable.
-   */
+  /** @deprecated Renamed to `retryIntervalMs`. Lowest precedence of the three; its default also dropped 30s -> 1s. */
   reclaimIntervalMs?: number
   /**
-   * Minimum idle time (ms) before a pending entry would become eligible for
-   * reclaim. Default 60000. Inert in this version, like `reclaimIntervalMs`.
+   * Floor for the retry horizon, in ms. Default 60000. The horizon is the idle threshold at which a pending entry
+   * counts as abandoned, so this is also the crash-detection latency.
    */
   minIdleMs?: number
   /** Overrides the auto-generated consumer name (`hostname:pid:rand8`). */
   consumerName?: string
   /**
-   * XREADGROUP BLOCK timeout in ms. Default 5000.
-   *
-   * Each `subscribe()` call owns its own duplicated Redis connection (see
-   * connection model on the class), so this knob does NOT affect publish or
-   * read latency for new messages - those wake the blocked subscriber as soon
-   * as data lands. It only governs:
-   *   - Idle Redis traffic: one `XREADGROUP` per subscription per `blockMs`
-   *     when the stream is empty.
-   *   - Recovery cadence after transient errors (the loop falls back through
-   *     a 1s sleep + a fresh BLOCK on the next iteration).
-   *
-   * Shutdown responsiveness is decoupled - `onDestroy()` / `unsubscribe()`
-   * call `disconnect()` on the subClient, which forces the in-flight BLOCK
-   * to throw and the loop to exit immediately regardless of `blockMs`.
+   * `XREADGROUP BLOCK` timeout in ms. Default 5000. Governs idle Redis traffic and error-recovery cadence only - new
+   * messages wake the blocked read immediately, and shutdown disconnects the socket rather than waiting it out.
    */
   blockMs?: number
   /**
-   * Max time `onDestroy()` waits for in-flight handlers to settle before
-   * forcing cleanup. Default 5000ms. Set 0 to skip drain (immediate quit).
-   *
-   * Drain happens after subClients are disconnected but before the pubClient
-   * closes, so handlers can still complete `xack` / Lua calls through the
-   * pubClient. A timed-out handler leaks, and its entry stays pending in the
-   * PEL - nothing redelivers it, since idle reclaim is disabled in this
-   * version. That makes sizing `drainTimeoutMs` to cover expected handler
-   * runtime more important, not less; it still does not need to absorb
-   * `blockMs`.
+   * Budget `onDestroy()` gives the running housekeeping pass and the in-flight handlers together, before forcing
+   * cleanup. Default 5000ms, 0 skips the drain. A timed-out handler's entry stays in the PEL and is redelivered once
+   * it crosses the horizon, so this sizes duplicate work, not loss.
    */
   drainTimeoutMs?: number
 }
 
 /**
- * One blocking `XREADGROUP` lane. Each lane owns a dedicated duplicated
- * client created via `pubClient.duplicate({ lazyConnect: true })`. Owned by
- * the transport regardless of `ownsClient` - subClients are always our
- * responsibility to close on unsubscribe / destroy.
- *
- * Batch-mode subscriptions have exactly one lane; sliding-mode subscriptions
- * have `concurrency` lanes, each running `XREADGROUP COUNT 1` in parallel.
+ * One blocking `XREADGROUP` lane on its own duplicated client, always owned by the transport regardless of
+ * `ownsClient`. Batch subscriptions get one lane, sliding subscriptions `concurrency` of them.
  */
 interface SubLane {
   client: Redis
   consumer: string
+}
+
+/** Per-topic schedule of the transitional legacy-ZSET drain. Keyed by topic: the ZSET is `${topic}:retry`. */
+interface LegacyDrain {
+  /** Live subscriptions on the topic - the schedule stops when the last one unsubscribes. */
+  refs: number
+  timer?: ReturnType<typeof setTimeout>
+  intervalMs: number
+  /** The drain currently in flight, if any. Never rejects. */
+  running?: Promise<void>
 }
 
 interface ActiveSub {
@@ -90,11 +87,7 @@ interface ActiveSub {
   group: string
   mode: DispatchMode
   concurrency: number
-  /**
-   * True if the group name encodes per-process suffix (`@On({ broadcast: true })`).
-   * Triggers orphan cleanup on subscribe (cross-restart recovery) and XGROUP DESTROY
-   * on shutdown so per-process groups don't leak in Redis state.
-   */
+  /** Group name carries a per-process suffix: triggers orphan cleanup on subscribe and `XGROUP DESTROY` on shutdown. */
   isBroadcast: boolean
   handler: (envelope: MessageEnvelope) => Promise<HandlerResult>
   abort: AbortController
@@ -102,6 +95,10 @@ interface ActiveSub {
 }
 
 type StreamReadResult = Array<[string, Array<[string, string[]]>]>
+/** `XPENDING` extended-form row: id, consumer, idle ms, delivery count. */
+type PendingEntry = [string, string, number, number]
+/** `XCLAIM` reply row. Redis < 7 returns `null` for an entry trimmed while pending. */
+type ClaimedEntry = [string, string[]] | null
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -110,101 +107,40 @@ function escapeRegex(s: string): string {
 // Signatures for the Lua commands registered via ioredis defineCommand().
 // TS doesn't learn those dynamically, so we keep them as a narrow cast target.
 interface LuaCommands {
-  retrySchedule(
-    streamKey: string,
-    retryKey: string,
-    group: string,
-    entryId: string,
-    retryAtMs: number,
-    envelopeJson: string,
-  ): Promise<number>
+  parkRetry(streamKey: string, group: string, entryId: string, consumer: string, idleMs: number): Promise<number>
   drainRetry(streamKey: string, retryKey: string, nowMs: number, batchSize: number): Promise<number>
   moveToDlq(streamKey: string, dlqKey: string, group: string, entryId: string, envelopeJson: string): Promise<number>
 }
 
+// ioredis 5 types don't cover `XPENDING`'s extended form or variadic ids in
+// front of `IDLE` / `JUSTID`, so both go through an untyped view.
+interface RawCommands {
+  xpending(...args: unknown[]): Promise<unknown>
+  xclaim(...args: unknown[]): Promise<unknown>
+}
+
 /**
- * Redis Streams transport for `@miiajs/messaging`.
+ * Redis Streams transport for `@miiajs/messaging`. `publish()` is `XADD`; `subscribe()` joins a consumer group and
+ * reads it with `XREADGROUP ... BLOCK`. Four moving parts:
  *
- * Semantics:
- * - `publish()` → `XADD <topic> * data <envelope JSON>`
- * - `subscribe()` creates/joins a consumer group, spawns a loop that reads
- *   with `XREADGROUP ... BLOCK 5000 ... COUNT <concurrency>`
- * - On nack:
- *     - If `attempt < maxAttempts`: atomic ack + ZADD to `${topic}:retry`
- *       with score = `now + nextBackoffMs()`. A background scheduler drains
- *       due entries back into the main stream every `retrySchedulerIntervalMs`.
- *     - Otherwise: atomic ack + XADD to `${topic}.dlq` with `lastError`
- *       recorded in `meta.lastError`.
- * - Crash recovery is NOT implemented in this version. Entries left pending
- *   by a dead consumer stay in the PEL until something else claims them; the
- *   `reclaimIntervalMs` timer still ticks but `reclaimIdle()` does nothing.
+ * - **The PEL is the retry queue.** A nack acks nothing and re-publishes nothing: the entry stays pending in its own
+ *   group and is re-parked with `XCLAIM ... IDLE <horizon - backoff> JUSTID`, so it resurfaces one backoff later and
+ *   only for that group. Exhaustion is a gated `XACK` plus an `XADD` to `${topic}.dlq`.
+ * - **Housekeeping**, every `retryIntervalMs` per (topic, group): `XPENDING ... IDLE <horizon>`, then claim and
+ *   redeliver. A retry whose backoff elapsed and an entry whose consumer died are the same thing here, so crash
+ *   recovery needs no branch of its own.
+ * - **Heartbeat**, every `horizon / 2`: `XCLAIM ... IDLE 0 JUSTID` over the entries this process is still handling, so
+ *   a slow handler does not have to fit inside the horizon. Same stalled-job caveat as BullMQ's `lockRenewTime` - a
+ *   handler that blocks the event loop past `horizon / 2` can still lose its entry.
+ * - **Connections**: one publisher client for `XADD` / `XACK` / Lua / housekeeping, plus one per lane, so a blocking
+ *   `XREADGROUP` never queues a publish behind it.
  *
- * Lua scripts are registered via ioredis `defineCommand()` so they execute
- * server-side with SHA caching (EVALSHA fast path).
+ * Attempt counter of record is the PEL delivery count, so it survives the process and a SIGKILL mid-handler costs an
+ * attempt. Lua scripts run via ioredis `defineCommand()` (EVALSHA fast path). Requires Redis 6.2+ (`XPENDING ... IDLE`,
+ * exclusive `(id` cursor).
  *
- * ## Connection model
- *
- * The transport keeps **one publisher client** (`this.client`) that handles
- * `XADD`, `XACK`, all Lua commands, `XGROUP CREATE`, and the retry-drain
- * housekeeping. Each `subscribe()` call additionally creates its **own
- * duplicated client** via `this.client.duplicate({ lazyConnect: true })`
- * and runs its blocking `XREADGROUP` loop on it.
- *
- * This isolates publishing and Lua-driven retry/DLQ paths from the latency
- * floor of `BLOCK <ms>`: ioredis serializes commands on a single TCP socket,
- * so sharing the publishing client with blocking subscribers would queue
- * every `XADD` behind the in-flight BLOCK. Per-subscribe duplicates make
- * publish latency constant in subscriber count, equal to network RTT.
- *
- * Connection count: `1 (publisher) + Σ handlers × max(1, sliding lane count)`.
- *   - batch handler: +1 connection.
- *   - sliding handler with `concurrency=N`: +N connections.
- *
- * Migration note: prior to handler-per-subscription, multiple `@On` handlers
- * sharing `(topic, group)` were collapsed into one subscription. Now each
- * `@On` is its own subscription, so connection count grows from "one per
- * (topic,group) bucket" to "one per handler × sliding lanes" - trading
- * bandwidth for delivery isolation. A slow/throwing handler no longer blocks
- * or duplicates work for sibling handlers.
- *
- * Cost warning: combining bus-default sliding mode with many handlers is
- * multiplicative. Example: 10 handlers + bus
- * `dispatch: { mode: 'sliding', concurrency: 4 }` = 41 connections per
- * replica (1 publisher + 10 × 4 lanes). On managed Redis (Upstash, Redis
- * Cloud) this can hit tier limits or bump billing. Recommendation: leave
- * bus default at `batch`, opt into `mode: 'sliding'` on individual handlers
- * with variable runtime.
- *
- * Idempotency stores from `@miiajs/messaging-redis` keep their own client
- * and add to the count separately.
- *
- * ## Dispatch modes
- *
- * - `'batch'` (default): single `XREADGROUP COUNT=concurrency` loop on one
- *   duplicated client; current behavior. Best for high-throughput uniform
- *   workloads.
- * - `'sliding'`: spawns `concurrency` parallel lanes, each on its own
- *   duplicated client running `XREADGROUP COUNT 1`. Lane consumer names are
- *   suffixed `:laneN` for diagnosability in `XINFO CONSUMERS`. Best when
- *   handler runtimes vary (no head-of-line blocking).
- *
- * ## Broadcast group lifecycle
- *
- * Handlers with `broadcast: true` derive their consumer group as
- * `<base>__<hostname>_<pid>`. On graceful shutdown (`onDestroy`), the
- * transport runs `XGROUP DESTROY` on those groups so they don't leak.
- * For ungraceful exits (process crash), the next process to subscribe
- * with broadcast on the same hostname scans `XINFO GROUPS` and destroys
- * any matching `<base>__<thishost>_<otherpid>` groups - cleanup happens
- * automatically on first restart.
- *
- * SubClients are owned by the transport regardless of `ownsClient` - the
- * `ownsClient` flag only controls the lifecycle of the user-supplied parent.
- * Duplicates are always created and closed by us.
- *
- * Lua commands are registered per-instance in ioredis (via `defineCommand`).
- * SubClients do NOT inherit that registration, which is fine: subClients
- * only run `XREADGROUP`, never Lua.
+ * Dispatch modes, connection budgeting, stream retention, and operational caveats:
+ * https://miiajs.com/docs/packages/messaging/redis
  */
 export class RedisStreamsTransport implements MessageTransport {
   readonly supportedModes = ['batch', 'sliding'] as const satisfies readonly DispatchMode[]
@@ -216,16 +152,32 @@ export class RedisStreamsTransport implements MessageTransport {
   private ownsClient: boolean
   private retry: RetryConfig
   private subs: ActiveSub[] = []
-  private schedulerTimer?: ReturnType<typeof setInterval>
-  private reclaimTimer?: ReturnType<typeof setInterval>
+  private retryTimer?: ReturnType<typeof setInterval>
+  private heartbeatTimer?: ReturnType<typeof setInterval>
+  /** The housekeeping pass currently running, if any - passes never overlap. */
+  private retryPass?: Promise<void>
+  /** The heartbeat currently in flight, if any. Never rejects. */
+  private heartbeatTick?: Promise<void>
+  private stopping = false
   private logger = new Logger('RedisStreamsTransport')
   private readonly consumerName: string
-  private readonly retrySchedulerIntervalMs: number
-  private readonly reclaimIntervalMs: number
+  private readonly retryIntervalMs: number
+  /** Cadence the legacy drain falls back to while entries are still moving. Never slower than its own base. */
+  private readonly legacyDrainFastMs: number
   private readonly minIdleMs: number
+  private readonly horizonMs: number
+  private readonly heartbeatIntervalMs: number
   private readonly blockMs: number
   private readonly drainTimeoutMs: number
   private pendingDeliveries = new Set<Promise<void>>()
+  /**
+   * `topic -> group -> entry id -> owning consumer`. Keeps housekeeping off entries we are still handling, and batches
+   * the heartbeat per consumer. Nested rather than a composite key because topics and derived group names both
+   * contain colons.
+   */
+  private inFlight = new Map<string, Map<string, Map<string, string>>>()
+  /** `topic -> legacy drain schedule`. One per topic, however many groups subscribe to it. */
+  private legacyDrains = new Map<string, LegacyDrain>()
 
   constructor(options: RedisStreamsTransportOptions) {
     if (!options.client && !options.url) {
@@ -243,22 +195,54 @@ export class RedisStreamsTransport implements MessageTransport {
     }
     this.retry = { ...DEFAULT_RETRY, ...options.retry }
     this.consumerName = options.consumerName ?? `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`
-    this.retrySchedulerIntervalMs = options.retrySchedulerIntervalMs ?? 1000
-    this.reclaimIntervalMs = options.reclaimIntervalMs ?? 30000
-    this.minIdleMs = options.minIdleMs ?? 60000
-    this.blockMs = options.blockMs ?? 5000
-    this.drainTimeoutMs = options.drainTimeoutMs ?? 5000
+    this.retryIntervalMs = this.resolveRetryInterval(options)
+    this.legacyDrainFastMs = Math.min(this.retryIntervalMs, LEGACY_DRAIN_INTERVAL_MS)
+    this.minIdleMs = options.minIdleMs ?? DEFAULT_MIN_IDLE_MS
+    this.horizonMs = this.resolveHorizon()
+    this.heartbeatIntervalMs = Math.max(MIN_HEARTBEAT_INTERVAL_MS, Math.floor(this.horizonMs / 2))
+    this.blockMs = options.blockMs ?? DEFAULT_BLOCK_MS
+    this.drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS
 
     this.registerLuaCommands()
   }
 
+  private resolveRetryInterval(options: RedisStreamsTransportOptions): number {
+    const deprecated = options.retrySchedulerIntervalMs ?? options.reclaimIntervalMs
+    if (deprecated !== undefined) {
+      this.logger.warn(
+        '`retrySchedulerIntervalMs` / `reclaimIntervalMs` are deprecated - retry scheduling and idle reclaim are ' +
+          'one pass now. Use `retryIntervalMs`. Precedence: retryIntervalMs > retrySchedulerIntervalMs > ' +
+          'reclaimIntervalMs.',
+      )
+    }
+    return options.retryIntervalMs ?? deprecated ?? DEFAULT_RETRY_INTERVAL_MS
+  }
+
+  private resolveHorizon(): number {
+    // A backoff is expressed as `IDLE horizon - backoff`, so the horizon must cover every level or Redis clamps the
+    // deadline to `now` and the level silently collapses. `max()` over all levels, not the last: `backoffMultiplier`
+    // below 1 is not validated upstream. Levels stop one short of `maxAttempts` - that attempt is DLQ'd, never parked.
+    let horizon = this.minIdleMs
+    for (let attempt = 1; attempt < this.retry.maxAttempts; attempt++) {
+      horizon = Math.max(horizon, nextBackoffMs(attempt, this.retry))
+    }
+    if (!Number.isFinite(horizon) || horizon <= 0 || horizon > MAX_HORIZON_MS) {
+      throw new Error(
+        `[messaging-redis] Retry horizon ${horizon}ms is outside (0, ${MAX_HORIZON_MS}ms]. It is the max of ` +
+          '`minIdleMs` and every backoff level; Redis accepts an out-of-range IDLE without complaint and parks the ' +
+          'entry forever, so this fails at startup instead. Lower `retry.backoffMs` / `retry.backoffMultiplier` / ' +
+          '`retry.maxAttempts` or `minIdleMs`.',
+      )
+    }
+    return Math.ceil(horizon)
+  }
+
   private registerLuaCommands(): void {
-    // defineCommand is dynamic - each call adds a method on the client instance.
-    // TypeScript types in ioredis don't cover dynamic commands, so cast.
+    // defineCommand adds methods on the client instance dynamically; ioredis types don't cover them.
     const c = this.client as unknown as {
       defineCommand: (name: string, options: { numberOfKeys: number; lua: string }) => void
     }
-    c.defineCommand('retrySchedule', { numberOfKeys: 2, lua: RETRY_SCHEDULE_SCRIPT })
+    c.defineCommand('parkRetry', { numberOfKeys: 1, lua: PARK_RETRY_SCRIPT })
     c.defineCommand('drainRetry', { numberOfKeys: 2, lua: DRAIN_RETRY_SCRIPT })
     c.defineCommand('moveToDlq', { numberOfKeys: 2, lua: DLQ_SCRIPT })
   }
@@ -267,40 +251,67 @@ export class RedisStreamsTransport implements MessageTransport {
     return this.client as unknown as LuaCommands
   }
 
+  private get raw(): RawCommands {
+    return this.client as unknown as RawCommands
+  }
+
   async onInit(): Promise<void> {
-    // Only manage connection state when the transport constructed the client.
-    // If the user provided a pre-built Redis instance, their code owns its
-    // lifecycle - we don't call connect() or quit() on it.
+    // A user-supplied client's lifecycle belongs to the user - never connect or quit it.
     if (this.ownsClient && this.client.status !== 'ready') {
       await this.client.connect()
     }
-    this.schedulerTimer = setInterval(() => {
-      this.drainRetryZset().catch((err) => this.logger.error('retry drain failed', String(err)))
-    }, this.retrySchedulerIntervalMs)
-    this.reclaimTimer = setInterval(() => {
-      this.reclaimIdle().catch((err) => this.logger.error('idle reclaim failed', String(err)))
-    }, this.reclaimIntervalMs)
+    this.retryTimer = setInterval(() => {
+      // Skip rather than queue: overlapping passes would only contend on the same PEL window.
+      if (this.retryPass || this.stopping) return
+      const pass = this.runRetryPass()
+        .catch((err) => this.logger.error('retry pass failed', String(err)))
+        .finally(() => {
+          if (this.retryPass === pass) this.retryPass = undefined
+        })
+      this.retryPass = pass
+    }, this.retryIntervalMs)
+    this.heartbeatTimer = setInterval(() => {
+      if (this.heartbeatTick) return
+      const tick = this.runHeartbeat()
+        .catch((err) => this.logger.error('heartbeat failed', String(err)))
+        .finally(() => {
+          if (this.heartbeatTick === tick) this.heartbeatTick = undefined
+        })
+      this.heartbeatTick = tick
+    }, this.heartbeatIntervalMs)
   }
 
   async onDestroy(): Promise<void> {
-    if (this.schedulerTimer) clearInterval(this.schedulerTimer)
-    if (this.reclaimTimer) clearInterval(this.reclaimTimer)
+    this.stopping = true
+    if (this.retryTimer) clearInterval(this.retryTimer)
+    const drains = [...this.legacyDrains.values()]
+    this.legacyDrains.clear()
+    for (const state of drains) if (state.timer) clearTimeout(state.timer)
 
-    // Snapshot before clearing - we still need each sub's lane clients below
-    // to tear their blocking sockets. Order:
-    //   1. abort first so the catch in runConsumerLoop sees aborted=true
-    //   2. disconnect each lane to actually break the BLOCK
-    //   3. drain in-flight handlers (their XACK / Lua calls go through the
-    //      still-alive pubClient on existing groups)
-    //   4. XGROUP DESTROY for broadcast subs (after drain to avoid NOGROUP
-    //      on pending acks; before pubClient.quit because DESTROY uses it)
-    //   5. quit pubClient
+    // Snapshot before clearing - the lane clients are still needed below. Order matters: abort so the loop's catch
+    // sees it, disconnect to break the in-flight BLOCK, drain the running pass and its handlers on ONE budget (their
+    // XACK / Lua still go through the live pubClient), stop the heartbeat only after that drain so entries of handlers
+    // still finishing stay invisible to other replicas, then XGROUP DESTROY broadcast groups before the quit they need.
     const subsSnapshot = this.subs
     this.subs = []
     for (const sub of subsSnapshot) sub.abort.abort()
     for (const sub of subsSnapshot) for (const lane of sub.lanes) lane.client.disconnect()
 
-    await this.waitForDrain()
+    const deadline = Date.now() + this.drainTimeoutMs
+    if (this.drainTimeoutMs > 0) {
+      if (this.retryPass && !(await this.awaitUntil(this.retryPass, deadline))) {
+        this.logger.warn('Drain timeout: housekeeping pass still running')
+      }
+      // Legacy drains are a round trip each and share the same budget - a quit under one only logs noise.
+      const running = drains.map((state) => state.running).filter((run) => run !== undefined)
+      if (running.length > 0) await this.awaitUntil(Promise.all(running), deadline)
+      await this.waitForDrain(deadline)
+    }
+
+    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
+    // Only XCLAIM round trips, but `maxRetriesPerRequest: null` lets one queue forever on a wedged
+    // connection, so it shares the drain ceiling rather than making shutdown unbounded.
+    if (this.heartbeatTick) await this.awaitUntil(this.heartbeatTick, deadline)
 
     for (const sub of subsSnapshot) {
       if (!sub.isBroadcast) continue
@@ -317,22 +328,16 @@ export class RedisStreamsTransport implements MessageTransport {
   }
 
   /**
-   * Destroy orphaned broadcast groups from previous incarnations of this
-   * process on the same host. Called from `subscribe()` when subscribing
-   * with a broadcast group, before XGROUP CREATE.
-   *
-   * Matching strategy: anchor by current `hostname()` and `process.pid` to
-   * derive the suffix slice deterministically. Hostnames may contain
-   * underscores (e.g. `node_worker_3`, `pod_abc_xyz_42`); a greedy regex
-   * split would mis-segment them and risk destroying unrelated groups.
+   * Destroy broadcast groups left behind by previous incarnations of this process on this host. The suffix slice is
+   * anchored on the current `hostname()` and pid rather than split greedily, because hostnames may themselves contain
+   * underscores (`pod_abc_xyz_42`) and a mis-segmented match would destroy unrelated groups.
    */
   private async cleanupBroadcastOrphans(topic: string, currentGroup: string): Promise<void> {
     const host = hostname()
     const myPid = String(process.pid)
     const suffix = `__${host}_${myPid}`
     if (!currentGroup.endsWith(suffix)) {
-      // Defensive: currentGroup wasn't formed by our broadcast derivation,
-      // skip cleanup rather than guess.
+      // Not formed by our broadcast derivation - skip rather than guess.
       return
     }
     const prefix = currentGroup.slice(0, -suffix.length)
@@ -357,7 +362,6 @@ export class RedisStreamsTransport implements MessageTransport {
       const groupName = String(groupInfo[1])
       if (groupName === currentGroup) continue
       if (!orphanPattern.test(groupName)) continue
-      // Same hostname, different pid → orphaned by previous incarnation.
       await this.client
         .xgroup('DESTROY', topic, groupName)
         .catch((err) => this.logger.warn(`orphan cleanup failed for ${groupName}: ${String(err)}`))
@@ -365,22 +369,30 @@ export class RedisStreamsTransport implements MessageTransport {
     }
   }
 
-  private async waitForDrain(): Promise<void> {
-    if (this.drainTimeoutMs <= 0 || this.pendingDeliveries.size === 0) return
-
-    const drainPromise = Promise.allSettled([...this.pendingDeliveries])
+  /** Await `work`, giving up at `deadline`. Returns false on timeout. */
+  private async awaitUntil(work: Promise<unknown>, deadline: number): Promise<boolean> {
+    const remaining = deadline - Date.now()
+    if (remaining <= 0) return false
     let timer: ReturnType<typeof setTimeout> | null = null
-    const timeoutPromise = new Promise<'timeout'>((r) => {
-      timer = setTimeout(() => r('timeout'), this.drainTimeoutMs)
+    const timeout = new Promise<'timeout'>((r) => {
+      timer = setTimeout(() => r('timeout'), remaining)
     })
-
     try {
-      const result = await Promise.race([drainPromise.then(() => 'drained' as const), timeoutPromise])
-      if (result === 'timeout') {
-        this.logger.warn(`Drain timeout: ${this.pendingDeliveries.size} handler(s) still in flight`)
-      }
+      const settled = work.then(
+        () => 'done' as const,
+        () => 'done' as const,
+      )
+      return (await Promise.race([settled, timeout])) === 'done'
     } finally {
       if (timer) clearTimeout(timer)
+    }
+  }
+
+  private async waitForDrain(deadline: number): Promise<void> {
+    if (this.pendingDeliveries.size === 0) return
+    const drained = await this.awaitUntil(Promise.all([...this.pendingDeliveries]), deadline)
+    if (!drained) {
+      this.logger.warn(`Drain timeout: ${this.pendingDeliveries.size} handler(s) still in flight`)
     }
   }
 
@@ -395,16 +407,10 @@ export class RedisStreamsTransport implements MessageTransport {
   ): Promise<Subscription> {
     const group = options.group ?? 'default'
     const concurrency = options.concurrency ?? 1
-    // Defensive default - the bus normally resolves and validates `mode`
-    // upstream, but direct callers (or transports under test) may omit it.
+    // Defensive default - the bus resolves and validates `mode` upstream, but direct callers may omit it.
     const mode: DispatchMode = options.mode ?? this.defaultMode
     const isBroadcast = options.broadcast === true
 
-    // Broadcast handlers derive group as `<base>__<host>_<pid>`. Each restart
-    // of the process produces a new group (different pid), and the previous
-    // incarnation's group is left orphaned in Redis. Scan and destroy
-    // matching groups from prior pids on the same host before we create the
-    // current one.
     if (isBroadcast) {
       await this.cleanupBroadcastOrphans(topic, group)
     }
@@ -416,12 +422,9 @@ export class RedisStreamsTransport implements MessageTransport {
       if (!String(err).includes('BUSYGROUP')) throw err
     }
 
-    // Lane fan-out:
-    //   batch  - 1 lane that reads `XREADGROUP COUNT=concurrency` (current
-    //            behavior; head-of-line within a batch).
-    //   sliding - `concurrency` lanes, each `COUNT=1`. Each lane gets its own
-    //            duplicated client and a unique `:laneN` consumer name so
-    //            Redis distributes pending entries across them naturally.
+    // Lane fan-out: batch reads `COUNT=concurrency` on one lane (head-of-line within the batch), sliding spawns
+    // `concurrency` lanes of `COUNT=1`, each with its own client and `:laneN` consumer name so Redis spreads entries.
+    // Every lane is a connection, so sliding mode multiplies the transport's socket budget by `concurrency`.
     const laneCount = mode === 'sliding' ? concurrency : 1
     const perLaneCount = mode === 'sliding' ? 1 : concurrency
 
@@ -429,8 +432,7 @@ export class RedisStreamsTransport implements MessageTransport {
     try {
       for (let i = 0; i < laneCount; i++) {
         const consumer = mode === 'sliding' ? `${this.consumerName}:lane${i}` : this.consumerName
-        // lazyConnect override: we control connect lifecycle even when the
-        // parent was eagerly connected (typical for user-supplied `client`).
+        // lazyConnect override: we own the connect lifecycle even when the parent was eagerly connected.
         const client = this.client.duplicate({ lazyConnect: true })
         await client.connect()
         lanes.push({ client, consumer })
@@ -441,10 +443,11 @@ export class RedisStreamsTransport implements MessageTransport {
       throw err
     }
 
+    await this.startLegacyDrain(topic)
+
     const abort = new AbortController()
     const sub: ActiveSub = { topic, group, mode, concurrency, isBroadcast, handler, abort, lanes }
     this.subs.push(sub)
-    // Fire and forget per lane - each runs until aborted.
     for (const [i, lane] of lanes.entries()) {
       this.runConsumerLoop(sub, lane, perLaneCount, i).catch((err) => {
         this.logger.error(`Consumer loop ${topic} lane ${i} terminated`, String(err))
@@ -454,11 +457,13 @@ export class RedisStreamsTransport implements MessageTransport {
     return {
       unsubscribe: async () => {
         abort.abort()
+        // Release the drain ref only on the first call - `unsubscribe()` is idempotent by contract.
         const idx = this.subs.indexOf(sub)
-        if (idx >= 0) this.subs.splice(idx, 1)
-        // disconnect() is sync in ioredis 5; tears the socket so each lane's
-        // in-flight BLOCK rejects with "Connection is closed" and the loop
-        // exits via the existing aborted branch.
+        if (idx >= 0) {
+          this.subs.splice(idx, 1)
+          this.stopLegacyDrain(topic)
+        }
+        // Sync in ioredis 5: tears the socket so each lane's in-flight BLOCK rejects and the loop exits via `aborted`.
         for (const lane of sub.lanes) lane.client.disconnect()
       },
     }
@@ -467,8 +472,6 @@ export class RedisStreamsTransport implements MessageTransport {
   private async runConsumerLoop(sub: ActiveSub, lane: SubLane, perLaneCount: number, laneIndex: number): Promise<void> {
     while (!sub.abort.signal.aborted) {
       try {
-        // XREADGROUP runs on the per-lane client so it cannot block
-        // publishes / Lua / XACK on the shared pubClient.
         const result = (await lane.client.xreadgroup(
           'GROUP',
           sub.group,
@@ -485,33 +488,21 @@ export class RedisStreamsTransport implements MessageTransport {
         if (!result || sub.abort.signal.aborted) continue
 
         const messages = result[0]?.[1] ?? []
-        // In sliding mode `messages.length` is at most 1, so the inner
-        // allSettled is degenerate; in batch mode it's the head-of-line
-        // barrier we explicitly opt into.
+        // `>` only yields entries never delivered to this group, so the delivery count is 1 and so is the attempt.
         await Promise.allSettled(
-          messages.map((msg) => {
-            const p = this.processMessage(sub, msg)
-            this.pendingDeliveries.add(p)
-            p.finally(() => this.pendingDeliveries.delete(p))
-            return p
-          }),
+          messages.map((msg) => this.trackDelivery(this.processMessage(sub, msg, lane.consumer, 1))),
         )
       } catch (err) {
         if (sub.abort.signal.aborted) break
 
-        // NOGROUP means the stream or consumer group was deleted externally
-        // (e.g. during test cleanup or operator intervention). Treat as a
-        // graceful shutdown of this lane - retrying would just spam errors
-        // against a non-existent group.
+        // Stream or group deleted externally: shut the lane down instead of spamming a group that no longer exists.
         if (String(err).includes('NOGROUP')) {
           this.logger.warn(`Stream/group gone for ${sub.topic} lane ${laneIndex}, exiting consumer loop`)
           break
         }
 
         this.logger.error(`Consumer loop error for ${sub.topic} lane ${laneIndex}`, String(err))
-        // Abortable sleep - so tests that tear down during backoff don't
-        // wait the full 1000ms before the loop exits.
-        await this.abortableSleep(1000, sub.abort.signal)
+        await this.abortableSleep(CONSUMER_ERROR_BACKOFF_MS, sub.abort.signal)
       }
     }
   }
@@ -532,80 +523,350 @@ export class RedisStreamsTransport implements MessageTransport {
     })
   }
 
-  private async processMessage(sub: ActiveSub, [id, fields]: [string, string[]]): Promise<void> {
-    let envelope: MessageEnvelope
-    try {
-      envelope = parseEnvelopeFromFields(fields)
-    } catch (err) {
-      this.logger.error(`Failed to parse stream entry ${id}`, String(err))
-      // Drop unparseable entries - no point retrying corrupt data.
-      await this.client.xack(sub.topic, sub.group, id)
-      return
-    }
-
-    let result: HandlerResult
-    try {
-      result = await sub.handler(envelope)
-    } catch (err) {
-      result = {
-        status: 'nack',
-        error: err instanceof Error ? err : new Error(String(err)),
-      }
-    }
-
-    if (result.status === 'ack') {
-      await this.client.xack(sub.topic, sub.group, id)
-      return
-    }
-
-    await this.handleNack(sub, id, envelope, result.error)
+  /**
+   * Register a delivery so `onDestroy()` drains it - housekeeping redeliveries included, they are the ones this
+   * design adds. The returned promise never rejects, so callers can `race` it safely.
+   */
+  private trackDelivery(work: Promise<void>): Promise<void> {
+    const tracked = work.catch((err) => {
+      this.logger.error('Delivery failed', String(err))
+    })
+    this.pendingDeliveries.add(tracked)
+    void tracked.finally(() => this.pendingDeliveries.delete(tracked))
+    return tracked
   }
 
-  private async handleNack(sub: ActiveSub, id: string, envelope: MessageEnvelope, error: Error): Promise<void> {
-    const nextAttempt = envelope.meta.attempt + 1
+  private markInFlight(topic: string, group: string, id: string, consumer: string): void {
+    let groups = this.inFlight.get(topic)
+    if (!groups) {
+      groups = new Map()
+      this.inFlight.set(topic, groups)
+    }
+    let entries = groups.get(group)
+    if (!entries) {
+      entries = new Map()
+      groups.set(group, entries)
+    }
+    entries.set(id, consumer)
+  }
 
-    if (nextAttempt > this.retry.maxAttempts) {
-      if (this.retry.dlq) {
-        const dlqEnvelope = JSON.stringify({
-          ...envelope,
-          topic: dlqTopic(sub.topic),
-          meta: { ...envelope.meta, lastError: error.message },
-        })
-        await this.lua.moveToDlq(sub.topic, dlqTopic(sub.topic), sub.group, id, dlqEnvelope)
-      } else {
+  private clearInFlight(topic: string, group: string, id: string): void {
+    const groups = this.inFlight.get(topic)
+    const entries = groups?.get(group)
+    if (!groups || !entries) return
+    entries.delete(id)
+    if (entries.size === 0) groups.delete(group)
+    if (groups.size === 0) this.inFlight.delete(topic)
+  }
+
+  private isInFlight(topic: string, group: string, id: string): boolean {
+    return this.inFlight.get(topic)?.get(group)?.has(id) === true
+  }
+
+  private async processMessage(
+    sub: ActiveSub,
+    [id, fields]: [string, string[]],
+    consumer: string,
+    attempt: number,
+  ): Promise<void> {
+    this.markInFlight(sub.topic, sub.group, id, consumer)
+    try {
+      let envelope: MessageEnvelope
+      try {
+        envelope = parseEnvelopeFromFields(fields)
+      } catch (err) {
+        this.logger.error(`Failed to parse stream entry ${id}`, String(err))
+        // Drop unparseable entries - no point retrying corrupt data.
         await this.client.xack(sub.topic, sub.group, id)
-        this.logger.error(
-          `Dropped ${envelope.id} on ${sub.topic} after ${this.retry.maxAttempts} attempts`,
-          error.stack ?? error.message,
+        return
+      }
+
+      // `meta.attempt` only carries the PEL delivery count to the handler. Skip the substitution when `lastError` is
+      // set: that is a DLQ record, whose `attempt` describes the death of the original and would be clobbered by the
+      // `.dlq` stream's own delivery count of 1. Legacy ZSET envelopes have no `lastError`, so they get a fresh budget.
+      if (envelope.meta.lastError === undefined) {
+        envelope = { ...envelope, meta: { ...envelope.meta, attempt } }
+      } else {
+        attempt = envelope.meta.attempt
+      }
+
+      let result: HandlerResult
+      try {
+        result = await sub.handler(envelope)
+      } catch (err) {
+        result = {
+          status: 'nack',
+          error: err instanceof Error ? err : new Error(String(err)),
+        }
+      }
+
+      if (result.status === 'ack') {
+        await this.client.xack(sub.topic, sub.group, id)
+        return
+      }
+
+      await this.handleNack(sub, id, consumer, envelope, attempt, result.error)
+    } finally {
+      this.clearInFlight(sub.topic, sub.group, id)
+    }
+  }
+
+  private async handleNack(
+    sub: ActiveSub,
+    id: string,
+    consumer: string,
+    envelope: MessageEnvelope,
+    attempt: number,
+    error: Error,
+  ): Promise<void> {
+    // Exhaustion check 1 of 2: only this path knows WHY the message failed - the housekeeping pass sees a delivery
+    // count and nothing else, so a DLQ record written there carries a synthetic error instead.
+    if (attempt >= this.retry.maxAttempts) {
+      await this.exhaust(sub, id, envelope, attempt, error)
+      return
+    }
+
+    const backoff = nextBackoffMs(attempt, this.retry)
+    // Unreachable for a normal envelope (the horizon covers every level); it guards a DLQ envelope replayed under a
+    // different retry config, whose level can exceed our horizon.
+    const idle = Math.max(0, this.horizonMs - backoff)
+
+    // Deregister BEFORE parking, then let a heartbeat already in the air land: `IDLE 0` on a freshly parked entry
+    // would reset its backoff to a full horizon.
+    this.clearInFlight(sub.topic, sub.group, id)
+    if (this.heartbeatTick) await this.heartbeatTick
+
+    const parked = await this.lua.parkRetry(sub.topic, sub.group, id, consumer, idle)
+    if (parked === -1) {
+      this.logger.warn(
+        `Entry ${id} on ${sub.topic} was reclaimed by another consumer while attempt ${attempt} was running; ` +
+          'leaving the retry to its new owner',
+      )
+    } else if (parked === 0) {
+      this.logger.warn(`Entry ${id} on ${sub.topic} is no longer pending; nothing to retry`)
+    }
+  }
+
+  /** Exhaustion tail shared by the nack path and the abandoned-entry path. */
+  private async exhaust(
+    sub: ActiveSub,
+    id: string,
+    envelope: MessageEnvelope,
+    attempt: number,
+    error: Error,
+  ): Promise<void> {
+    if (!this.retry.dlq) {
+      await this.client.xack(sub.topic, sub.group, id)
+      this.logger.error(
+        `Dropped ${envelope.id} on ${sub.topic} after ${this.retry.maxAttempts} attempts`,
+        error.stack ?? error.message,
+      )
+      return
+    }
+    const dlqEnvelope = JSON.stringify({
+      ...envelope,
+      topic: dlqTopic(sub.topic),
+      meta: { ...envelope.meta, attempt, lastError: error.message },
+    })
+    await this.lua.moveToDlq(sub.topic, dlqTopic(sub.topic), sub.group, id, dlqEnvelope)
+  }
+
+  /**
+   * Transitional legacy-ZSET migration - see DRAIN_RETRY_SCRIPT. Keyed by topic, not by (topic, group): one
+   * `${topic}:retry` key serves every group, so N groups must not probe it N times. The first drain is awaited, which
+   * is what covers whatever a pre-PEL replica left behind before this process started; the rest ride the timer below,
+   * off the retry tick because the key usually does not exist and the probe was two thirds of idle traffic.
+   */
+  private async startLegacyDrain(topic: string): Promise<void> {
+    const existing = this.legacyDrains.get(topic)
+    if (existing) {
+      existing.refs++
+      return
+    }
+    const state: LegacyDrain = { refs: 1, intervalMs: LEGACY_DRAIN_INTERVAL_MS }
+    this.legacyDrains.set(topic, state)
+    if ((await this.drainLegacy(topic)) > 0) state.intervalMs = this.legacyDrainFastMs
+    this.scheduleLegacyDrain(topic, state)
+  }
+
+  private stopLegacyDrain(topic: string): void {
+    const state = this.legacyDrains.get(topic)
+    if (!state) return
+    if (--state.refs > 0) return
+    if (state.timer) clearTimeout(state.timer)
+    this.legacyDrains.delete(topic)
+  }
+
+  private scheduleLegacyDrain(topic: string, state: LegacyDrain): void {
+    state.timer = setTimeout(() => {
+      if (this.stopping || this.legacyDrains.get(topic) !== state) return
+      const run = this.drainLegacy(topic)
+        .then((moved) => {
+          // Backoff shape: straight back to the retry cadence the moment an entry moves, because an old replica is
+          // still writing; otherwise double up to the ceiling. Never stops - a long canary would strand messages.
+          state.intervalMs =
+            moved > 0 ? this.legacyDrainFastMs : Math.min(state.intervalMs * 2, LEGACY_DRAIN_MAX_INTERVAL_MS)
+        })
+        .finally(() => {
+          if (state.running === run) state.running = undefined
+          if (!this.stopping && this.legacyDrains.get(topic) === state) this.scheduleLegacyDrain(topic, state)
+        })
+      state.running = run
+    }, state.intervalMs)
+  }
+
+  /** Never rejects: a failed migration probe must not take down the schedule or the subscribe that started it. */
+  private drainLegacy(topic: string): Promise<number> {
+    return this.lua.drainRetry(topic, `${topic}:retry`, Date.now(), DRAIN_BATCH).catch((err) => {
+      this.logger.error(`legacy retry drain failed for ${topic}`, String(err))
+      return 0
+    })
+  }
+
+  /** One housekeeping pass: a PEL sweep per subscribed (topic, group) pair. */
+  private async runRetryPass(): Promise<void> {
+    // `unsubscribe()` splices the live array, so iterate a snapshot. Pairs are deduplicated: two subscriptions on one
+    // (topic, group) are competing consumers, and a single sweep serves both.
+    const pairs = new Map<string, Map<string, ActiveSub>>()
+    for (const sub of [...this.subs]) {
+      let byGroup = pairs.get(sub.topic)
+      if (!byGroup) {
+        byGroup = new Map()
+        pairs.set(sub.topic, byGroup)
+      }
+      if (!byGroup.has(sub.group)) byGroup.set(sub.group, sub)
+    }
+
+    for (const [topic, byGroup] of pairs) {
+      if (this.stopping) return
+      for (const sub of byGroup.values()) {
+        if (this.stopping || sub.abort.signal.aborted) continue
+        await this.sweepPending(sub).catch((err) =>
+          this.logger.error(`retry sweep failed for ${topic}/${sub.group}`, String(err)),
         )
       }
+    }
+  }
+
+  /** Redeliver everything in this group's PEL idle past the horizon: elapsed backoffs and dead consumers alike. */
+  private async sweepPending(sub: ActiveSub): Promise<void> {
+    const { topic, group } = sub
+    const consumer = `${this.consumerName}:retry`
+    const limit = Math.max(1, sub.concurrency)
+    const running = new Set<Promise<void>>()
+    // A sweep never outlives the gap to the next pass; what it does not get through this time, the next one picks up.
+    const deadline = Date.now() + this.retryIntervalMs
+    // Exclusive `(<id>` cursor: entries we are still processing sit at the head of the PEL and would otherwise pin
+    // every window to the same first page, hiding the abandoned entries behind them.
+    let cursor = '-'
+
+    while (!this.stopping && !sub.abort.signal.aborted) {
+      const window = (await this.raw.xpending(topic, group, 'IDLE', this.horizonMs, cursor, '+', PENDING_PAGE)) as
+        | PendingEntry[]
+        | null
+      if (!window || window.length === 0) return
+      cursor = `(${window[window.length - 1]![0]}`
+
+      for (const [id, , , deliveryCount] of window) {
+        if (this.stopping || sub.abort.signal.aborted) return
+        if (this.isInFlight(topic, group, id)) continue
+
+        // Exhaustion check 2 of 2, and it must happen BEFORE the claim, or a poison message that killed the process
+        // gets one attempt more than `maxAttempts`. The count is post-claim, so `>= maxAttempts` means the handler
+        // has already run that many times.
+        if (deliveryCount >= this.retry.maxAttempts) {
+          await this.exhaustAbandoned(sub, id, consumer, deliveryCount)
+          continue
+        }
+
+        const claimed = await this.claim(topic, group, consumer, id)
+        if (!claimed) continue
+
+        // INVARIANT: `XCLAIM` bumps the delivery count by exactly 1 and post-claim count == handler invocations, so
+        // this delivery's attempt is the pre-claim `deliveryCount + 1`.
+        const delivery = this.trackDelivery(this.processMessage(sub, claimed, consumer, deliveryCount + 1))
+        running.add(delivery)
+        void delivery.finally(() => running.delete(delivery))
+        // Cap redeliveries at the subscription's concurrency: 50 abandoned entries must not run 50 handlers at once.
+        if (running.size >= limit && !(await this.awaitUntil(Promise.race(running), deadline))) {
+          // Passes are single-flight for the whole transport, so waiting out a handler that never settles would
+          // starve every other pair. Leave it running - it stays in-flight, so the next pass skips it and moves on.
+          this.logger.warn(`Retry pass gave up waiting on redeliveries for ${topic}/${group}`)
+          return
+        }
+      }
+
+      if (window.length < PENDING_PAGE) return
+    }
+  }
+
+  /** DLQ (or drop) an entry whose delivery budget ran out while nobody was holding it. */
+  private async exhaustAbandoned(sub: ActiveSub, id: string, consumer: string, deliveryCount: number): Promise<void> {
+    // Claim first: the DLQ record needs the payload, and the claim is what keeps a second replica's pass out.
+    const claimed = await this.claim(sub.topic, sub.group, consumer, id)
+    if (!claimed) return
+    let envelope: MessageEnvelope
+    try {
+      envelope = parseEnvelopeFromFields(claimed[1])
+    } catch (err) {
+      this.logger.error(`Failed to parse stream entry ${id}`, String(err))
+      await this.client.xack(sub.topic, sub.group, id)
       return
     }
-
-    const delay = nextBackoffMs(envelope.meta.attempt, this.retry)
-    const retryAt = Date.now() + delay
-    const retryEnvelope = JSON.stringify({
-      ...envelope,
-      meta: { ...envelope.meta, attempt: nextAttempt },
-    })
-    await this.lua.retrySchedule(sub.topic, `${sub.topic}:retry`, sub.group, id, retryAt, retryEnvelope)
+    // Synthetic: nobody was alive to report the real failure.
+    const error = new Error(`Abandoned on ${sub.topic} after ${deliveryCount} delivery attempt(s) without ack or retry`)
+    await this.exhaust(sub, id, envelope, deliveryCount, error)
   }
 
-  private async drainRetryZset(): Promise<void> {
-    const topics = new Set(this.subs.map((s) => s.topic))
-    const now = Date.now()
-    for (const topic of topics) {
-      await this.lua.drainRetry(topic, `${topic}:retry`, now, 100)
+  /**
+   * Take ownership of a pending entry, or null when somebody else got there first. `min-idle = horizon` is the mutual
+   * exclusion: the winner's claim resets idle to 0, so a concurrent pass on another replica gets an empty reply
+   * instead of a second delivery.
+   */
+  private async claim(topic: string, group: string, consumer: string, id: string): Promise<[string, string[]] | null> {
+    const reply = (await this.raw.xclaim(topic, group, consumer, this.horizonMs, id)) as ClaimedEntry[] | null
+    const entry = reply?.[0]
+    if (entry) return entry
+    if (reply && reply.length > 0) {
+      // Redis < 7 answers `[null]` for an entry trimmed out of the stream while still pending (7.x drops it from the
+      // PEL itself). The payload is gone either way - ack the ghost so the PEL stops pointing at it.
+      this.logger.error(`Pending entry ${id} on ${topic} no longer exists in the stream (trimmed); acking`)
+      await this.client.xack(topic, group, id)
     }
+    return null
   }
 
-  private async reclaimIdle(): Promise<void> {
-    // Disabled. The previous body ran XAUTOCLAIM per (topic, group) and threw
-    // the returned entries away, so it never redelivered anything - nothing is
-    // lost by removing it. It did mutate Redis: reassigning PEL ownership,
-    // bumping delivery counts and resetting idle times. A forthcoming release
-    // parks retries in the PEL and reads exactly those two values, so leaving
-    // this loop alive would corrupt the new state during a rolling deploy.
+  /**
+   * Keep every entry we are still processing from crossing the horizon. Keyed per (topic, group, consumer) rather
+   * than per pair so ownership stays with the lane that read the entry: `:laneN` diagnostics survive, and the
+   * ownership gate in `parkRetry` keeps matching.
+   */
+  private async runHeartbeat(): Promise<void> {
+    const pairs: Array<[string, string]> = []
+    for (const [topic, groups] of this.inFlight) {
+      for (const group of groups.keys()) pairs.push([topic, group])
+    }
+
+    for (const [topic, group] of pairs) {
+      // Re-read membership per pair rather than snapshotting the whole tick: each pair costs a round trip, and an
+      // `IDLE 0` on an entry parked by a nack in the meantime would turn its backoff into a full horizon.
+      const entries = this.inFlight.get(topic)?.get(group)
+      if (!entries || entries.size === 0) continue
+
+      const byConsumer = new Map<string, string[]>()
+      for (const [id, consumer] of entries) {
+        const ids = byConsumer.get(consumer)
+        if (ids) ids.push(id)
+        else byConsumer.set(consumer, [id])
+      }
+
+      for (const [consumer, ids] of byConsumer) {
+        for (let i = 0; i < ids.length; i += HEARTBEAT_BATCH) {
+          const chunk = ids.slice(i, i + HEARTBEAT_BATCH)
+          await this.raw.xclaim(topic, group, consumer, 0, ...chunk, 'IDLE', 0, 'JUSTID')
+        }
+      }
+    }
   }
 }
 
