@@ -25,9 +25,17 @@ export interface RedisStreamsTransportOptions {
   retry?: Partial<RetryConfig>
   /** How often to drain the retry ZSET back into the main stream. Default 1000ms. */
   retrySchedulerIntervalMs?: number
-  /** How often to XAUTOCLAIM stale pending entries. Default 30000ms. */
+  /**
+   * How often the idle-reclaim timer fires. Default 30000ms.
+   *
+   * Inert in this version: the timer still ticks, but `reclaimIdle()` is a
+   * no-op, so this value changes nothing observable.
+   */
   reclaimIntervalMs?: number
-  /** Minimum idle time (ms) before an entry is eligible for XAUTOCLAIM. Default 60000. */
+  /**
+   * Minimum idle time (ms) before a pending entry would become eligible for
+   * reclaim. Default 60000. Inert in this version, like `reclaimIntervalMs`.
+   */
   minIdleMs?: number
   /** Overrides the auto-generated consumer name (`hostname:pid:rand8`). */
   consumerName?: string
@@ -54,9 +62,11 @@ export interface RedisStreamsTransportOptions {
    *
    * Drain happens after subClients are disconnected but before the pubClient
    * closes, so handlers can still complete `xack` / Lua calls through the
-   * pubClient. A timed-out handler will leak and may trigger redelivery via
-   * XAUTOCLAIM after `minIdleMs`. Size `drainTimeoutMs` to cover expected
-   * handler runtime; it no longer needs to absorb `blockMs`.
+   * pubClient. A timed-out handler leaks, and its entry stays pending in the
+   * PEL - nothing redelivers it, since idle reclaim is disabled in this
+   * version. That makes sizing `drainTimeoutMs` to cover expected handler
+   * runtime more important, not less; it still does not need to absorb
+   * `blockMs`.
    */
   drainTimeoutMs?: number
 }
@@ -125,8 +135,9 @@ interface LuaCommands {
  *       due entries back into the main stream every `retrySchedulerIntervalMs`.
  *     - Otherwise: atomic ack + XADD to `${topic}.dlq` with `lastError`
  *       recorded in `meta.lastError`.
- * - A separate `reclaimIntervalMs` loop runs `XAUTOCLAIM` on each active
- *   (topic, group) pair to recover messages from dead consumers.
+ * - Crash recovery is NOT implemented in this version. Entries left pending
+ *   by a dead consumer stay in the PEL until something else claims them; the
+ *   `reclaimIntervalMs` timer still ticks but `reclaimIdle()` does nothing.
  *
  * Lua scripts are registered via ioredis `defineCommand()` so they execute
  * server-side with SHA caching (EVALSHA fast path).
@@ -134,9 +145,9 @@ interface LuaCommands {
  * ## Connection model
  *
  * The transport keeps **one publisher client** (`this.client`) that handles
- * `XADD`, `XACK`, all Lua commands, `XGROUP CREATE`, and the `XAUTOCLAIM` /
- * retry-drain housekeeping. Each `subscribe()` call additionally creates its
- * **own duplicated client** via `this.client.duplicate({ lazyConnect: true })`
+ * `XADD`, `XACK`, all Lua commands, `XGROUP CREATE`, and the retry-drain
+ * housekeeping. Each `subscribe()` call additionally creates its **own
+ * duplicated client** via `this.client.duplicate({ lazyConnect: true })`
  * and runs its blocking `XREADGROUP` loop on it.
  *
  * This isolates publishing and Lua-driven retry/DLQ paths from the latency
@@ -589,32 +600,12 @@ export class RedisStreamsTransport implements MessageTransport {
   }
 
   private async reclaimIdle(): Promise<void> {
-    // Multiple subs may share the same (topic, group) when explicit `group`
-    // puts handler classes into a competing-consumers pool. Dedupe here so
-    // we issue one XAUTOCLAIM per (topic, group) rather than one per handler.
-    const seen = new Set<string>()
-    for (const sub of this.subs) {
-      const key = `${sub.topic}::${sub.group}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      try {
-        // Some ioredis type versions may lack typed xautoclaim signatures.
-        // The consumer arg is a label on PEL ownership; we use lane[0] as a
-        // stable target. XAUTOCLAIM operates at the group level, so one call
-        // per (topic, group) suffices regardless of lane count.
-        await (this.client as unknown as { xautoclaim: (...args: unknown[]) => Promise<unknown> }).xautoclaim(
-          sub.topic,
-          sub.group,
-          sub.lanes[0]!.consumer,
-          this.minIdleMs,
-          '0',
-          'COUNT',
-          100,
-        )
-      } catch (err) {
-        this.logger.warn(`xautoclaim failed for ${sub.topic} group ${sub.group}: ${String(err)}`)
-      }
-    }
+    // Disabled. The previous body ran XAUTOCLAIM per (topic, group) and threw
+    // the returned entries away, so it never redelivered anything - nothing is
+    // lost by removing it. It did mutate Redis: reassigning PEL ownership,
+    // bumping delivery counts and resetting idle times. A forthcoming release
+    // parks retries in the PEL and reads exactly those two values, so leaving
+    // this loop alive would corrupt the new state during a rolling deploy.
   }
 }
 
