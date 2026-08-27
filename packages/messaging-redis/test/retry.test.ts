@@ -402,6 +402,65 @@ d('RedisStreamsTransport retry', () => {
     expect(await client.xlen(`${topic}.dlq`)).toBe(1)
   })
 
+  it('drops and logs a dead-letter record that fails again instead of nesting a second DLQ', async () => {
+    const logs = captureLogs(transport)
+    const dlqReceived: MessageEnvelope[] = []
+    await transport.subscribe(
+      topic,
+      async (): Promise<HandlerResult> => ({ status: 'nack', error: new Error('nope') }),
+      {
+        group: 'g',
+      },
+    )
+    await transport.subscribe(
+      `${topic}.dlq`,
+      async (e): Promise<HandlerResult> => {
+        dlqReceived.push(e)
+        return { status: 'nack', error: new Error('the DLQ consumer fails too') }
+      },
+      { group: 'dlq' },
+    )
+    await wait(50)
+
+    const env = envelope(topic, { n: 1 })
+    await transport.publish(env)
+    await waitFor(() => dlqReceived.length === 1, 'the DLQ delivery')
+
+    // The record arrives carrying the original's exhausted attempt, so it exhausts on its first delivery here.
+    await waitFor(async () => (await pending(client, `${topic}.dlq`, 'dlq')).length === 0, 'an empty DLQ PEL')
+    await wait(300)
+
+    expect(await client.exists(`${topic}.dlq.dlq`)).toBe(0)
+    expect(dlqReceived).toHaveLength(1)
+    // The drop leaves no record anywhere, so the log line is the only place the reader can find out what happened.
+    expect(logs.errors.some((m) => m.includes(env.id) && m.includes('already a dead-letter record'))).toBe(true)
+  })
+
+  it('still dead-letters an ordinary message on a topic whose name ends in .dlq', async () => {
+    const tp = `${topic}.dlq`
+    const attempts: number[] = []
+    await transport.subscribe(
+      tp,
+      async (e): Promise<HandlerResult> => {
+        attempts.push(e.meta.attempt)
+        return { status: 'nack', error: new Error('permanent') }
+      },
+      { group: 'g' },
+    )
+    await wait(50)
+
+    // Naming an ordinary topic `<something>.dlq` is the user's business: nothing published here is a dead-letter
+    // record, so exhaustion has to write one rather than drop the message with a log line.
+    await transport.publish(envelope(tp, { n: 1 }))
+    await waitFor(async () => (await dlqEnvelopes(client, tp)).length === 1, 'a real dead-letter record')
+
+    const dead = await dlqEnvelopes(client, tp)
+    expect(dead[0]?.topic).toBe(`${topic}.dlq.dlq`)
+    expect(dead[0]?.payload).toEqual({ n: 1 })
+    expect(dead[0]?.meta.lastError).toBe('permanent')
+    expect(attempts).toEqual([1, 2, 3])
+  })
+
   it('a retry in one consumer group is never redelivered to another group on the same topic', async () => {
     const flaky: number[] = []
     const stable: MessageEnvelope[] = []

@@ -33,6 +33,9 @@ import {
 import { DLQ_SCRIPT, DRAIN_RETRY_SCRIPT, PARK_RETRY_SCRIPT } from './retry-queue.js'
 import { parseEnvelopeFromFields } from './serialization.js'
 
+/** Derived from the writer so the dead-letter check cannot drift from the naming it is checking for. */
+const DLQ_SUFFIX = dlqTopic('')
+
 export interface RedisStreamsTransportOptions {
   /** Redis URL (e.g. `redis://localhost:6379`). Mutually exclusive with `client`. */
   url?: string
@@ -739,10 +742,16 @@ export class RedisStreamsTransport implements MessageTransport {
     attempt: number,
     error: Error,
   ): Promise<void> {
-    if (!this.retry.dlq) {
+    // `lastError` is written only by the DLQ move below, so it is the honest marker of a dead-letter record; the
+    // `.dlq` suffix alone proves nothing, since a user is free to name an ordinary topic `billing.dlq` and dropping
+    // their exhausted messages would lose data.
+    const alreadyDeadLettered = envelope.meta.lastError !== undefined && sub.topic.endsWith(DLQ_SUFFIX)
+
+    if (!this.retry.dlq || alreadyDeadLettered) {
       await this.client.xack(sub.topic, sub.group, id)
+      const because = alreadyDeadLettered ? ' - already a dead-letter record, not nesting another DLQ' : ''
       this.logger.error(
-        `Dropped ${envelope.id} on ${sub.topic} after ${this.retry.maxAttempts} attempts`,
+        `Dropped ${envelope.id} on ${sub.topic} after ${this.retry.maxAttempts} attempts${because}`,
         error.stack ?? error.message,
       )
       return
