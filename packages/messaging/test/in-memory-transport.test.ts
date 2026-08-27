@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import type { LoggerService } from '@miiajs/core'
 import { inMemoryTransport, InMemoryTransport } from '../src/in-memory-transport.js'
 import type { MessageEnvelope, MessageTransport, HandlerResult } from '../src/types.js'
 
@@ -13,6 +14,21 @@ function envelope(topic: string, payload: unknown = {}): MessageEnvelope {
 
 function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
+}
+
+/** A dropped message leaves no record anywhere, so the log line is the only place a test can read what happened. */
+function captureErrors(transport: MessageTransport): string[] {
+  const errors: string[] = []
+  const recorder: LoggerService = {
+    log: () => {},
+    warn: () => {},
+    error: (message) => {
+      errors.push(message)
+    },
+    debug: () => {},
+  }
+  ;(transport as unknown as { logger: LoggerService }).logger = recorder
+  return errors
 }
 
 describe('InMemoryTransport', () => {
@@ -184,6 +200,71 @@ describe('InMemoryTransport', () => {
     expect(dlqReceived).toHaveLength(1)
     expect(dlqReceived[0]?.topic).toBe('topic.dlq')
     expect(dlqReceived[0]?.payload).toEqual({ id: 42 })
+    expect(dlqReceived[0]?.meta.lastError).toBe('permanent')
+  })
+
+  it('drops and logs a dead-letter record that fails again instead of nesting a second DLQ', async () => {
+    const errors = captureErrors(transport)
+    const dlqReceived: MessageEnvelope[] = []
+    const nested: MessageEnvelope[] = []
+    await transport.subscribe('topic', async () => ({ status: 'nack', error: new Error('permanent') }), {})
+    await transport.subscribe(
+      'topic.dlq',
+      async (e) => {
+        dlqReceived.push(e)
+        return { status: 'nack', error: new Error('the DLQ consumer fails too') }
+      },
+      {},
+    )
+    await transport.subscribe(
+      'topic.dlq.dlq',
+      async (e) => {
+        nested.push(e)
+        return { status: 'ack' }
+      },
+      {},
+    )
+
+    const env = envelope('topic', { id: 42 })
+    await transport.publish(env)
+    // retry delays: 10 + 20 + 40 = 70ms, then the DLQ publish - which arrives carrying the exhausted attempt, so
+    // it has no retries of its own left and fails for good on its first delivery here.
+    await wait(200)
+
+    expect(dlqReceived).toHaveLength(1)
+    expect(nested).toHaveLength(0)
+    expect(errors.some((m) => m.includes(env.id) && m.includes('already a dead-letter record'))).toBe(true)
+  })
+
+  it('still dead-letters an ordinary message on a topic whose name ends in .dlq', async () => {
+    const attempts: number[] = []
+    const dlqReceived: MessageEnvelope[] = []
+    // Naming an ordinary topic `<something>.dlq` is the user's business: nothing published here is a dead-letter
+    // record, so exhaustion has to write one rather than drop the message with a log line.
+    await transport.subscribe(
+      'billing.dlq',
+      async (e) => {
+        attempts.push(e.meta.attempt)
+        return { status: 'nack', error: new Error('permanent') }
+      },
+      {},
+    )
+    await transport.subscribe(
+      'billing.dlq.dlq',
+      async (e) => {
+        dlqReceived.push(e)
+        return { status: 'ack' }
+      },
+      {},
+    )
+
+    await transport.publish(envelope('billing.dlq', { id: 7 }))
+    await wait(200)
+
+    expect(attempts).toEqual([1, 2, 3])
+    expect(dlqReceived).toHaveLength(1)
+    expect(dlqReceived[0]?.topic).toBe('billing.dlq.dlq')
+    expect(dlqReceived[0]?.payload).toEqual({ id: 7 })
     expect(dlqReceived[0]?.meta.lastError).toBe('permanent')
   })
 

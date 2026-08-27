@@ -39,6 +39,9 @@ interface LocalSub {
 
 const DEFAULT_DRAIN_TIMEOUT_MS = 5000
 
+/** Derived from the writer so the dead-letter check cannot drift from the naming it is checking for. */
+const DLQ_SUFFIX = dlqTopic('')
+
 /**
  * In-process message transport. Fire-and-forget delivery via `queueMicrotask`,
  * exponential backoff retry via `setTimeout`, auto-DLQ via re-publishing to
@@ -153,12 +156,16 @@ export class InMemoryTransport implements MessageTransport {
       return
     }
 
-    // Final failure.
+    // Final failure. `lastError` is written only by the DLQ publish below, so it is the honest marker of a
+    // dead-letter record; the `.dlq` suffix alone proves nothing, since a user is free to name an ordinary topic
+    // `billing.dlq` and dropping their exhausted messages would lose data.
+    const alreadyDeadLettered = envelope.meta.lastError !== undefined && envelope.topic.endsWith(DLQ_SUFFIX)
+    const because = alreadyDeadLettered ? ' - dropped, already a dead-letter record, not nesting another DLQ' : ''
     this.logger.error(
-      `Message ${envelope.id} on ${envelope.topic} exhausted ${this.retry.maxAttempts} attempts`,
+      `Message ${envelope.id} on ${envelope.topic} exhausted ${this.retry.maxAttempts} attempts${because}`,
       result.error.stack ?? result.error.message,
     )
-    if (this.retry.dlq) {
+    if (this.retry.dlq && !alreadyDeadLettered) {
       await this.publish({
         ...envelope,
         topic: dlqTopic(envelope.topic),
