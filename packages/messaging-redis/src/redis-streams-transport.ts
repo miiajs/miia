@@ -546,6 +546,7 @@ export class RedisStreamsTransport implements MessageTransport {
           // grow the map with every subscription that comes and goes, dropping it early would reset a live count.
           if (!this.subs.some((s) => s.topic === topic && s.group === group)) {
             this.failures.delete(`retry sweep ${topic}/${group}`)
+            this.failures.delete(`heartbeat ${topic}/${group}`)
           }
         }
         // Sync in ioredis 5: tears the socket so each lane's in-flight BLOCK rejects and the loop exits via `aborted`.
@@ -721,7 +722,10 @@ export class RedisStreamsTransport implements MessageTransport {
     // Deregister BEFORE parking, then let a heartbeat already in the air land: `IDLE 0` on a freshly parked entry
     // would reset its backoff to a full horizon.
     this.clearInFlight(sub.topic, sub.group, id)
-    if (this.heartbeatTick) await this.heartbeatTick
+    // Bounded like the shutdown drain and for the same reason: `maxRetriesPerRequest: null` lets a heartbeat command
+    // queue forever on a wedged connection, and every nacking handler would queue behind it. Giving up costs at worst
+    // a stale `IDLE 0` landing after the park - a retry delayed by one horizon, never a lost message.
+    if (this.heartbeatTick) await this.awaitUntil(this.heartbeatTick, Date.now() + this.heartbeatIntervalMs)
 
     const parked = await this.lua.parkRetry(sub.topic, sub.group, id, consumer, idle)
     if (parked === -1) {
@@ -959,18 +963,29 @@ export class RedisStreamsTransport implements MessageTransport {
       const entries = this.inFlight.get(topic)?.get(group)
       if (!entries || entries.size === 0) continue
 
-      const byConsumer = new Map<string, string[]>()
-      for (const [id, consumer] of entries) {
-        const ids = byConsumer.get(consumer)
-        if (ids) ids.push(id)
-        else byConsumer.set(consumer, [id])
-      }
+      // Isolated per pair like the sweep: one pair answering NOGROUP must not cost every other topic its renewals,
+      // which is exactly the second delivery of a still-running handler the heartbeat exists to prevent.
+      await this.renewPair(topic, group, entries).then(
+        () => this.reportSuccess(`heartbeat ${topic}/${group}`),
+        (err) =>
+          this.reportFailure(`heartbeat ${topic}/${group}`, `heartbeat failed for ${topic}/${group}`, String(err)),
+      )
+    }
+  }
 
-      for (const [consumer, ids] of byConsumer) {
-        for (let i = 0; i < ids.length; i += HEARTBEAT_BATCH) {
-          const chunk = ids.slice(i, i + HEARTBEAT_BATCH)
-          await this.raw.xclaim(topic, group, consumer, 0, ...chunk, 'IDLE', 0, 'JUSTID')
-        }
+  /** Renew one pair's entries, batched per owning consumer. */
+  private async renewPair(topic: string, group: string, entries: Map<string, string>): Promise<void> {
+    const byConsumer = new Map<string, string[]>()
+    for (const [id, consumer] of entries) {
+      const ids = byConsumer.get(consumer)
+      if (ids) ids.push(id)
+      else byConsumer.set(consumer, [id])
+    }
+
+    for (const [consumer, ids] of byConsumer) {
+      for (let i = 0; i < ids.length; i += HEARTBEAT_BATCH) {
+        const chunk = ids.slice(i, i + HEARTBEAT_BATCH)
+        await this.raw.xclaim(topic, group, consumer, 0, ...chunk, 'IDLE', 0, 'JUSTID')
       }
     }
   }

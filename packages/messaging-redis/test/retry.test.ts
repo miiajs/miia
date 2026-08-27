@@ -664,6 +664,176 @@ d('RedisStreamsTransport retry', () => {
     }
   }, 15_000)
 
+  it('a heartbeat that fails on one pair still renews the entries of every other pair', async () => {
+    const probe = new Redis(REDIS_URL!)
+    const workerClient = new Redis(REDIS_URL!)
+    const wedged = `miia-test:retry-hb-wedged:${randomUUID()}`
+    const healthy = `miia-test:retry-hb-healthy:${randomUUID()}`
+    const options: RedisStreamsTransportOptions = {
+      retry: { backoffMs: 50, maxAttempts: 5 },
+      retryIntervalMs: 50,
+      minIdleMs: HORIZON_MS,
+      blockMs: 100,
+      // The wedged topic's handler outlives the test, so teardown must not spend a drain budget on it.
+      drainTimeoutMs: 0,
+    }
+    const worker = new RedisStreamsTransport({ ...options, client: workerClient })
+    const sweeper = new RedisStreamsTransport({ ...options, client: new Redis(REDIS_URL!) })
+    const logs = captureLogs(worker)
+    await worker.onInit?.()
+    await sweeper.onInit?.()
+
+    // Only one pair's renewals fail, and only the renewals: `JUSTID` is what tells them apart from the sweep's own
+    // claims, which stay real so nothing else about that topic changes.
+    const raw = workerClient as unknown as { xclaim: (...args: unknown[]) => Promise<unknown> }
+    const xclaim = raw.xclaim.bind(raw)
+    raw.xclaim = (...args) =>
+      args[0] === wedged && args.includes('JUSTID')
+        ? Promise.reject(new Error('NOGROUP No such key or consumer group'))
+        : xclaim(...args)
+
+    let wedgedStarted = false
+    let started = false
+    let finished = false
+    const stolen: MessageEnvelope[] = []
+    try {
+      await worker.subscribe(
+        wedged,
+        async (): Promise<HandlerResult> => {
+          wedgedStarted = true
+          return new Promise<HandlerResult>(() => {})
+        },
+        { group: 'g' },
+      )
+      await worker.subscribe(
+        healthy,
+        async () => {
+          started = true
+          await wait(HORIZON_MS * 5)
+          finished = true
+          return { status: 'ack' }
+        },
+        { group: 'g' },
+      )
+      await wait(50)
+
+      // The failing pair goes in flight first, so a tick that gives up on its first rejection never reaches the other.
+      await worker.publish(envelope(wedged, { n: 1 }))
+      await waitFor(() => wedgedStarted, 'the failing pair to go in flight')
+      await worker.publish(envelope(healthy, { n: 2 }))
+      await waitFor(() => started, 'the long handler to start')
+
+      // A second replica on the same group, with no knowledge of the worker's in-flight set.
+      await sweeper.subscribe(
+        healthy,
+        async (e) => {
+          stolen.push(e)
+          return { status: 'ack' }
+        },
+        { group: 'g' },
+      )
+
+      // Two horizons into a five-horizon handler: unrenewed, this entry would be claimable by now.
+      await wait(HORIZON_MS * 2)
+      expect(stolen).toHaveLength(0)
+      const midFlight = await pending(probe, healthy, 'g')
+      expect(midFlight).toHaveLength(1)
+      expect(midFlight[0]![2]).toBeLessThan(HORIZON_MS)
+      expect(midFlight[0]![3]).toBe(1)
+
+      await waitFor(() => finished, 'the long handler to finish')
+      await waitFor(async () => (await pending(probe, healthy, 'g')).length === 0, 'an empty PEL')
+      expect(stolen).toHaveLength(0)
+
+      // Through the sweep's suppression rather than a channel of its own: one line for the run, not one per tick.
+      expect(logs.errors.filter((m) => m.includes(`heartbeat failed for ${wedged}/g`))).toHaveLength(1)
+    } finally {
+      raw.xclaim = xclaim
+      await worker.onDestroy?.()
+      await sweeper.onDestroy?.()
+      try {
+        await drainKeys(probe, wedged)
+        await drainKeys(probe, healthy)
+      } finally {
+        await Promise.all([probe.quit(), workerClient.quit()])
+      }
+    }
+  }, 15_000)
+
+  it('bounds the nack path on a heartbeat that never returns instead of waiting it out', async () => {
+    const probe = new Redis(REDIS_URL!)
+    const busClient = new Redis(REDIS_URL!)
+    const slow = `miia-test:nack-hb-slow:${randomUUID()}`
+    const flaky = `miia-test:nack-hb-flaky:${randomUUID()}`
+    const t = new RedisStreamsTransport({
+      client: busClient,
+      retry: { backoffMs: 50, maxAttempts: 3 },
+      retryIntervalMs: 50,
+      minIdleMs: HORIZON_MS,
+      blockMs: 100,
+      drainTimeoutMs: 1000,
+    })
+    const logs = captureLogs(t)
+    await t.onInit?.()
+
+    // What `maxRetriesPerRequest: null` looks like on a wedged connection: the renewal never settles, so the tick
+    // stays in flight forever and the `if (this.heartbeatTick) return` guard schedules no other.
+    const raw = busClient as unknown as { xclaim: (...args: unknown[]) => Promise<unknown> }
+    const xclaim = raw.xclaim.bind(raw)
+    let renewals = 0
+    raw.xclaim = (...args) => {
+      if (!args.includes('JUSTID')) return xclaim(...args)
+      renewals++
+      return new Promise(() => {})
+    }
+
+    const attempts: number[] = []
+    try {
+      // Something in flight for the first tick to wedge on, released as soon as it has.
+      await t.subscribe(
+        slow,
+        async (): Promise<HandlerResult> => {
+          await waitFor(() => renewals > 0, 'the heartbeat to wedge')
+          return { status: 'ack' }
+        },
+        { group: 'gs' },
+      )
+      await wait(50)
+      await t.publish(envelope(slow, { n: 1 }))
+      await waitFor(async () => (await pending(probe, slow, 'gs')).length === 0, 'the wedging delivery to settle')
+
+      await t.subscribe(
+        flaky,
+        async (e): Promise<HandlerResult> => {
+          attempts.push(e.meta.attempt)
+          if (e.meta.attempt === 1) return { status: 'nack', error: new Error('transient') }
+          return { status: 'ack' }
+        },
+        { group: 'gf' },
+      )
+      await wait(50)
+      await t.publish(envelope(flaky, { n: 2 }))
+      await waitFor(() => attempts.length === 2, 'the retry')
+      await waitFor(async () => (await pending(probe, flaky, 'gf')).length === 0, 'an empty PEL')
+
+      // The retry itself proves nothing - the sweep redelivers an unparked entry at the horizon either way. What an
+      // unbounded wait costs is the nacking delivery: it never leaves `pendingDeliveries`, and the shutdown drain
+      // then burns its whole budget on it. The wedged tick still costs `onDestroy` the tail of that budget, but that
+      // bound is `onDestroy`'s own and logs nothing.
+      await t.onDestroy?.()
+      expect(logs.warns.filter((w) => w.includes('still in flight'))).toEqual([])
+      expect(attempts).toEqual([1, 2])
+    } finally {
+      raw.xclaim = xclaim
+      try {
+        await drainKeys(probe, slow)
+        await drainKeys(probe, flaky)
+      } finally {
+        await Promise.all([probe.quit(), busClient.quit()])
+      }
+    }
+  }, 15_000)
+
   it('two transports sweeping one group write exactly one DLQ record per message', async () => {
     const probe = new Redis(REDIS_URL!)
     const tp = `miia-test:retry-gated-dlq:${randomUUID()}`
