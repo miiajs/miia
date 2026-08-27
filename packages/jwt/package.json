@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/jwt",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Injectable JWT sign/verify service for MiiaJS - a thin wrapper around jose.",

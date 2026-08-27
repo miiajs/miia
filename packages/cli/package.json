@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/cli",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "CLI for MiiaJS - build, develop, and scaffold MiiaJS applications",

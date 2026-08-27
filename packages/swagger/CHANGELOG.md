@@ -1,5 +1,12 @@
 # @miiajs/swagger
 
+## 0.6.1
+
+### Patch Changes
+
+- Updated dependencies []:
+  - @miiajs/serve-static@0.6.1
+
 ## 0.6.0
 
 ### Minor Changes

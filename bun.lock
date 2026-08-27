@@ -144,7 +144,7 @@
     },
     "packages/auth": {
       "name": "@miiajs/auth",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
       },
@@ -154,7 +154,7 @@
     },
     "packages/cli": {
       "name": "@miiajs/cli",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "bin": {
         "miia": "dist/bin.js",
       },
@@ -171,7 +171,7 @@
     },
     "packages/config": {
       "name": "@miiajs/config",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "@miiajs/testing": "workspace:*",
@@ -183,14 +183,14 @@
     },
     "packages/core": {
       "name": "@miiajs/core",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/testing": "workspace:*",
       },
     },
     "packages/drizzle": {
       "name": "@miiajs/drizzle",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "drizzle-orm": "^0.45.2",
@@ -210,7 +210,7 @@
     },
     "packages/jwt": {
       "name": "@miiajs/jwt",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "jose": "^6.0.11",
@@ -222,7 +222,7 @@
     },
     "packages/messaging": {
       "name": "@miiajs/messaging",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "@miiajs/testing": "workspace:*",
@@ -233,9 +233,9 @@
     },
     "packages/messaging-redis": {
       "name": "@miiajs/messaging-redis",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@miiajs/messaging": "^0.6.0",
+        "@miiajs/messaging": "^0.6.1",
       },
       "devDependencies": {
         "@miiajs/core": "workspace:*",
@@ -248,7 +248,7 @@
     },
     "packages/mongoose": {
       "name": "@miiajs/mongoose",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "mongoose": "^9.4.1",
@@ -260,7 +260,7 @@
     },
     "packages/multipart": {
       "name": "@miiajs/multipart",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
         "multipasta": "^0.2.8",
       },
@@ -274,11 +274,11 @@
     },
     "packages/node-server": {
       "name": "@miiajs/node-server",
-      "version": "0.6.0",
+      "version": "0.6.1",
     },
     "packages/papr": {
       "name": "@miiajs/papr",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "mongodb": "^7.1.1",
@@ -292,7 +292,7 @@
     },
     "packages/rate-limit": {
       "name": "@miiajs/rate-limit",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
         "@miiajs/testing": "workspace:*",
@@ -303,7 +303,7 @@
     },
     "packages/serve-static": {
       "name": "@miiajs/serve-static",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
       },
@@ -313,9 +313,9 @@
     },
     "packages/swagger": {
       "name": "@miiajs/swagger",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
-        "@miiajs/serve-static": "^0.6.0",
+        "@miiajs/serve-static": "^0.6.1",
       },
       "devDependencies": {
         "@miiajs/core": "workspace:*",
@@ -330,7 +330,7 @@
     },
     "packages/testing": {
       "name": "@miiajs/testing",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "devDependencies": {
         "@miiajs/core": "workspace:*",
       },
@@ -340,7 +340,7 @@
     },
     "packages/uws-server": {
       "name": "@miiajs/uws-server",
-      "version": "0.6.0",
+      "version": "0.6.1",
       "dependencies": {
         "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.69.0",
       },
