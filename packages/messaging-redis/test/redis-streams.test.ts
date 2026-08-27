@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
-import { Redis } from 'ioredis'
+import type { Redis } from 'ioredis'
 import { RedisStreamsTransport } from '../src/redis-streams-transport.js'
+import { closeClientsAfterEach, testClient } from './helpers.js'
 
 const REDIS_URL = process.env.REDIS_TEST_URL
 const d = REDIS_URL ? describe : describe.skip
+
+closeClientsAfterEach()
 
 /**
  * Housekeeping cadence parked far past the lifetime of a test. The tests using it measure publish latency, shutdown
@@ -38,7 +41,7 @@ d('RedisStreamsTransport', () => {
   let topic: string
 
   beforeEach(async () => {
-    client = new Redis(REDIS_URL!)
+    client = testClient()
     topic = `miia-test:${randomUUID()}`
     transport = new RedisStreamsTransport({
       client,
@@ -51,12 +54,7 @@ d('RedisStreamsTransport', () => {
 
   afterEach(async () => {
     await transport.onDestroy?.()
-    const cleanup = new Redis(REDIS_URL!)
-    try {
-      await drainKeys(cleanup, topic)
-    } finally {
-      await cleanup.quit()
-    }
+    await drainKeys(testClient(), topic)
   })
 
   it('publishes and delivers to a subscriber', async () => {
@@ -83,7 +81,7 @@ d('RedisStreamsTransport', () => {
   it('load-balances within the same consumer group', async () => {
     // Two subscribers joining the SAME group should split deliveries.
     // Use a second transport so each has its own consumer name.
-    const otherClient = new Redis(REDIS_URL!)
+    const otherClient = testClient()
     const other = new RedisStreamsTransport({
       client: otherClient,
       retry: { backoffMs: 50, maxAttempts: 3 },
@@ -169,7 +167,7 @@ d('RedisStreamsTransport', () => {
   it('onDestroy waits for in-flight handler before quitting the client', async () => {
     // Standalone transport so we can configure drainTimeoutMs without touching
     // the shared one in beforeEach.
-    const client2 = new Redis(REDIS_URL!)
+    const client2 = testClient()
     const topic2 = `miia-test:${randomUUID()}`
     const t = new RedisStreamsTransport({
       client: client2,
@@ -205,12 +203,7 @@ d('RedisStreamsTransport', () => {
     expect(elapsed).toBeLessThan(2500)
 
     // cleanup the test stream so afterEach drainKeys is enough
-    const cleanup = new Redis(REDIS_URL!)
-    try {
-      await drainKeys(cleanup, topic2)
-    } finally {
-      await cleanup.quit()
-    }
+    await drainKeys(testClient(), topic2)
   })
 
   describe('connection isolation', () => {
@@ -220,7 +213,7 @@ d('RedisStreamsTransport', () => {
     // handler' above.
 
     it('publish latency does not degrade with active blocking subscribers', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const t = new RedisStreamsTransport({
         client: c,
         retry: { backoffMs: 50, maxAttempts: 3 },
@@ -253,17 +246,13 @@ d('RedisStreamsTransport', () => {
         expect(max).toBeLessThan(100)
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          for (const tp of subscribedTopics) await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        const cleanup = testClient()
+        for (const tp of subscribedTopics) await drainKeys(cleanup, tp)
       }
     })
 
     it('publish proceeds while a subscriber is mid-BLOCK on a long timeout', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const t = new RedisStreamsTransport({
         client: c,
         retry: { backoffMs: 50, maxAttempts: 3 },
@@ -286,18 +275,14 @@ d('RedisStreamsTransport', () => {
         expect(elapsed).toBeLessThan(100)
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          await drainKeys(cleanup, blockedTopic)
-          await drainKeys(cleanup, publishTopic)
-        } finally {
-          await cleanup.quit()
-        }
+        const cleanup = testClient()
+        await drainKeys(cleanup, blockedTopic)
+        await drainKeys(cleanup, publishTopic)
       }
     })
 
     it('onDestroy disconnects all subClients deterministically', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const t = new RedisStreamsTransport({
         client: c,
         retry: { backoffMs: 50, maxAttempts: 3 },
@@ -338,12 +323,8 @@ d('RedisStreamsTransport', () => {
           expect(['end', 'close']).toContain(sc.status)
         }
       } finally {
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          for (const tp of topics) await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        const cleanup = testClient()
+        for (const tp of topics) await drainKeys(cleanup, tp)
       }
     })
   })
@@ -372,7 +353,7 @@ d('RedisStreamsTransport', () => {
     })
 
     it('batch mode head-of-line: next read waits for the current batch to settle', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const tp = `miia-test:dispatch-batch:${randomUUID()}`
       const t = new RedisStreamsTransport({
         client: c,
@@ -414,17 +395,12 @@ d('RedisStreamsTransport', () => {
         expect(idx5).toBeGreaterThan(idx0)
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        await drainKeys(testClient(), tp)
       }
     })
 
     it('sliding mode: fast handlers complete before a slow one (no head-of-line)', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const tp = `miia-test:dispatch-sliding:${randomUUID()}`
       const t = new RedisStreamsTransport({
         client: c,
@@ -461,17 +437,12 @@ d('RedisStreamsTransport', () => {
         expect(completionOrder[completionOrder.length - 1]).toBe(0)
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        await drainKeys(testClient(), tp)
       }
     })
 
     it('sliding mode creates concurrency lanes with :laneN consumer names', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const tp = `miia-test:dispatch-lanes:${randomUUID()}`
       const t = new RedisStreamsTransport({
         client: c,
@@ -493,17 +464,12 @@ d('RedisStreamsTransport', () => {
         expect(consumers[2]).toMatch(/:lane2$/)
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        await drainKeys(testClient(), tp)
       }
     })
 
     it('batch mode creates exactly one lane regardless of concurrency', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const tp = `miia-test:dispatch-batch-lanes:${randomUUID()}`
       const t = new RedisStreamsTransport({
         client: c,
@@ -522,17 +488,12 @@ d('RedisStreamsTransport', () => {
         expect(subs[0]!.lanes[0]!.consumer).not.toMatch(/:lane\d+$/)
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        await drainKeys(testClient(), tp)
       }
     })
 
     it('sliding lane cleanup on unsubscribe disconnects every lane client', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const tp = `miia-test:dispatch-cleanup:${randomUUID()}`
       const t = new RedisStreamsTransport({
         client: c,
@@ -560,17 +521,12 @@ d('RedisStreamsTransport', () => {
         }
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        await drainKeys(testClient(), tp)
       }
     })
 
     it('sliding lane cleanup on onDestroy disconnects every lane client across subs', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const t = new RedisStreamsTransport({
         client: c,
         blockMs: 30_000,
@@ -598,12 +554,8 @@ d('RedisStreamsTransport', () => {
           expect(['end', 'close']).toContain(cli.status)
         }
       } finally {
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          for (const tp of topics) await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        const cleanup = testClient()
+        for (const tp of topics) await drainKeys(cleanup, tp)
       }
     })
   })
@@ -624,7 +576,7 @@ d('RedisStreamsTransport', () => {
     }
 
     it('subscribe with broadcast group destroys orphaned same-host groups from previous incarnations', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const tp = `miia-test:bcast-orphan:${randomUUID()}`
       const t = new RedisStreamsTransport({ client: c, blockMs: 200 })
       await t.onInit?.()
@@ -659,17 +611,12 @@ d('RedisStreamsTransport', () => {
         expect(after).not.toContain(orphanGroup)
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        await drainKeys(testClient(), tp)
       }
     })
 
     it('does not destroy groups from a different hostname', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const tp = `miia-test:bcast-otherhost:${randomUUID()}`
       const t = new RedisStreamsTransport({ client: c, blockMs: 200 })
       await t.onInit?.()
@@ -698,17 +645,12 @@ d('RedisStreamsTransport', () => {
         expect(after).toContain(otherHostGroup)
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        await drainKeys(testClient(), tp)
       }
     })
 
     it('does not destroy groups with a mismatched prefix (different handler/topic)', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const tp = `miia-test:bcast-prefix:${randomUUID()}`
       const t = new RedisStreamsTransport({ client: c, blockMs: 200 })
       await t.onInit?.()
@@ -736,17 +678,12 @@ d('RedisStreamsTransport', () => {
         expect(after).toContain(unrelatedGroup)
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        await drainKeys(testClient(), tp)
       }
     })
 
     it('onDestroy destroys current process broadcast groups', async () => {
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const tp = `miia-test:bcast-destroy:${randomUUID()}`
       const t = new RedisStreamsTransport({ client: c, blockMs: 200, drainTimeoutMs: 200 })
       await t.onInit?.()
@@ -769,19 +706,18 @@ d('RedisStreamsTransport', () => {
       await t.onDestroy?.()
 
       // Reuse a fresh client to verify; the transport's own client may be closing.
-      const verify = new Redis(REDIS_URL!)
+      const verify = testClient()
       try {
         const after = await listGroupNames(verify, tp)
         expect(after).not.toContain(currentGroup)
       } finally {
         await drainKeys(verify, tp)
-        await verify.quit()
       }
     })
 
     it('non-broadcast subscribe does not run orphan scan', async () => {
       // Pre-create a fake "orphan-looking" group; non-broadcast subscribe must not touch it.
-      const c = new Redis(REDIS_URL!)
+      const c = testClient()
       const tp = `miia-test:bcast-skip:${randomUUID()}`
       const t = new RedisStreamsTransport({ client: c, blockMs: 200 })
       await t.onInit?.()
@@ -806,12 +742,7 @@ d('RedisStreamsTransport', () => {
         expect(after).toContain(lookalikeGroup)
       } finally {
         await t.onDestroy?.()
-        const cleanup = new Redis(REDIS_URL!)
-        try {
-          await drainKeys(cleanup, tp)
-        } finally {
-          await cleanup.quit()
-        }
+        await drainKeys(testClient(), tp)
       }
     })
   })

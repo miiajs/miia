@@ -2,12 +2,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import type { LoggerService } from '@miiajs/core'
 import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
-import { Redis } from 'ioredis'
+import type { Redis } from 'ioredis'
 import { FAILURE_LOG_BURST } from '../src/constants.js'
 import { RedisStreamsTransport, type RedisStreamsTransportOptions } from '../src/redis-streams-transport.js'
+import { closeClientsAfterEach, testClient } from './helpers.js'
 
 const REDIS_URL = process.env.REDIS_TEST_URL
 const d = REDIS_URL ? describe : describe.skip
+
+closeClientsAfterEach()
 
 /**
  * Retry horizon used throughout: the idle threshold at which a pending entry counts as abandoned, and so the
@@ -143,8 +146,8 @@ interface SweepHarness {
  * on every tick, with no reconnect timing to make the line count flaky.
  */
 async function sweepHarness(): Promise<SweepHarness> {
-  const probe = new Redis(REDIS_URL!)
-  const busClient = new Redis(REDIS_URL!)
+  const probe = testClient()
+  const busClient = testClient()
   const tp = `miia-test:retry-log:${randomUUID()}`
   const transport = new RedisStreamsTransport({
     client: busClient,
@@ -174,11 +177,7 @@ async function sweepHarness(): Promise<SweepHarness> {
       // Before the drain, so `onDestroy()` gets a working client whatever the test left behind.
       heal()
       await transport.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await Promise.all([probe.quit(), busClient.quit()])
-      }
+      await drainKeys(probe, tp)
     },
   }
 }
@@ -189,7 +188,7 @@ d('RedisStreamsTransport retry', () => {
   let topic: string
 
   beforeEach(async () => {
-    client = new Redis(REDIS_URL!)
+    client = testClient()
     topic = `miia-test:${randomUUID()}`
     transport = new RedisStreamsTransport({
       client,
@@ -203,12 +202,7 @@ d('RedisStreamsTransport retry', () => {
 
   afterEach(async () => {
     await transport.onDestroy?.()
-    const cleanup = new Redis(REDIS_URL!)
-    try {
-      await drainKeys(cleanup, topic)
-    } finally {
-      await cleanup.quit()
-    }
+    await drainKeys(testClient(), topic)
   })
 
   it('retries nacked messages with exponential backoff', async () => {
@@ -233,13 +227,13 @@ d('RedisStreamsTransport retry', () => {
   })
 
   it('honours a fractional backoff level instead of collapsing it onto the horizon', async () => {
-    const probe = new Redis(REDIS_URL!)
+    const probe = testClient()
     const tp = `miia-test:retry-fractional:${randomUUID()}`
     const horizon = HORIZON_MS * 2
     // 45 * 1.5 = 67.5, and Redis rejects a fractional `IDLE`: an unrounded park is refused and the entry ages out at
     // the horizon instead. The attempt sequence looks identical either way, so only the gap tells them apart.
     const t = new RedisStreamsTransport({
-      client: new Redis(REDIS_URL!),
+      client: testClient(),
       retry: { backoffMs: 45, backoffMultiplier: 1.5, maxAttempts: 4 },
       retryIntervalMs: 20,
       minIdleMs: horizon,
@@ -269,11 +263,7 @@ d('RedisStreamsTransport retry', () => {
       expect(gap).toBeLessThan(horizon / 2)
     } finally {
       await t.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await probe.quit()
-      }
+      await drainKeys(probe, tp)
     }
   })
 
@@ -495,10 +485,10 @@ d('RedisStreamsTransport retry', () => {
   })
 
   it('redelivers an entry left pending by a dead consumer', async () => {
-    const probe = new Redis(REDIS_URL!)
+    const probe = testClient()
     const tp = `miia-test:retry-dead:${randomUUID()}`
     const t = new RedisStreamsTransport({
-      client: new Redis(REDIS_URL!),
+      client: testClient(),
       retry: { backoffMs: 50, maxAttempts: 5 },
       retryIntervalMs: 50,
       minIdleMs: HORIZON_MS,
@@ -530,16 +520,12 @@ d('RedisStreamsTransport retry', () => {
       await waitFor(async () => (await pending(probe, tp, 'g')).length === 0, 'an empty PEL')
     } finally {
       await t.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await probe.quit()
-      }
+      await drainKeys(probe, tp)
     }
   })
 
   it('advances the attempt sequence across a consumer crash', async () => {
-    const probe = new Redis(REDIS_URL!)
+    const probe = testClient()
     const tp = `miia-test:retry-crash:${randomUUID()}`
     const options: RedisStreamsTransportOptions = {
       retry: { backoffMs: 50, maxAttempts: 4 },
@@ -548,8 +534,8 @@ d('RedisStreamsTransport retry', () => {
       blockMs: 100,
     }
     // A killed process drains nothing, so the crashing side gets no drain budget at all.
-    const crashed = new RedisStreamsTransport({ ...options, client: new Redis(REDIS_URL!), drainTimeoutMs: 0 })
-    const survivor = new RedisStreamsTransport({ ...options, client: new Redis(REDIS_URL!) })
+    const crashed = new RedisStreamsTransport({ ...options, client: testClient(), drainTimeoutMs: 0 })
+    const survivor = new RedisStreamsTransport({ ...options, client: testClient() })
     await crashed.onInit?.()
     await survivor.onInit?.()
 
@@ -590,16 +576,12 @@ d('RedisStreamsTransport retry', () => {
       expect(dead[0]?.meta.lastError).toBe('still failing')
     } finally {
       await survivor.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await probe.quit()
-      }
+      await drainKeys(probe, tp)
     }
   }, 15_000)
 
   it('heartbeat keeps a handler that outlives the horizon from being stolen by another transport', async () => {
-    const probe = new Redis(REDIS_URL!)
+    const probe = testClient()
     const tp = `miia-test:retry-heartbeat:${randomUUID()}`
     const options: RedisStreamsTransportOptions = {
       retry: { backoffMs: 50, maxAttempts: 5 },
@@ -608,8 +590,8 @@ d('RedisStreamsTransport retry', () => {
       blockMs: 100,
       drainTimeoutMs: 3000,
     }
-    const worker = new RedisStreamsTransport({ ...options, client: new Redis(REDIS_URL!) })
-    const sweeper = new RedisStreamsTransport({ ...options, client: new Redis(REDIS_URL!) })
+    const worker = new RedisStreamsTransport({ ...options, client: testClient() })
+    const sweeper = new RedisStreamsTransport({ ...options, client: testClient() })
     await worker.onInit?.()
     await sweeper.onInit?.()
 
@@ -656,17 +638,13 @@ d('RedisStreamsTransport retry', () => {
     } finally {
       await worker.onDestroy?.()
       await sweeper.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await probe.quit()
-      }
+      await drainKeys(probe, tp)
     }
   }, 15_000)
 
   it('a heartbeat that fails on one pair still renews the entries of every other pair', async () => {
-    const probe = new Redis(REDIS_URL!)
-    const workerClient = new Redis(REDIS_URL!)
+    const probe = testClient()
+    const workerClient = testClient()
     const wedged = `miia-test:retry-hb-wedged:${randomUUID()}`
     const healthy = `miia-test:retry-hb-healthy:${randomUUID()}`
     const options: RedisStreamsTransportOptions = {
@@ -678,7 +656,7 @@ d('RedisStreamsTransport retry', () => {
       drainTimeoutMs: 0,
     }
     const worker = new RedisStreamsTransport({ ...options, client: workerClient })
-    const sweeper = new RedisStreamsTransport({ ...options, client: new Redis(REDIS_URL!) })
+    const sweeper = new RedisStreamsTransport({ ...options, client: testClient() })
     const logs = captureLogs(worker)
     await worker.onInit?.()
     await sweeper.onInit?.()
@@ -751,18 +729,14 @@ d('RedisStreamsTransport retry', () => {
       raw.xclaim = xclaim
       await worker.onDestroy?.()
       await sweeper.onDestroy?.()
-      try {
-        await drainKeys(probe, wedged)
-        await drainKeys(probe, healthy)
-      } finally {
-        await Promise.all([probe.quit(), workerClient.quit()])
-      }
+      await drainKeys(probe, wedged)
+      await drainKeys(probe, healthy)
     }
   }, 15_000)
 
   it('bounds the nack path on a heartbeat that never returns instead of waiting it out', async () => {
-    const probe = new Redis(REDIS_URL!)
-    const busClient = new Redis(REDIS_URL!)
+    const probe = testClient()
+    const busClient = testClient()
     const slow = `miia-test:nack-hb-slow:${randomUUID()}`
     const flaky = `miia-test:nack-hb-flaky:${randomUUID()}`
     const t = new RedisStreamsTransport({
@@ -825,17 +799,13 @@ d('RedisStreamsTransport retry', () => {
       expect(attempts).toEqual([1, 2])
     } finally {
       raw.xclaim = xclaim
-      try {
-        await drainKeys(probe, slow)
-        await drainKeys(probe, flaky)
-      } finally {
-        await Promise.all([probe.quit(), busClient.quit()])
-      }
+      await drainKeys(probe, slow)
+      await drainKeys(probe, flaky)
     }
   }, 15_000)
 
   it('two transports sweeping one group write exactly one DLQ record per message', async () => {
-    const probe = new Redis(REDIS_URL!)
+    const probe = testClient()
     const tp = `miia-test:retry-gated-dlq:${randomUUID()}`
     const messages = 5
     const options: RedisStreamsTransportOptions = {
@@ -844,8 +814,8 @@ d('RedisStreamsTransport retry', () => {
       minIdleMs: HORIZON_MS,
       blockMs: 100,
     }
-    const a = new RedisStreamsTransport({ ...options, client: new Redis(REDIS_URL!) })
-    const b = new RedisStreamsTransport({ ...options, client: new Redis(REDIS_URL!) })
+    const a = new RedisStreamsTransport({ ...options, client: testClient() })
+    const b = new RedisStreamsTransport({ ...options, client: testClient() })
     await a.onInit?.()
     await b.onInit?.()
 
@@ -878,20 +848,16 @@ d('RedisStreamsTransport retry', () => {
     } finally {
       await a.onDestroy?.()
       await b.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await probe.quit()
-      }
+      await drainKeys(probe, tp)
     }
   }, 15_000)
 
   it('a reclaimed handler that never returns does not stall housekeeping for another subscription', async () => {
-    const probe = new Redis(REDIS_URL!)
+    const probe = testClient()
     const stalling = `miia-test:retry-stall:${randomUUID()}`
     const healthy = `miia-test:retry-stall-healthy:${randomUUID()}`
     const t = new RedisStreamsTransport({
-      client: new Redis(REDIS_URL!),
+      client: testClient(),
       retry: { backoffMs: 50, maxAttempts: 5 },
       retryIntervalMs: 50,
       minIdleMs: HORIZON_MS,
@@ -937,20 +903,16 @@ d('RedisStreamsTransport retry', () => {
       expect(delivered[0]?.payload).toEqual({ n: 2 })
     } finally {
       await t.onDestroy?.()
-      try {
-        await drainKeys(probe, stalling)
-        await drainKeys(probe, healthy)
-      } finally {
-        await probe.quit()
-      }
+      await drainKeys(probe, stalling)
+      await drainKeys(probe, healthy)
     }
   }, 15_000)
 
   it('drops and logs instead of writing a DLQ record when dlq is false (nack path)', async () => {
-    const probe = new Redis(REDIS_URL!)
+    const probe = testClient()
     const tp = `miia-test:retry-nodlq-nack:${randomUUID()}`
     const t = new RedisStreamsTransport({
-      client: new Redis(REDIS_URL!),
+      client: testClient(),
       retry: { backoffMs: 50, maxAttempts: 2, dlq: false },
       retryIntervalMs: 50,
       minIdleMs: HORIZON_MS,
@@ -981,19 +943,15 @@ d('RedisStreamsTransport retry', () => {
       expect(logs.errors.some((m) => m.includes(env.id))).toBe(true)
     } finally {
       await t.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await probe.quit()
-      }
+      await drainKeys(probe, tp)
     }
   })
 
   it('drops and logs instead of writing a DLQ record when dlq is false (abandoned path)', async () => {
-    const probe = new Redis(REDIS_URL!)
+    const probe = testClient()
     const tp = `miia-test:retry-nodlq-abandoned:${randomUUID()}`
     const t = new RedisStreamsTransport({
-      client: new Redis(REDIS_URL!),
+      client: testClient(),
       retry: { backoffMs: 50, maxAttempts: 1, dlq: false },
       retryIntervalMs: 50,
       minIdleMs: HORIZON_MS,
@@ -1026,11 +984,7 @@ d('RedisStreamsTransport retry', () => {
       expect(logs.errors.some((m) => m.includes(env.id))).toBe(true)
     } finally {
       await t.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await probe.quit()
-      }
+      await drainKeys(probe, tp)
     }
   })
 
@@ -1148,10 +1102,10 @@ d('RedisStreamsTransport retry', () => {
   }, 15_000)
 
   it('drains a legacy retry ZSET entry and delivers it with a fresh attempt budget', async () => {
-    const probe = new Redis(REDIS_URL!)
+    const probe = testClient()
     const tp = `miia-test:retry-legacy-zset:${randomUUID()}`
     const t = new RedisStreamsTransport({
-      client: new Redis(REDIS_URL!),
+      client: testClient(),
       retry: { backoffMs: 50, maxAttempts: 3 },
       retryIntervalMs: 50,
       minIdleMs: HORIZON_MS,
@@ -1181,17 +1135,13 @@ d('RedisStreamsTransport retry', () => {
       await waitFor(async () => (await probe.zcard(`${tp}:retry`)) === 0, 'the legacy ZSET to be emptied')
     } finally {
       await t.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await probe.quit()
-      }
+      await drainKeys(probe, tp)
     }
   })
 
   it('drains the legacy ZSET once per topic on subscribe, not once per retry tick', async () => {
-    const probe = new Redis(REDIS_URL!)
-    const busClient = new Redis(REDIS_URL!)
+    const probe = testClient()
+    const busClient = testClient()
     const tp = `miia-test:retry-legacy-cadence:${randomUUID()}`
     const t = new RedisStreamsTransport({
       client: busClient,
@@ -1237,19 +1187,15 @@ d('RedisStreamsTransport retry', () => {
       expect(drains).toBe(1)
     } finally {
       await t.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await Promise.all([probe.quit(), busClient.quit()])
-      }
+      await drainKeys(probe, tp)
     }
   })
 
   it('still retries when only the deprecated retrySchedulerIntervalMs is set', async () => {
-    const probe = new Redis(REDIS_URL!)
+    const probe = testClient()
     const tp = `miia-test:retry-deprecated-alias:${randomUUID()}`
     const t = new RedisStreamsTransport({
-      client: new Redis(REDIS_URL!),
+      client: testClient(),
       retry: { backoffMs: 50, maxAttempts: 3 },
       retrySchedulerIntervalMs: 50,
       minIdleMs: HORIZON_MS,
@@ -1276,11 +1222,7 @@ d('RedisStreamsTransport retry', () => {
       expect(attempts).toEqual([1, 2, 3])
     } finally {
       await t.onDestroy?.()
-      try {
-        await drainKeys(probe, tp)
-      } finally {
-        await probe.quit()
-      }
+      await drainKeys(probe, tp)
     }
   })
 
