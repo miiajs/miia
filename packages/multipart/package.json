@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/multipart",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Streaming multipart/form-data for MiiaJS - backpressured part iterator, per-file and per-form limits, buffered form helper.",
@@ -49,7 +49,7 @@
     "multipasta": "^0.2.8"
   },
   "peerDependencies": {
-    "@miiajs/core": ">=0.6.0 <1.0.0"
+    "@miiajs/core": ">=0.7.0 <1.0.0"
   },
   "devDependencies": {
     "@miiajs/core": "workspace:*",
