@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/messaging",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Messaging for MiiaJS - decorator-driven event bus, retry with auto-DLQ, idempotency, named buses, pluggable transports.",

@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/testing",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Testing utilities for MiiaJS applications.",

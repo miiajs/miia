@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/messaging-redis",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Redis Streams transport for @miiajs/messaging - consumer groups, exponential backoff retry held in the group's PEL, auto-DLQ, idempotency store.",
@@ -47,7 +47,7 @@
     "deno": ">=2.6.1"
   },
   "dependencies": {
-    "@miiajs/messaging": "^0.6.0"
+    "@miiajs/messaging": "^0.6.1"
   },
   "peerDependencies": {
     "@miiajs/core": ">=0.6.0 <1.0.0",

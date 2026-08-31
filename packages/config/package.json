@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/config",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "ConfigModule and ConfigService for MiiaJS with validated environment variables (Zod, Valibot, ArkType, or any ZodLike validator).",
