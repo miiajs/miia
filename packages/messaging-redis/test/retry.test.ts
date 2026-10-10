@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import type { LoggerService } from '@miiajs/core'
 import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
 import type { Redis } from 'ioredis'
 import { FAILURE_LOG_BURST } from '../src/constants.js'
 import { RedisStreamsTransport, type RedisStreamsTransportOptions } from '../src/redis-streams-transport.js'
-import { closeClientsAfterEach, testClient } from './helpers.js'
+import { type CapturedLogs, captureLogs, closeClientsAfterEach, testClient, waitFor } from './helpers.js'
 
 const REDIS_URL = process.env.REDIS_TEST_URL
 const d = REDIS_URL ? describe : describe.skip
@@ -35,20 +34,6 @@ function wait(ms: number): Promise<void> {
 async function drainKeys(client: Redis, prefix: string): Promise<void> {
   const keys = await client.keys(`${prefix}*`)
   if (keys.length > 0) await client.del(...keys)
-}
-
-/**
- * Poll until `check` holds. Everything under test is driven by a Redis round trip on a timer, so the arrival time is
- * a range rather than a number - polling keeps the assertion about behaviour and the failure message about what never
- * happened. The timeout sits below bun's per-test default so a failure reports this message and not `test timed out`.
- */
-async function waitFor(check: () => boolean | Promise<boolean>, label: string, timeoutMs = 3000): Promise<void> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    if (await check()) return
-    await wait(10)
-  }
-  throw new Error(`timed out after ${timeoutMs}ms waiting for ${label}`)
 }
 
 /** `XPENDING` extended-form row: id, consumer, idle ms, delivery count. */
@@ -86,34 +71,6 @@ async function takeAsDeadConsumer(client: Redis, topic: string, group: string, c
     '>',
   )) as Array<[string, Array<[string, string[]]>]> | null
   return (read?.[0]?.[1] ?? []).map(([id]) => id)
-}
-
-interface CapturedLogs {
-  errors: string[]
-  /** Second argument of each `error()` call, by the same index: the cause a failure line carries. */
-  errorDetails: string[]
-  warns: string[]
-  logs: string[]
-}
-
-/** `dlq: false` drops the message; the log line is the only trace it leaves, so the test has to read the logger. */
-function captureLogs(transport: RedisStreamsTransport): CapturedLogs {
-  const captured: CapturedLogs = { errors: [], errorDetails: [], warns: [], logs: [] }
-  const recorder: LoggerService = {
-    log: (message) => {
-      captured.logs.push(message)
-    },
-    warn: (message) => {
-      captured.warns.push(message)
-    },
-    error: (message, trace) => {
-      captured.errors.push(message)
-      captured.errorDetails.push(trace ?? '')
-    },
-    debug: () => {},
-  }
-  ;(transport as unknown as { logger: LoggerService }).logger = recorder
-  return captured
 }
 
 /** One failure line of a housekeeping channel: the message carries the count, the detail carries the cause. */

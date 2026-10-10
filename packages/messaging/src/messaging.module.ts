@@ -3,7 +3,7 @@ import { resolveOptions } from '@miiajs/core'
 import { MessageBus } from './message-bus.js'
 import { type IdempotencyStore } from './idempotency.js'
 import { getMessageBusToken, getMessageTransportToken, getIdempotencyStoreToken } from './tokens.js'
-import { type DispatchMode, type MessageTransport } from './types.js'
+import { type DispatchMode, type InitialPosition, type MessageTransport } from './types.js'
 
 /**
  * Bus-level defaults for dispatch behavior. Per-handler `@On({ mode, concurrency })`
@@ -44,6 +44,11 @@ export interface MessagingModuleOptions {
    * Recommended for any production deployment with shared infrastructure.
    */
   appName?: string
+  /**
+   * Bus default for where a newly created subscription starts reading. Per-handler `@On({ initialPosition })`
+   * overrides it; broadcast handlers ignore it and always start at `'latest'`. Default `'latest'`.
+   */
+  initialPosition?: InitialPosition
 }
 
 /**
@@ -108,6 +113,7 @@ export class MessagingModule {
             return new MessageBus(transport, store, name ?? null, {
               dispatch: opts.dispatch ?? null,
               appName: opts.appName ?? null,
+              initialPosition: opts.initialPosition ?? null,
             })
           },
         },

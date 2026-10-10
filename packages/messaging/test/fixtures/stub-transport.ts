@@ -1,6 +1,7 @@
 import type {
   DispatchMode,
   HandlerResult,
+  InitialPositionKind,
   MessageEnvelope,
   MessageTransport,
   SubscribeOptions,
@@ -17,6 +18,8 @@ export interface StubTransportOptions {
   defaultMode: DispatchMode
   /** Default `true` - assume broker-style competing consumers unless otherwise specified. */
   supportsCompetingConsumers?: boolean
+  /** Set on the instance only when given, so a transport that does not declare it can be tested. */
+  supportedInitialPositions?: readonly InitialPositionKind[]
 }
 
 /**
@@ -28,12 +31,14 @@ export class StubTransport implements MessageTransport {
   readonly supportedModes: readonly DispatchMode[]
   readonly defaultMode: DispatchMode
   readonly supportsCompetingConsumers: boolean
+  readonly supportedInitialPositions?: readonly InitialPositionKind[]
   readonly subscribes: StubSubscribeRecord[] = []
 
   constructor(options: StubTransportOptions) {
     this.supportedModes = options.supportedModes
     this.defaultMode = options.defaultMode
     this.supportsCompetingConsumers = options.supportsCompetingConsumers ?? true
+    if (options.supportedInitialPositions) this.supportedInitialPositions = options.supportedInitialPositions
   }
 
   async publish(_envelope: MessageEnvelope): Promise<void> {

@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
 import type { Redis } from 'ioredis'
 import { RedisStreamsTransport } from '../src/redis-streams-transport.js'
-import { closeClientsAfterEach, testClient } from './helpers.js'
+import { type CapturedLogs, captureLogs, closeClientsAfterEach, testClient, waitFor } from './helpers.js'
 
 const REDIS_URL = process.env.REDIS_TEST_URL
 const d = REDIS_URL ? describe : describe.skip
@@ -744,6 +744,173 @@ d('RedisStreamsTransport', () => {
         await t.onDestroy?.()
         await drainKeys(testClient(), tp)
       }
+    })
+  })
+
+  describe('initial position', () => {
+    // Every test owns its transport and a fresh topic: a group's start position is decided once, by whoever creates it.
+    const opened: Array<{ t: RedisStreamsTransport; tp: string }> = []
+
+    afterEach(async () => {
+      for (const { t, tp } of opened.splice(0)) {
+        await t.onDestroy?.()
+        await drainKeys(testClient(), tp)
+      }
+    })
+
+    async function setup(): Promise<{ c: Redis; t: RedisStreamsTransport; logs: CapturedLogs; tp: string }> {
+      const c = testClient()
+      const tp = `miia-test:initpos:${randomUUID()}`
+      const t = new RedisStreamsTransport({ client: c, blockMs: 200, retryIntervalMs: NO_HOUSEKEEPING })
+      const logs = captureLogs(t)
+      await t.onInit?.()
+      opened.push({ t, tp })
+      return { c, t, logs, tp }
+    }
+
+    function collect(received: string[]): (e: MessageEnvelope) => Promise<HandlerResult> {
+      return async (e) => {
+        received.push((e.payload as { n: string }).n)
+        return { status: 'ack' }
+      }
+    }
+
+    function created(logs: CapturedLogs): string[] {
+      return logs.logs.filter((line) => line.startsWith('Created consumer group'))
+    }
+
+    async function redisNowMs(c: Redis): Promise<number> {
+      const [seconds, micros] = await c.time()
+      return Number(seconds) * 1000 + Math.floor(Number(micros) / 1000)
+    }
+
+    async function groupInfos(c: Redis, tp: string): Promise<Array<Record<string, unknown>>> {
+      let rows: unknown[][]
+      try {
+        rows = (await (c as unknown as { xinfo: (...args: unknown[]) => Promise<unknown> }).xinfo(
+          'GROUPS',
+          tp,
+        )) as unknown[][]
+      } catch (err) {
+        if (String(err).includes('no such key')) return []
+        throw err
+      }
+      return rows.map((row) => {
+        const info: Record<string, unknown> = {}
+        for (let i = 0; i < row.length; i += 2) info[String(row[i])] = row[i + 1]
+        return info
+      })
+    }
+
+    it("'latest' (the default) skips entries published before the group existed", async () => {
+      const { t, logs, tp } = await setup()
+      const received: string[] = []
+
+      await t.publish(envelope(tp, { n: 'before' }))
+      await t.subscribe(tp, collect(received), { group: 'g' })
+      await t.publish(envelope(tp, { n: 'after' }))
+
+      // Entries are read in id order, so by the time `after` lands `before` would already have.
+      await waitFor(() => received.includes('after'), 'the entry published after subscribe')
+      expect(received).toEqual(['after'])
+      expect(created(logs)).toHaveLength(1)
+      expect(created(logs)[0]).toMatch(/^Created consumer group .+ at \$$/)
+    })
+
+    it("'earliest' delivers everything the stream retains", async () => {
+      const { c, t, logs, tp } = await setup()
+      const received: string[] = []
+
+      await c.xadd(tp, '1-1', 'data', JSON.stringify(envelope(tp, { n: 'ancient' })))
+      await t.subscribe(tp, collect(received), { group: 'g', initialPosition: 'earliest' })
+
+      await waitFor(() => received.includes('ancient'), 'the entry with the oldest possible id')
+      expect(created(logs)[0]).toMatch(/ at 0$/)
+    })
+
+    it('{ since } delivers the window and skips what is older, measured on the Redis clock', async () => {
+      const { c, t, logs, tp } = await setup()
+      const received: string[] = []
+      const now = await redisNowMs(c)
+
+      await c.xadd(tp, `${now - 120_000}-1`, 'data', JSON.stringify(envelope(tp, { n: 'old' })))
+      await t.publish(envelope(tp, { n: 'recent' }))
+      await t.subscribe(tp, collect(received), { group: 'g', initialPosition: { since: 60_000 } })
+
+      await waitFor(() => received.includes('recent'), 'the entry inside the window')
+      expect(received).toEqual(['recent'])
+      const line = created(logs)[0]
+      expect(line).toMatch(/ at \d+-0$/)
+      const cutoff = Number(/ at (\d+)-0$/.exec(line!)![1])
+      expect(Math.abs(cutoff - (now - 60_000))).toBeLessThan(5000)
+    })
+
+    it("a broadcast group starts at '$' whatever position it is passed", async () => {
+      const { t, logs, tp } = await setup()
+      const received: string[] = []
+
+      await t.publish(envelope(tp, { n: 'before' }))
+      await t.subscribe(tp, collect(received), { group: 'bcast', broadcast: true, initialPosition: 'earliest' })
+      await t.publish(envelope(tp, { n: 'after' }))
+
+      await waitFor(() => received.includes('after'), 'the entry published after subscribe')
+      expect(received).toEqual(['after'])
+      expect(created(logs)).toHaveLength(0)
+    })
+
+    it('an existing group is never moved', async () => {
+      const { c, t, logs, tp } = await setup()
+      const received: string[] = []
+
+      const idA = await c.xadd(tp, '*', 'data', JSON.stringify(envelope(tp, { n: 'A' })))
+      await c.xgroup('CREATE', tp, 'g', '$', 'MKSTREAM')
+      await t.subscribe(tp, collect(received), { group: 'g', initialPosition: 'earliest' })
+
+      // Read before B exists: once B is delivered, last-delivered-id moves past A and proves nothing.
+      const [info] = await groupInfos(c, tp)
+      expect(info?.['last-delivered-id']).toBe(idA)
+
+      await t.publish(envelope(tp, { n: 'B' }))
+      await waitFor(() => received.includes('B'), 'the entry published after subscribe')
+      expect(received).toEqual(['B'])
+      expect(created(logs)).toHaveLength(0)
+    })
+
+    it('a denied TIME falls back to the process clock and warns once', async () => {
+      const { c, t, logs, tp } = await setup()
+      ;(c as unknown as { time: () => Promise<unknown> }).time = () =>
+        Promise.reject(new Error("NOPERM User limited has no permissions to run the 'time' command"))
+      const first: string[] = []
+      const second: string[] = []
+
+      await t.publish(envelope(tp, { n: 'recent' }))
+      await t.subscribe(tp, collect(first), { group: 'g1', initialPosition: { since: 60_000 } })
+      await t.subscribe(tp, collect(second), { group: 'g2', initialPosition: { since: 60_000 } })
+
+      await waitFor(() => first.includes('recent') && second.includes('recent'), 'both groups to get the entry')
+      expect(logs.warns.filter((line) => line.startsWith('TIME rejected'))).toHaveLength(1)
+    })
+
+    it('any other TIME failure fails the subscribe', async () => {
+      const { c, t, tp } = await setup()
+      ;(c as unknown as { time: () => Promise<unknown> }).time = () =>
+        Promise.reject(new Error('Connection is closed.'))
+
+      await expect(
+        t.subscribe(tp, async () => ({ status: 'ack' }), { group: 'g', initialPosition: { since: 1000 } }),
+      ).rejects.toThrow(/Connection is closed/)
+      expect(await groupInfos(c, tp)).toEqual([])
+    })
+
+    it('a direct caller passing an invalid window is rejected before any group is created', async () => {
+      const { c, t, tp } = await setup()
+
+      for (const since of [Number.NaN, -1000]) {
+        await expect(
+          t.subscribe(tp, async () => ({ status: 'ack' }), { group: 'g', initialPosition: { since } }),
+        ).rejects.toThrow(/Invalid initialPosition/)
+      }
+      expect(await groupInfos(c, tp)).toEqual([])
     })
   })
 })

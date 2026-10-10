@@ -33,6 +33,16 @@ describe('@On decorator', () => {
     })
   })
 
+  it('stores initialPosition when provided', () => {
+    class S {
+      @On('media.video', { initialPosition: { since: 3_600_000 } })
+      handle() {}
+    }
+
+    const items = getMeta<OnMeta[]>(S, ON)
+    expect(items![0]?.initialPosition).toEqual({ since: 3_600_000 })
+  })
+
   it('accumulates multiple @On on the same class', () => {
     class S {
       @On('a')

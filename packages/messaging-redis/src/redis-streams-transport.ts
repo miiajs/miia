@@ -8,6 +8,8 @@ import {
   type MessageEnvelope,
   type MessageTransport,
   type HandlerResult,
+  type InitialPosition,
+  type InitialPositionKind,
   nextBackoffMs,
   type RetryConfig,
   type SubscribeOptions,
@@ -147,8 +149,9 @@ interface RawCommands {
 }
 
 /**
- * Redis Streams transport for `@miiajs/messaging`. `publish()` is `XADD`; `subscribe()` joins a consumer group and
- * reads it with `XREADGROUP ... BLOCK`. Four moving parts:
+ * Redis Streams transport for `@miiajs/messaging`. `publish()` is `XADD`; `subscribe()` joins a consumer group -
+ * creating it at the subscription's `initialPosition` when it does not exist - and reads it with
+ * `XREADGROUP ... BLOCK`. Four moving parts:
  *
  * - **The PEL is the retry queue.** A nack acks nothing and re-publishes nothing: the entry stays pending in its own
  *   group and is re-parked with `XCLAIM ... IDLE <horizon - backoff> JUSTID`, so it resurfaces one backoff later and
@@ -173,6 +176,7 @@ export class RedisStreamsTransport implements MessageTransport {
   readonly supportedModes = ['batch', 'sliding'] as const satisfies readonly DispatchMode[]
   readonly defaultMode: DispatchMode = 'batch'
   readonly supportsCompetingConsumers = true
+  readonly supportedInitialPositions = ['latest', 'earliest', 'since'] as const satisfies readonly InitialPositionKind[]
 
   private client: Redis
   /** True if the transport owns the client lifecycle (connect/quit). */
@@ -210,6 +214,7 @@ export class RedisStreamsTransport implements MessageTransport {
    * heartbeat, each topic's legacy drain. Only ever read back whole, so the key doubles as the channel's log name.
    */
   private failures = new Map<string, FailureRun>()
+  private timeFallbackWarned = false
 
   constructor(options: RedisStreamsTransportOptions) {
     if (!options.client && !options.url) {
@@ -410,6 +415,63 @@ export class RedisStreamsTransport implements MessageTransport {
   }
 
   /**
+   * Create the group unless it exists - an existing group is never moved, whatever position is asked for. Broadcast
+   * groups start at `$` regardless: they live and die with this process. MKSTREAM auto-creates the stream if missing.
+   */
+  private async ensureGroup(
+    topic: string,
+    group: string,
+    position: InitialPosition,
+    isBroadcast: boolean,
+  ): Promise<void> {
+    const start = isBroadcast ? '$' : await this.groupStartId(position)
+    try {
+      await this.client.xgroup('CREATE', topic, group, start, 'MKSTREAM')
+    } catch (err) {
+      if (String(err).includes('BUSYGROUP')) return
+      throw err
+    }
+    if (!isBroadcast) this.logger.log(`Created consumer group ${group} on ${topic} at ${start}`)
+  }
+
+  /**
+   * `XGROUP CREATE` start id: `$` for latest, `0` for earliest, `<ms>-0` for a window - ids carry the Redis clock.
+   * Throws on anything else: the bus validates, but a direct caller's `{ since: NaN }` would otherwise replay the whole
+   * stream and a negative `since` would start the group in the future and skip new entries.
+   */
+  private async groupStartId(position: InitialPosition): Promise<string> {
+    if (position === 'latest') return '$'
+    if (position === 'earliest') return '0'
+    const since = (position as { since?: unknown } | null)?.since
+    if (typeof since !== 'number' || !Number.isInteger(since) || since < 1) {
+      throw new Error(`[messaging-redis] Invalid initialPosition ${JSON.stringify(position)}`)
+    }
+    const cutoff = (await this.redisNowMs()) - since
+    return cutoff > 0 ? `${cutoff}-0` : '0'
+  }
+
+  /**
+   * Redis clock in ms. Only a denied or unknown `TIME` (ACL category `@fast` only, or a proxy that does not know it)
+   * falls back to the process clock - any other error would fail the `XGROUP CREATE` right after it anyway.
+   */
+  private async redisNowMs(): Promise<number> {
+    try {
+      const [seconds, micros] = await this.client.time()
+      return Number(seconds) * 1000 + Math.floor(Number(micros) / 1000)
+    } catch (err) {
+      const msg = String(err)
+      if (!msg.includes('NOPERM') && !/unknown command|unsupported command/i.test(msg)) throw err
+      if (!this.timeFallbackWarned) {
+        this.timeFallbackWarned = true
+        this.logger.warn(
+          `TIME rejected - a new group with initialPosition.since is measured on the process clock: ${msg}`,
+        )
+      }
+      return Date.now()
+    }
+  }
+
+  /**
    * A housekeeping channel failed. The first failure of a run logs verbatim, then the channel goes quiet apart from
    * one line per `FAILURE_LOG_WINDOW_MS` carrying the running count: a dead Redis fails every channel every tick, and
    * the hundredth copy of one cause says nothing the first did not. A *changed* cause is a different matter - a sweep
@@ -495,12 +557,7 @@ export class RedisStreamsTransport implements MessageTransport {
       await this.cleanupBroadcastOrphans(topic, group)
     }
 
-    // Idempotent group creation - MKSTREAM auto-creates the stream if missing.
-    try {
-      await this.client.xgroup('CREATE', topic, group, '$', 'MKSTREAM')
-    } catch (err) {
-      if (!String(err).includes('BUSYGROUP')) throw err
-    }
+    await this.ensureGroup(topic, group, options.initialPosition ?? 'latest', isBroadcast)
 
     // Lane fan-out: batch reads `COUNT=concurrency` on one lane (head-of-line within the batch), sliding spawns
     // `concurrency` lanes of `COUNT=1`, each with its own client and `:laneN` consumer name so Redis spreads entries.

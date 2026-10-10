@@ -58,6 +58,20 @@ export interface MessageMeta {
  */
 export type DispatchMode = 'batch' | 'sliding'
 
+/**
+ * Where a subscription starts reading when its broker-side group is created for the first time. An existing group is
+ * never moved - this only decides what a brand new one does with entries published before it existed.
+ *
+ * - `'latest'` - only entries published after the group is created. Default; RabbitMQ and Kafka `latest` behave so.
+ * - `'earliest'` - everything the broker still retains for the topic. On a broker without retention that is the
+ *   topic's whole history.
+ * - `{ since: ms }` - entries published in the last `since` milliseconds, plus everything after.
+ */
+export type InitialPosition = 'latest' | 'earliest' | { since: number }
+
+/** The capability name of each `InitialPosition` form, as transports declare them. */
+export type InitialPositionKind = 'latest' | 'earliest' | 'since'
+
 export interface SubscribeOptions {
   /**
    * Consumer group for load-balancing between replicas/processes.
@@ -92,6 +106,13 @@ export interface SubscribeOptions {
    * without broker state (in-memory) ignore it.
    */
   broadcast?: boolean
+
+  /**
+   * Resolved initial position for this subscription: `@On({ initialPosition })` > bus default > `'latest'`, always
+   * `'latest'` for broadcast. Validated against `transport.supportedInitialPositions` before `subscribe()`. Absent
+   * means `'latest'` (direct callers).
+   */
+  initialPosition?: InitialPosition
 }
 
 export type HandlerResult = { status: 'ack' } | { status: 'nack'; error: Error }
@@ -162,6 +183,14 @@ export interface MessageTransport {
    *   (no durable groups)
    */
   readonly supportsCompetingConsumers: boolean
+
+  /**
+   * Initial positions this transport can honour for a newly created subscription. Absent means `['latest']`: a
+   * handler asking for more fails at startup instead of being silently started at the end. Must include `'latest'` -
+   * defaults and broadcast handlers always resolve to it. A transport that retains nothing (in-memory) may declare all
+   * of them, since "everything retained" is then nothing.
+   */
+  readonly supportedInitialPositions?: readonly InitialPositionKind[]
 
   publish(envelope: MessageEnvelope): Promise<void>
 

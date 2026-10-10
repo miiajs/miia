@@ -1,5 +1,5 @@
 import { createMethodDecorator, pushMeta, setInMapMeta, type DiscoverableMethodMeta } from '@miiajs/core'
-import type { DispatchMode, MessageMeta } from './types.js'
+import type { DispatchMode, InitialPosition, MessageMeta } from './types.js'
 
 export const ON = Symbol('miia:messaging:on')
 
@@ -41,6 +41,13 @@ export interface OnMeta extends DiscoverableMethodMeta {
    * (cache invalidation, websocket broadcast).
    */
   broadcast?: boolean
+  /**
+   * Where the subscription starts reading when its broker-side group is created for the first time. Resolution
+   * order: this field > `MessagingModule.configure({ initialPosition })` > `'latest'`. An existing group is never
+   * moved. Broadcast handlers always start at `'latest'` - the bus default does not reach them, and an explicit
+   * non-latest value throws at `MessageBus.onReady()`.
+   */
+  initialPosition?: InitialPosition
 }
 
 export interface IdempotentMeta {
@@ -65,6 +72,7 @@ export interface IdempotentMeta {
  * @param options.bus          Target bus for multi-bus setups.
  * @param options.broadcast    Cluster-wide fan-out (every replica gets a copy).
  *                             Mutually exclusive with `group`.
+ * @param options.initialPosition Where a newly created group starts reading. Default `'latest'`.
  *
  * **Subscription model.** Each `@On` becomes its own broker subscription with
  * an auto-derived consumer group `<topic>__<ClassName>_<methodName>` (or
@@ -96,12 +104,20 @@ export interface IdempotentMeta {
  * @On('user.created')                              // 1 worker, fan-out across handlers
  * @On('cache.invalidate', { broadcast: true })     // copy to every replica
  * @On('jobs', { group: 'workers' })                // explicit competing-consumers pool
+ * @On('media.video', { initialPosition: { since: 60 * 60 * 1000 } }) // a new group picks up the last hour
  * ```
  */
 export const On = createMethodDecorator<
   [
     topic: string,
-    options?: { group?: string; concurrency?: number; bus?: string; mode?: DispatchMode; broadcast?: boolean },
+    options?: {
+      group?: string
+      concurrency?: number
+      bus?: string
+      mode?: DispatchMode
+      broadcast?: boolean
+      initialPosition?: InitialPosition
+    },
   ]
 >((_target, ctx, topic, options) => {
   pushMeta(ctx.metadata!, ON, {
@@ -112,6 +128,7 @@ export const On = createMethodDecorator<
     bus: options?.bus,
     mode: options?.mode,
     broadcast: options?.broadcast,
+    initialPosition: options?.initialPosition,
   } satisfies OnMeta)
 })
 

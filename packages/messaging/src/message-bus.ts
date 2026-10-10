@@ -7,6 +7,8 @@ import { getMessageBusToken } from './tokens.js'
 import {
   type DispatchMode,
   type HandlerResult,
+  type InitialPosition,
+  type InitialPositionKind,
   type MessageEnvelope,
   type MessageMeta,
   type MessageTransport,
@@ -23,7 +25,26 @@ interface DispatchDefaults {
 interface MessageBusOptions {
   dispatch?: DispatchDefaults | null
   appName?: string | null
+  initialPosition?: InitialPosition | null
 }
+
+/** The capability a position needs from the transport, or null when the value is not a valid `InitialPosition`. */
+function initialPositionKind(position: unknown): InitialPositionKind | null {
+  if (position === 'latest' || position === 'earliest') return position
+  if (typeof position !== 'object' || position === null) return null
+  const since = (position as { since?: unknown }).since
+  return Number.isInteger(since) && (since as number) >= 1 ? 'since' : null
+}
+
+function describeInitialPosition(position: unknown): string {
+  if (typeof position === 'string') return `'${position}'`
+  if (typeof position === 'object' && position !== null && 'since' in position) {
+    return `{ since: ${String((position as { since: unknown }).since)} }`
+  }
+  return JSON.stringify(position) ?? String(position)
+}
+
+const VALID_INITIAL_POSITIONS = "'latest', 'earliest' or { since: ms } with a positive integer number of milliseconds"
 
 /**
  * Central message bus. Inject from any provider:
@@ -96,6 +117,17 @@ export class MessageBus {
     const transportName = (this.transport as object).constructor.name
     const dispatchDefaults = this.options.dispatch ?? null
     const appName = this.options.appName ?? null
+    const busDefaultPosition = this.options.initialPosition ?? null
+
+    if (busDefaultPosition !== null && initialPositionKind(busDefaultPosition) === null) {
+      throw new Error(
+        `[messaging] MessagingModule.configure({ initialPosition }) on bus '${this.busName ?? '<default>'}' is ` +
+          `${describeInitialPosition(busDefaultPosition)}, which is invalid. Use ${VALID_INITIAL_POSITIONS}.`,
+      )
+    }
+
+    // `[topic, group] -> resolved position`: the first handler to create a shared group decides where it starts.
+    const groupPositions = new Map<string, { position: string; handler: string }>()
 
     for (const h of handlers) {
       const meta = h.metadata
@@ -165,6 +197,35 @@ export class MessageBus {
         )
       }
 
+      // Broadcast groups belong to one process and die with it - history means nothing to them, so the bus default
+      // does not reach them and an explicit non-latest position is a contradiction.
+      if (meta.broadcast && meta.initialPosition !== undefined && meta.initialPosition !== 'latest') {
+        throw new Error(
+          `[messaging] @On on ${h.ctor.name}.${h.methodName}: broadcast handlers always start at 'latest', but ` +
+            `initialPosition is ${describeInitialPosition(meta.initialPosition)}. A broadcast group lives and dies ` +
+            `with its process, so it has no history to read - remove the option.`,
+        )
+      }
+      const initialPosition: InitialPosition = meta.broadcast
+        ? 'latest'
+        : (meta.initialPosition ?? busDefaultPosition ?? 'latest')
+      const positionKind = initialPositionKind(initialPosition)
+      if (positionKind === null) {
+        throw new Error(
+          `[messaging] @On on ${h.ctor.name}.${h.methodName} for topic '${meta.topic}' has initialPosition ` +
+            `${describeInitialPosition(initialPosition)}, which is invalid. Use ${VALID_INITIAL_POSITIONS}.`,
+        )
+      }
+      const supportedPositions: readonly InitialPositionKind[] = this.transport.supportedInitialPositions ?? ['latest']
+      if (!supportedPositions.includes(positionKind)) {
+        const supported = supportedPositions.map((k) => `'${k}'`).join(', ')
+        throw new Error(
+          `[messaging] @On on ${h.ctor.name}.${h.methodName} on bus '${this.busName ?? '<default>'}' ` +
+            `for topic '${meta.topic}' resolves to initialPosition ${describeInitialPosition(initialPosition)}, ` +
+            `which ${transportName} does not support. Supported: [${supported}].`,
+        )
+      }
+
       const group = deriveGroupName({
         topic: meta.topic,
         ctorName: h.ctor.name,
@@ -174,11 +235,25 @@ export class MessageBus {
         broadcast: meta.broadcast,
       })
 
+      // Only reachable with an explicit group - auto-derived groups are unique per handler.
+      const pairKey = JSON.stringify([meta.topic, group])
+      const position = describeInitialPosition(initialPosition)
+      const first = groupPositions.get(pairKey)
+      if (first && first.position !== position) {
+        throw new Error(
+          `[messaging] @On on ${h.ctor.name}.${h.methodName} and ${first.handler} share group '${group}' on ` +
+            `topic '${meta.topic}' but resolve to different initialPosition values (${position} vs ` +
+            `${first.position}). Whichever creates the group first would decide where it starts, so they must agree.`,
+        )
+      }
+      if (!first) groupPositions.set(pairKey, { position, handler: `${h.ctor.name}.${h.methodName}` })
+
       const sub = await this.transport.subscribe(meta.topic, async (envelope) => this.dispatch(h, envelope), {
         group,
         concurrency: effectiveConcurrency,
         mode: effectiveMode,
         broadcast: meta.broadcast,
+        initialPosition,
       })
       this.subscriptions.push(sub)
     }

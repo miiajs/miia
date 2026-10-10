@@ -15,6 +15,8 @@ export type {
   MessageMeta,
   MessageTransport,
   HandlerResult,
+  InitialPosition,
+  InitialPositionKind,
   RetryConfig,
   SubscribeOptions,
   Subscription,

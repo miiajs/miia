@@ -6,6 +6,7 @@ import {
   type MessageEnvelope,
   type MessageTransport,
   type HandlerResult,
+  type InitialPositionKind,
   type RetryConfig,
   type SubscribeOptions,
   type Subscription,
@@ -57,11 +58,15 @@ const DLQ_SUFFIX = dlqTopic('')
  * groups work normally (each handler is its own subscription, fan-out is
  * automatic). Handlers requesting `mode: 'batch'` or sharing an explicit
  * `group` are rejected at `MessageBus.onReady()`.
+ *
+ * **Initial position:** retains nothing, so every initial position means "from now" - all three are declared anyway so
+ * apps that run Redis in production and in-memory in tests do not fail at startup.
  */
 export class InMemoryTransport implements MessageTransport {
   readonly supportedModes = ['sliding'] as const satisfies readonly DispatchMode[]
   readonly defaultMode: DispatchMode = 'sliding'
   readonly supportsCompetingConsumers = false
+  readonly supportedInitialPositions = ['latest', 'earliest', 'since'] as const satisfies readonly InitialPositionKind[]
 
   private subs = new Map<string, LocalSub[]>()
   private retry: RetryConfig
