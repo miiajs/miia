@@ -42,3 +42,9 @@ export const FAILURE_LOG_BURST = 3
 export const LEGACY_DRAIN_INTERVAL_MS = 10000
 /** Ceiling for the legacy-drain backoff: a stranded entry must still be picked up within a minute. */
 export const LEGACY_DRAIN_MAX_INTERVAL_MS = 60000
+/** Prefix of the per-process liveness key that keeps a broadcast group out of other processes' orphan cleanup. */
+export const ALIVE_KEY_PREFIX = 'miia:messaging:alive:'
+/** Liveness key TTL: a process that misses refreshes this long (crash, wedged loop, Redis down) looks dead. */
+export const ALIVE_TTL_MS = 30000
+/** Liveness key refresh cadence - a third of the TTL, so one missed write still leaves a 10s margin. */
+export const ALIVE_REFRESH_MS = 10000

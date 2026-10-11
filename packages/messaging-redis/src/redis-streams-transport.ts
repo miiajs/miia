@@ -17,6 +17,9 @@ import {
 } from '@miiajs/messaging'
 import { Redis } from 'ioredis'
 import {
+  ALIVE_KEY_PREFIX,
+  ALIVE_REFRESH_MS,
+  ALIVE_TTL_MS,
   CONSUMER_ERROR_BACKOFF_MS,
   DEFAULT_BLOCK_MS,
   DEFAULT_DRAIN_TIMEOUT_MS,
@@ -59,7 +62,8 @@ export interface RedisStreamsTransportOptions {
   consumerName?: string
   /**
    * `XREADGROUP BLOCK` timeout in ms. Default 5000. Governs idle Redis traffic and error-recovery cadence only - new
-   * messages wake the blocked read immediately, and shutdown disconnects the socket rather than waiting it out.
+   * messages wake the blocked read immediately, and shutdown disconnects the socket rather than waiting it out. On
+   * Redis 6.2 it also bounds how late a lane notices its stream was deleted while nothing is published to it.
    */
   blockMs?: number
   /**
@@ -110,6 +114,8 @@ interface ActiveSub {
   concurrency: number
   /** Group name carries a per-process suffix: triggers orphan cleanup on subscribe and `XGROUP DESTROY` on shutdown. */
   isBroadcast: boolean
+  /** Where a recreated group starts when this process knows no position for it. */
+  initialPosition: InitialPosition
   handler: (envelope: MessageEnvelope) => Promise<HandlerResult>
   abort: AbortController
   lanes: SubLane[]
@@ -123,6 +129,14 @@ type ClaimedEntry = [string, string[]] | null
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Order two stream ids. Both halves of `<ms>-<seq>` are 64-bit, so they are compared as BigInt. */
+function compareStreamIds(a: string, b: string): number {
+  const [aMs = '0', aSeq = '0'] = a.split('-')
+  const [bMs = '0', bSeq = '0'] = b.split('-')
+  const diff = BigInt(aMs) === BigInt(bMs) ? BigInt(aSeq) - BigInt(bSeq) : BigInt(aMs) - BigInt(bMs)
+  return diff === 0n ? 0 : diff < 0n ? -1 : 1
 }
 
 /**
@@ -151,7 +165,7 @@ interface RawCommands {
 /**
  * Redis Streams transport for `@miiajs/messaging`. `publish()` is `XADD`; `subscribe()` joins a consumer group -
  * creating it at the subscription's `initialPosition` when it does not exist - and reads it with
- * `XREADGROUP ... BLOCK`. Four moving parts:
+ * `XREADGROUP ... BLOCK`, recreating the group if it disappears underneath. Four moving parts:
  *
  * - **The PEL is the retry queue.** A nack acks nothing and re-publishes nothing: the entry stays pending in its own
  *   group and is re-parked with `XCLAIM ... IDLE <horizon - backoff> JUSTID`, so it resurfaces one backoff later and
@@ -210,11 +224,26 @@ export class RedisStreamsTransport implements MessageTransport {
   /** `topic -> legacy drain schedule`. One per topic, however many groups subscribe to it. */
   private legacyDrains = new Map<string, LegacyDrain>()
   /**
-   * `channel -> current failure run`, one entry per unit that can fail on its own: each (topic, group) sweep, the
-   * heartbeat, each topic's legacy drain. Only ever read back whole, so the key doubles as the channel's log name.
+   * `channel -> current failure run`, one entry per unit that can fail on its own: each (topic, group) sweep and its
+   * lanes' group, the heartbeat, the liveness key, each topic's legacy drain. Only ever read back whole, so the key
+   * doubles as the channel's log name.
    */
   private failures = new Map<string, FailureRun>()
   private timeFallbackWarned = false
+  /** `topic -> group -> highest known position`: at subscribe, then the last entry read. A lost group resumes there. */
+  private lastRead = new Map<string, Map<string, string>>()
+  private seedWarned = false
+  /** Present and fresh while this process lives - what keeps its broadcast groups out of other processes' cleanup. */
+  private readonly aliveKey = `${ALIVE_KEY_PREFIX}${hostname()}_${process.pid}`
+  private aliveRefreshMs = ALIVE_REFRESH_MS
+  /** The one-off second orphan cleanup: a predecessor that crashed just before we started still had a live key. */
+  private aliveRecheckMs = ALIVE_TTL_MS + ALIVE_REFRESH_MS
+  private aliveTimer?: ReturnType<typeof setInterval>
+  /** The liveness refresh currently in flight, if any. Never rejects. */
+  private aliveTick?: Promise<void>
+  private aliveRecheck?: ReturnType<typeof setTimeout>
+  /** `SET` on the liveness key was denied: no liveness, and so no orphan cleanup either. */
+  private aliveDisabled = false
 
   constructor(options: RedisStreamsTransportOptions) {
     if (!options.client && !options.url) {
@@ -327,14 +356,17 @@ export class RedisStreamsTransport implements MessageTransport {
   async onDestroy(): Promise<void> {
     this.stopping = true
     if (this.retryTimer) clearInterval(this.retryTimer)
+    if (this.aliveRecheck) clearTimeout(this.aliveRecheck)
+    this.aliveRecheck = undefined
     const drains = [...this.legacyDrains.values()]
     this.legacyDrains.clear()
     for (const state of drains) if (state.timer) clearTimeout(state.timer)
 
     // Snapshot before clearing - the lane clients are still needed below. Order matters: abort so the loop's catch
     // sees it, disconnect to break the in-flight BLOCK, drain the running pass and its handlers on ONE budget (their
-    // XACK / Lua still go through the live pubClient), stop the heartbeat only after that drain so entries of handlers
-    // still finishing stay invisible to other replicas, then XGROUP DESTROY broadcast groups before the quit they need.
+    // XACK / Lua still go through the live pubClient), stop the heartbeat and the liveness refresh only after that
+    // drain so entries of handlers still finishing stay invisible to other replicas and broadcast groups stay out of
+    // their orphan cleanup, then XGROUP DESTROY broadcast groups before the quit they need.
     const subsSnapshot = this.subs
     this.subs = []
     for (const sub of subsSnapshot) sub.abort.abort()
@@ -352,6 +384,8 @@ export class RedisStreamsTransport implements MessageTransport {
     }
 
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
+    if (this.aliveTimer) clearInterval(this.aliveTimer)
+    this.aliveTimer = undefined
     // Only XCLAIM round trips, but `maxRetriesPerRequest: null` lets one queue forever on a wedged
     // connection, so it shares the drain ceiling rather than making shutdown unbounded.
     if (this.heartbeatTick) await this.awaitUntil(this.heartbeatTick, deadline)
@@ -373,20 +407,16 @@ export class RedisStreamsTransport implements MessageTransport {
   }
 
   /**
-   * Destroy broadcast groups left behind by previous incarnations of this process on this host. The suffix slice is
-   * anchored on the current `hostname()` and pid rather than split greedily, because hostnames may themselves contain
-   * underscores (`pod_abc_xyz_42`) and a mis-segmented match would destroy unrelated groups.
+   * Destroy this handler's broadcast groups whose owner is gone, from any host: a live owner keeps its liveness key
+   * fresh, a crashed one lets it expire. Does nothing while liveness is off.
    */
   private async cleanupBroadcastOrphans(topic: string, currentGroup: string): Promise<void> {
-    const host = hostname()
-    const myPid = String(process.pid)
-    const suffix = `__${host}_${myPid}`
-    if (!currentGroup.endsWith(suffix)) {
-      // Not formed by our broadcast derivation - skip rather than guess.
-      return
-    }
-    const prefix = currentGroup.slice(0, -suffix.length)
-    const orphanPattern = new RegExp(`^${escapeRegex(prefix)}__${escapeRegex(host)}_(\\d+)$`)
+    const suffix = `__${hostname()}_${process.pid}`
+    if (!currentGroup.endsWith(suffix)) return // not formed by our broadcast derivation - skip rather than guess
+    const base = currentGroup.slice(0, -suffix.length)
+    // `<base>__<host>_<pid>` from any host; the owner part is its liveness key name. An owner starting with `_` or
+    // containing `__` is a sibling handler whose method extends ours (`handle_`, `handle__v2`) - skip it.
+    const pattern = new RegExp(`^${escapeRegex(base)}__([^_](?:(?!__).)*_\\d+)$`)
 
     let groups: Array<[string, ...unknown[]]>
     try {
@@ -401,22 +431,31 @@ export class RedisStreamsTransport implements MessageTransport {
       this.logger.warn(`xinfo GROUPS failed for ${topic}: ${msg}`)
       return
     }
+    if (this.aliveDisabled) return
 
     for (const groupInfo of groups) {
       // groupInfo format: ['name', '<groupname>', 'consumers', N, ...]
       const groupName = String(groupInfo[1])
       if (groupName === currentGroup) continue
-      if (!orphanPattern.test(groupName)) continue
-      await this.client
-        .xgroup('DESTROY', topic, groupName)
-        .catch((err) => this.logger.warn(`orphan cleanup failed for ${groupName}: ${String(err)}`))
-      this.logger.log(`Cleaned up orphaned broadcast group ${groupName} on ${topic}`)
+      const owner = pattern.exec(groupName)?.[1]
+      if (!owner) continue
+      const alive = await this.client.exists(`${ALIVE_KEY_PREFIX}${owner}`).catch((err) => {
+        this.logger.warn(`liveness check failed for ${groupName}: ${String(err)}`)
+        return 1 // unknown -> keep
+      })
+      if (alive) continue
+      const destroyed = await this.client.xgroup('DESTROY', topic, groupName).catch((err) => {
+        this.logger.warn(`orphan cleanup failed for ${groupName}: ${String(err)}`)
+        return 0
+      })
+      // Replicas starting together all see the same orphan; only the one whose DESTROY removed it says so.
+      if (destroyed === 1) this.logger.log(`Cleaned up orphaned broadcast group ${groupName} on ${topic}`)
     }
   }
 
   /**
    * Create the group unless it exists - an existing group is never moved, whatever position is asked for. Broadcast
-   * groups start at `$` regardless: they live and die with this process. MKSTREAM auto-creates the stream if missing.
+   * groups start at `$` regardless: they live and die with this process.
    */
   private async ensureGroup(
     topic: string,
@@ -425,6 +464,11 @@ export class RedisStreamsTransport implements MessageTransport {
     isBroadcast: boolean,
   ): Promise<void> {
     const start = isBroadcast ? '$' : await this.groupStartId(position)
+    await this.createGroup(topic, group, start, isBroadcast)
+  }
+
+  /** `XGROUP CREATE` at `start`, a no-op for a group that exists. MKSTREAM auto-creates the stream if missing. */
+  private async createGroup(topic: string, group: string, start: string, isBroadcast: boolean): Promise<void> {
     try {
       await this.client.xgroup('CREATE', topic, group, start, 'MKSTREAM')
     } catch (err) {
@@ -432,6 +476,115 @@ export class RedisStreamsTransport implements MessageTransport {
       throw err
     }
     if (!isBroadcast) this.logger.log(`Created consumer group ${group} on ${topic} at ${start}`)
+  }
+
+  /**
+   * Remember where the group stands right after subscribe, so a lane that has read nothing yet still recreates it from
+   * there rather than from `initialPosition`. Rows are parsed by field name: 7.x adds `entries-read` and `lag`.
+   */
+  private async seedLastRead(topic: string, group: string): Promise<void> {
+    let rows: unknown[][]
+    try {
+      rows = (await this.client.xinfo('GROUPS', topic)) as unknown[][]
+    } catch (err) {
+      if (!this.seedWarned) {
+        this.seedWarned = true
+        this.logger.warn(
+          `xinfo GROUPS failed for ${topic} - a group recreated after NOGROUP starts at its initialPosition: ` +
+            String(err),
+        )
+      }
+      return
+    }
+    for (const row of rows) {
+      const info = new Map<string, unknown>()
+      for (let i = 0; i + 1 < row.length; i += 2) info.set(String(row[i]), row[i + 1])
+      if (String(info.get('name')) !== group) continue
+      const id = info.get('last-delivered-id')
+      if (typeof id === 'string') this.noteRead(topic, group, id)
+      return
+    }
+  }
+
+  private noteRead(topic: string, group: string, id: string): void {
+    let groups = this.lastRead.get(topic)
+    if (!groups) {
+      groups = new Map()
+      this.lastRead.set(topic, groups)
+    }
+    const known = groups.get(group)
+    if (known === undefined || compareStreamIds(id, known) > 0) groups.set(group, id)
+  }
+
+  /**
+   * Recreate a vanished group from the highest position this process knows for it, else from `initialPosition`.
+   * Broadcast: no await before the CREATE, so `onDestroy`'s `XGROUP DESTROY` on the same connection lands after it.
+   */
+  private async recoverGroup(sub: ActiveSub): Promise<void> {
+    const known = this.lastRead.get(sub.topic)?.get(sub.group)
+    if (sub.isBroadcast) this.markAlive().catch(() => {})
+    const start = known ?? (sub.isBroadcast ? '$' : await this.groupStartId(sub.initialPosition))
+    await this.createGroup(sub.topic, sub.group, start, sub.isBroadcast)
+  }
+
+  /**
+   * Start refreshing this process's liveness key, once per transport. The key is never deleted - it expires
+   * `ALIVE_TTL_MS` after the last refresh, and the groups it protects are destroyed on graceful shutdown anyway.
+   */
+  private async startLiveness(): Promise<void> {
+    if (this.stopping || this.aliveTimer || this.aliveDisabled) return
+    // Armed before the first await, so two concurrent first subscribes cannot start two.
+    this.aliveTimer = setInterval(() => {
+      if (this.aliveTick) return
+      const tick = this.markAlive()
+        .then(
+          () => {
+            if (!this.stopping) this.reportSuccess('liveness key')
+          },
+          (err) => {
+            if (!this.stopping) this.reportFailure('liveness key', 'liveness key refresh failed', String(err))
+          },
+        )
+        .finally(() => {
+          if (this.aliveTick === tick) this.aliveTick = undefined
+        })
+      this.aliveTick = tick
+    }, this.aliveRefreshMs)
+    this.aliveRecheck = setTimeout(() => {
+      this.aliveRecheck = undefined
+      void this.recheckOrphans()
+    }, this.aliveRecheckMs)
+    try {
+      await this.markAlive()
+    } catch (err) {
+      clearInterval(this.aliveTimer)
+      clearTimeout(this.aliveRecheck)
+      this.aliveTimer = undefined
+      this.aliveRecheck = undefined
+      const msg = String(err)
+      if (!msg.includes('NOPERM')) throw err
+      this.aliveDisabled = true
+      this.logger.warn(
+        `SET on ${this.aliveKey} rejected - broadcast orphan cleanup is off. Grant SET and EXISTS on ` +
+          `${ALIVE_KEY_PREFIX}* to turn it on: ${msg}`,
+      )
+    }
+  }
+
+  private async markAlive(): Promise<void> {
+    if (this.aliveDisabled) return
+    await this.client.set(this.aliveKey, '1', 'PX', ALIVE_TTL_MS)
+  }
+
+  /** Orphan cleanup again, for the groups of predecessors whose keys were still alive when this process subscribed. */
+  private async recheckOrphans(): Promise<void> {
+    for (const sub of [...this.subs]) {
+      if (this.stopping) return
+      if (!sub.isBroadcast || sub.abort.signal.aborted) continue
+      await this.cleanupBroadcastOrphans(sub.topic, sub.group).catch((err) =>
+        this.logger.warn(`orphan re-check failed for ${sub.group} on ${sub.topic}: ${String(err)}`),
+      )
+    }
   }
 
   /**
@@ -553,11 +706,15 @@ export class RedisStreamsTransport implements MessageTransport {
     const mode: DispatchMode = options.mode ?? this.defaultMode
     const isBroadcast = options.broadcast === true
 
+    // The liveness key exists before our group does, so no other process ever sees the group without it.
     if (isBroadcast) {
+      await this.startLiveness()
       await this.cleanupBroadcastOrphans(topic, group)
     }
 
-    await this.ensureGroup(topic, group, options.initialPosition ?? 'latest', isBroadcast)
+    const initialPosition = options.initialPosition ?? 'latest'
+    await this.ensureGroup(topic, group, initialPosition, isBroadcast)
+    await this.seedLastRead(topic, group)
 
     // Lane fan-out: batch reads `COUNT=concurrency` on one lane (head-of-line within the batch), sliding spawns
     // `concurrency` lanes of `COUNT=1`, each with its own client and `:laneN` consumer name so Redis spreads entries.
@@ -583,7 +740,7 @@ export class RedisStreamsTransport implements MessageTransport {
     await this.startLegacyDrain(topic)
 
     const abort = new AbortController()
-    const sub: ActiveSub = { topic, group, mode, concurrency, isBroadcast, handler, abort, lanes }
+    const sub: ActiveSub = { topic, group, mode, concurrency, isBroadcast, initialPosition, handler, abort, lanes }
     this.subs.push(sub)
     for (const [i, lane] of lanes.entries()) {
       this.runConsumerLoop(sub, lane, perLaneCount, i).catch((err) => {
@@ -604,6 +761,10 @@ export class RedisStreamsTransport implements MessageTransport {
           if (!this.subs.some((s) => s.topic === topic && s.group === group)) {
             this.failures.delete(`retry sweep ${topic}/${group}`)
             this.failures.delete(`heartbeat ${topic}/${group}`)
+            this.failures.delete(`group ${topic}/${group}`)
+            const known = this.lastRead.get(topic)
+            known?.delete(group)
+            if (known?.size === 0) this.lastRead.delete(topic)
           }
         }
         // Sync in ioredis 5: tears the socket so each lane's in-flight BLOCK rejects and the loop exits via `aborted`.
@@ -627,10 +788,13 @@ export class RedisStreamsTransport implements MessageTransport {
           sub.topic,
           '>',
         )) as StreamReadResult | null
+        this.reportSuccess(`group ${sub.topic}/${sub.group}`)
 
         if (!result || sub.abort.signal.aborted) continue
 
         const messages = result[0]?.[1] ?? []
+        // Recorded before the handlers run: a lane that recovers the group meanwhile must not start below them.
+        if (messages.length > 0) this.noteRead(sub.topic, sub.group, messages[messages.length - 1]![0])
         // `>` only yields entries never delivered to this group, so the delivery count is 1 and so is the attempt.
         await Promise.allSettled(
           messages.map((msg) => this.trackDelivery(this.processMessage(sub, msg, lane.consumer, 1))),
@@ -638,10 +802,21 @@ export class RedisStreamsTransport implements MessageTransport {
       } catch (err) {
         if (sub.abort.signal.aborted) break
 
-        // Stream or group deleted externally: shut the lane down instead of spamming a group that no longer exists.
-        if (String(err).includes('NOGROUP')) {
-          this.logger.warn(`Stream/group gone for ${sub.topic} lane ${laneIndex}, exiting consumer loop`)
-          break
+        // Group or stream gone (Redis restarted empty, flushed, key evicted, deleted by hand): recreate it and keep
+        // reading, with a backoff so a lane that keeps failing does not spin. 7.0 says UNBLOCKED here, not NOGROUP.
+        const msg = String(err)
+        if (msg.includes('NOGROUP') || msg.includes('no longer exists')) {
+          const channel = `group ${sub.topic}/${sub.group}`
+          this.reportFailure(channel, `Consumer group ${sub.group} on ${sub.topic} is gone, recreating it`, msg)
+          if (!this.stopping) {
+            await this.recoverGroup(sub).catch((createErr) => {
+              if (!sub.abort.signal.aborted) {
+                this.reportFailure(channel, `Failed to recreate ${sub.group} on ${sub.topic}`, String(createErr))
+              }
+            })
+          }
+          await this.abortableSleep(CONSUMER_ERROR_BACKOFF_MS, sub.abort.signal)
+          continue
         }
 
         this.logger.error(`Consumer loop error for ${sub.topic} lane ${laneIndex}`, String(err))

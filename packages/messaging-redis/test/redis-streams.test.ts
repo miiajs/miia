@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto'
+import { hostname } from 'node:os'
 import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
 import type { Redis } from 'ioredis'
+import { ALIVE_KEY_PREFIX } from '../src/constants.js'
 import { RedisStreamsTransport } from '../src/redis-streams-transport.js'
 import { type CapturedLogs, captureLogs, closeClientsAfterEach, testClient, waitFor } from './helpers.js'
 
@@ -594,6 +596,8 @@ d('RedisStreamsTransport', () => {
         await c.xgroup('CREATE', tp, orphanGroup, '$', 'MKSTREAM').catch((err) => {
           if (!String(err).includes('BUSYGROUP')) throw err
         })
+        // Liveness keys are per host + pid and outlive their tests, so make sure this pid's has expired.
+        await c.del(`${ALIVE_KEY_PREFIX}${host}_${orphanPid}`)
 
         const before = await listGroupNames(c, tp)
         expect(before).toContain(orphanGroup)
@@ -615,37 +619,79 @@ d('RedisStreamsTransport', () => {
       }
     })
 
-    it('does not destroy groups from a different hostname', async () => {
+    it('destroys an orphan of another host whose liveness key has expired', async () => {
       const c = testClient()
       const tp = `miia-test:bcast-otherhost:${randomUUID()}`
       const t = new RedisStreamsTransport({ client: c, blockMs: 200 })
       await t.onInit?.()
 
       try {
-        const host = (await import('node:os')).hostname()
-        const myPid = String(process.pid)
         const base = `${tp}__Service_run`
-        const otherHostGroup = `${base}__some-other-host_999`
-        const currentGroup = `${base}__${host}_${myPid}`
+        const otherHostGroup = `${base}__other-${randomUUID().slice(0, 8)}_999`
+        const currentGroup = `${base}__${hostname()}_${process.pid}`
+        await c.xgroup('CREATE', tp, otherHostGroup, '$', 'MKSTREAM')
 
-        await c.xgroup('CREATE', tp, otherHostGroup, '$', 'MKSTREAM').catch((err) => {
-          if (!String(err).includes('BUSYGROUP')) throw err
-        })
-
-        await t.subscribe(tp, async () => ({ status: 'ack' }), {
-          group: currentGroup,
-          mode: 'batch',
-          concurrency: 1,
-          broadcast: true,
-        })
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: currentGroup, broadcast: true })
 
         const after = await listGroupNames(c, tp)
         expect(after).toContain(currentGroup)
-        // Other-host group must remain - cleanup is host-anchored
-        expect(after).toContain(otherHostGroup)
+        expect(after).not.toContain(otherHostGroup)
       } finally {
         await t.onDestroy?.()
         await drainKeys(testClient(), tp)
+      }
+    })
+
+    it('keeps the group of another host whose liveness key is alive', async () => {
+      const c = testClient()
+      const tp = `miia-test:bcast-otherhost-live:${randomUUID()}`
+      const t = new RedisStreamsTransport({ client: c, blockMs: 200 })
+      await t.onInit?.()
+
+      const owner = `other-${randomUUID().slice(0, 8)}_999`
+      try {
+        const base = `${tp}__Service_run`
+        const otherHostGroup = `${base}__${owner}`
+        const currentGroup = `${base}__${hostname()}_${process.pid}`
+        await c.xgroup('CREATE', tp, otherHostGroup, '$', 'MKSTREAM')
+        await c.set(`${ALIVE_KEY_PREFIX}${owner}`, '1', 'PX', 30_000)
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: currentGroup, broadcast: true })
+
+        const after = await listGroupNames(c, tp)
+        expect(after).toContain(currentGroup)
+        expect(after).toContain(otherHostGroup)
+      } finally {
+        await t.onDestroy?.()
+        const cleanup = testClient()
+        await cleanup.del(`${ALIVE_KEY_PREFIX}${owner}`)
+        await drainKeys(cleanup, tp)
+      }
+    })
+
+    it('keeps a live sibling process on the same host', async () => {
+      // PM2 cluster, several workers per container: same hostname, other pid, fresh key.
+      const c = testClient()
+      const tp = `miia-test:bcast-sibling:${randomUUID()}`
+      const t = new RedisStreamsTransport({ client: c, blockMs: 200 })
+      await t.onInit?.()
+
+      const owner = `${hostname()}_${process.pid + 99999}`
+      try {
+        const base = `${tp}__Service_run`
+        const siblingGroup = `${base}__${owner}`
+        const currentGroup = `${base}__${hostname()}_${process.pid}`
+        await c.xgroup('CREATE', tp, siblingGroup, '$', 'MKSTREAM')
+        await c.set(`${ALIVE_KEY_PREFIX}${owner}`, '1', 'PX', 30_000)
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: currentGroup, broadcast: true })
+
+        expect(await listGroupNames(c, tp)).toContain(siblingGroup)
+      } finally {
+        await t.onDestroy?.()
+        const cleanup = testClient()
+        await cleanup.del(`${ALIVE_KEY_PREFIX}${owner}`)
+        await drainKeys(cleanup, tp)
       }
     })
 
@@ -744,6 +790,171 @@ d('RedisStreamsTransport', () => {
         await t.onDestroy?.()
         await drainKeys(testClient(), tp)
       }
+    })
+
+    describe('liveness', () => {
+      const ownKey = `${ALIVE_KEY_PREFIX}${hostname()}_${process.pid}`
+      const opened: Array<{ t: RedisStreamsTransport; tp: string; keys: string[] }> = []
+
+      afterEach(async () => {
+        for (const { t, tp, keys } of opened.splice(0)) {
+          await t.onDestroy?.()
+          const cleanup = testClient()
+          if (keys.length > 0) await cleanup.del(...keys)
+          await drainKeys(cleanup, tp)
+        }
+      })
+
+      interface Internals {
+        aliveRefreshMs: number
+        aliveRecheckMs: number
+        aliveTimer?: ReturnType<typeof setInterval>
+      }
+
+      /** Keys listed in `keys` are deleted after the test. */
+      async function setup(keys: string[] = []): Promise<{
+        c: Redis
+        t: RedisStreamsTransport
+        internals: Internals
+        logs: CapturedLogs
+        tp: string
+        group: string
+      }> {
+        const c = testClient()
+        const tp = `miia-test:bcast-alive:${randomUUID()}`
+        const t = new RedisStreamsTransport({ client: c, blockMs: 200, retryIntervalMs: NO_HOUSEKEEPING })
+        const logs = captureLogs(t)
+        await t.onInit?.()
+        opened.push({ t, tp, keys })
+        const group = `${tp}__Service_run__${hostname()}_${process.pid}`
+        return { c, t, internals: t as unknown as Internals, logs, tp, group }
+      }
+
+      /** Records the commands a client is asked to run, then runs them - or answers with `fail` when it returns one. */
+      function spy(c: Redis, command: string, fail?: (args: unknown[]) => Error | undefined): unknown[][] {
+        const calls: unknown[][] = []
+        const raw = c as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>
+        const original = raw[command]!.bind(c)
+        raw[command] = (...args) => {
+          calls.push(args)
+          const err = fail?.(args)
+          return err ? Promise.reject(err) : original(...args)
+        }
+        return calls
+      }
+
+      const noperm = (args: unknown[]) =>
+        String(args[0]).startsWith(ALIVE_KEY_PREFIX)
+          ? new Error(`NOPERM No permissions to access a key: ${String(args[0])}`)
+          : undefined
+
+      async function orphan(c: Redis, tp: string, owner: string): Promise<string> {
+        const group = `${tp}__Service_run__${owner}`
+        await c.xgroup('CREATE', tp, group, '$', 'MKSTREAM')
+        return group
+      }
+
+      it('a broadcast subscribe writes the liveness key with its TTL', async () => {
+        const { c, t, tp, group } = await setup()
+        await c.del(ownKey)
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group, broadcast: true })
+
+        const ttl = await c.pttl(ownKey)
+        expect(ttl).toBeGreaterThan(0)
+        expect(ttl).toBeLessThanOrEqual(30_000)
+      })
+
+      it('work-group subscriptions never touch the liveness key', async () => {
+        const { c, t, internals, tp } = await setup()
+        const sets = spy(c, 'set')
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: 'workers' })
+
+        expect(sets.filter(([key]) => String(key).startsWith(ALIVE_KEY_PREFIX))).toHaveLength(0)
+        expect(internals.aliveTimer).toBeUndefined()
+      })
+
+      it('refreshes the liveness key on its cadence', async () => {
+        const { c, t, internals, tp, group } = await setup()
+        internals.aliveRefreshMs = 100
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group, broadcast: true })
+        await c.del(ownKey)
+
+        await waitFor(async () => (await c.exists(ownKey)) === 1, 'the liveness key to be written again')
+      })
+
+      it('a NOPERM on the liveness key turns liveness off with one warning and the subscribe still works', async () => {
+        const { c, t, internals, logs, tp, group } = await setup()
+        internals.aliveRefreshMs = 50
+        const sets = spy(c, 'set', noperm)
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group, broadcast: true })
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: `${group}x`, broadcast: true })
+        await wait(250)
+
+        expect(sets).toHaveLength(1)
+        expect(internals.aliveTimer).toBeUndefined()
+        expect(logs.warns.filter((line) => line.includes('broadcast orphan cleanup is off'))).toHaveLength(1)
+        expect(await listGroupNames(c, tp)).toContain(group)
+      })
+
+      it('with liveness off, orphan cleanup removes nothing and checks no key', async () => {
+        const owner = `other-${randomUUID().slice(0, 8)}_999`
+        const { c, t, tp, group } = await setup()
+        spy(c, 'set', noperm)
+        const checks = spy(c, 'exists')
+        const orphanGroup = await orphan(c, tp, owner)
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group, broadcast: true })
+
+        expect(await listGroupNames(c, tp)).toContain(orphanGroup)
+        expect(checks).toHaveLength(0)
+      })
+
+      it('a liveness check that fails keeps the group it was checking', async () => {
+        const owner = `other-${randomUUID().slice(0, 8)}_999`
+        const { c, t, logs, tp, group } = await setup()
+        const orphanGroup = await orphan(c, tp, owner)
+        spy(c, 'exists', () => new Error('Connection is closed.'))
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group, broadcast: true })
+
+        expect(await listGroupNames(c, tp)).toContain(orphanGroup)
+        expect(logs.warns.filter((line) => line.startsWith('liveness check failed'))).toHaveLength(1)
+      })
+
+      it('removes an orphan whose key outlived the first cleanup on the delayed re-check', async () => {
+        // A predecessor that crashed just before this process started: its key is still alive at subscribe.
+        const owner = `other-${randomUUID().slice(0, 8)}_999`
+        const ownerKey = `${ALIVE_KEY_PREFIX}${owner}`
+        const { c, t, internals, logs, tp, group } = await setup([ownerKey])
+        internals.aliveRecheckMs = 400
+        const orphanGroup = await orphan(c, tp, owner)
+        await c.set(ownerKey, '1', 'PX', 300)
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group, broadcast: true })
+        expect(await listGroupNames(c, tp)).toContain(orphanGroup)
+
+        await waitFor(async () => !(await listGroupNames(c, tp)).includes(orphanGroup), 'the re-check to remove it')
+        expect(logs.logs.filter((line) => line.startsWith('Cleaned up orphaned broadcast group'))).toHaveLength(1)
+      })
+
+      it('leaves alone the broadcast groups of sibling handlers whose method name extends ours', async () => {
+        const { c, t, tp, group } = await setup()
+        const base = `${tp}__Service_run`
+        // `run_` and `run__v2` on host `h`, pid 1 - neither has a key, so a match would destroy them.
+        const underscored = await orphan(c, tp, '_h_1')
+        const versioned = `${base}__v2__h_1`
+        await c.xgroup('CREATE', tp, versioned, '$', 'MKSTREAM')
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group, broadcast: true })
+
+        const after = await listGroupNames(c, tp)
+        expect(after).toContain(underscored)
+        expect(after).toContain(versioned)
+      })
     })
   })
 
@@ -911,6 +1122,207 @@ d('RedisStreamsTransport', () => {
         ).rejects.toThrow(/Invalid initialPosition/)
       }
       expect(await groupInfos(c, tp)).toEqual([])
+    })
+  })
+
+  describe('NOGROUP recovery', () => {
+    // A recovering lane backs off one `CONSUMER_ERROR_BACKOFF_MS` (1s) before it reads again, hence the longer waits.
+    const RECOVERY_MS = 4000
+    const opened: Array<{ t: RedisStreamsTransport; tp: string }> = []
+
+    afterEach(async () => {
+      for (const { t, tp } of opened.splice(0)) {
+        await t.onDestroy?.()
+        await drainKeys(testClient(), tp)
+      }
+    })
+
+    async function setup(): Promise<{ c: Redis; t: RedisStreamsTransport; logs: CapturedLogs; tp: string }> {
+      const c = testClient()
+      const tp = `miia-test:nogroup:${randomUUID()}`
+      const t = new RedisStreamsTransport({ client: c, blockMs: 200, retryIntervalMs: NO_HOUSEKEEPING })
+      const logs = captureLogs(t)
+      await t.onInit?.()
+      opened.push({ t, tp })
+      return { c, t, logs, tp }
+    }
+
+    function collect(received: string[]): (e: MessageEnvelope) => Promise<HandlerResult> {
+      return async (e) => {
+        received.push((e.payload as { n: string }).n)
+        return { status: 'ack' }
+      }
+    }
+
+    function created(logs: CapturedLogs): string[] {
+      return logs.logs.filter((line) => line.startsWith('Created consumer group'))
+    }
+
+    async function add(c: Redis, tp: string, n: string): Promise<string> {
+      return (await c.xadd(tp, '*', 'data', JSON.stringify(envelope(tp, { n }))))!
+    }
+
+    async function groupNames(c: Redis, tp: string): Promise<string[]> {
+      const rows = (await c.xinfo('GROUPS', tp)) as unknown[][]
+      return rows.map((row) => String(row[row.indexOf('name') + 1]))
+    }
+
+    it('a stream deleted under a live subscriber comes back without replaying what was read', async () => {
+      const { c, t, tp } = await setup()
+      const received: string[] = []
+      await t.subscribe(tp, collect(received), { group: 'g' })
+      await add(c, tp, 'A')
+      await waitFor(() => received.includes('A'), 'A')
+      // A recreated stream numbers its first entry `<ms>-0` and the group resumes after A, so B must not share A's
+      // millisecond - here they can be one round trip apart.
+      await wait(10)
+
+      await c.del(tp)
+      // Redis 6.2 does not wake a blocked read on DEL - it notices on the next entry added to the key.
+      await add(c, tp, 'B')
+
+      await waitFor(() => received.includes('B'), 'B after the stream was deleted', RECOVERY_MS)
+      expect(received).toEqual(['A', 'B'])
+    }, 10_000)
+
+    it('a group destroyed on an intact stream resumes after the last entry this process read', async () => {
+      const { c, t, logs, tp } = await setup()
+      const received: string[] = []
+      await t.subscribe(tp, collect(received), { group: 'g' })
+      const idA = await add(c, tp, 'A')
+      await waitFor(() => received.includes('A'), 'A')
+
+      await c.xgroup('DESTROY', tp, 'g')
+      await waitFor(() => created(logs).length === 2, 'the group to be recreated')
+      expect(created(logs)[1]).toBe(`Created consumer group g on ${tp} at ${idA}`)
+      await add(c, tp, 'C')
+
+      await waitFor(() => received.includes('C'), 'C after the group was recreated', RECOVERY_MS)
+      expect(received).toEqual(['A', 'C'])
+    }, 10_000)
+
+    it('a group destroyed before anything was read comes back where it stood at subscribe', async () => {
+      const { c, t, logs, tp } = await setup()
+      const received: string[] = []
+      await t.subscribe(tp, collect(received), { group: 'g' })
+
+      await c.xgroup('DESTROY', tp, 'g')
+      await waitFor(() => created(logs).length === 2, 'the group to be recreated')
+      // Created at `$` on an empty stream, the group stood at 0-0: the seeded position, not `initialPosition` again.
+      expect(created(logs)[1]).toEndWith(' at 0-0')
+      await add(c, tp, 'X')
+
+      await waitFor(() => received.includes('X'), 'X after the group was recreated', RECOVERY_MS)
+      expect(received).toEqual(['X'])
+    }, 10_000)
+
+    it('a lane that recovers does not start below an entry another lane is still handling', async () => {
+      const { c, t, logs, tp } = await setup()
+      const handled: string[] = []
+      let release!: () => void
+      const gate = new Promise<void>((r) => {
+        release = r
+      })
+      await t.subscribe(
+        tp,
+        async (e) => {
+          const n = (e.payload as { n: string }).n
+          handled.push(n)
+          if (n === 'A') await gate
+          return { status: 'ack' }
+        },
+        { group: 'g', mode: 'sliding', concurrency: 2, initialPosition: 'earliest' },
+      )
+      const idA = await add(c, tp, 'A')
+      await waitFor(() => handled.includes('A'), 'A to go in flight')
+
+      await c.xgroup('DESTROY', tp, 'g')
+      await waitFor(() => created(logs).length === 2, 'the idle lane to recreate the group')
+      expect(created(logs)[1]).toEndWith(` at ${idA}`)
+      await add(c, tp, 'C')
+      await waitFor(() => handled.includes('C'), 'C on the recovered lane', RECOVERY_MS)
+
+      release()
+      await wait(300)
+      expect(handled).toEqual(['A', 'C'])
+    }, 10_000)
+
+    it('a broadcast group destroyed under its subscriber comes back without replaying what was read', async () => {
+      const { c, t, tp } = await setup()
+      const group = `${tp}__Cache_flush__${hostname()}_${process.pid}`
+      const received: string[] = []
+      await t.subscribe(tp, collect(received), { group, broadcast: true })
+      await add(c, tp, 'A')
+      await waitFor(() => received.includes('A'), 'A')
+
+      await c.xgroup('DESTROY', tp, group)
+      await add(c, tp, 'B')
+
+      await waitFor(() => received.includes('B'), 'B after the group was destroyed', RECOVERY_MS)
+      expect(received).toEqual(['A', 'B'])
+      expect(await groupNames(c, tp)).toContain(group)
+    }, 10_000)
+
+    it("recovers from Redis 7.0's UNBLOCKED reply to a read on a deleted stream", async () => {
+      const { c, t, logs, tp } = await setup()
+      const duplicate = c.duplicate.bind(c)
+      c.duplicate = ((...args: Parameters<Redis['duplicate']>) => {
+        const lane = duplicate(...args)
+        const raw = lane as unknown as { xreadgroup: (...a: unknown[]) => Promise<unknown> }
+        const read = raw.xreadgroup.bind(lane)
+        let first = true
+        raw.xreadgroup = (...a) => {
+          if (!first) return read(...a)
+          first = false
+          return Promise.reject(new Error('UNBLOCKED the stream key no longer exists'))
+        }
+        return lane
+      }) as Redis['duplicate']
+      const received: string[] = []
+
+      await t.subscribe(tp, collect(received), { group: 'g' })
+      await waitFor(() => logs.errors.some((line) => line.endsWith('is gone, recreating it')), 'the recovery line')
+      await add(c, tp, 'A')
+
+      await waitFor(() => received.includes('A'), 'A after the recovery', RECOVERY_MS)
+      expect(logs.errors.filter((line) => line.startsWith('Consumer loop error'))).toHaveLength(0)
+    }, 10_000)
+
+    it('a lane that never sees its group backs off instead of spinning', async () => {
+      const { c, t, logs, tp } = await setup()
+      // Lanes on another database: every read answers NOGROUP, every recreation on the publisher answers BUSYGROUP.
+      const duplicate = c.duplicate.bind(c)
+      c.duplicate = ((override) => duplicate({ ...override, db: (c.options.db ?? 0) + 1 })) as Redis['duplicate']
+      const raw = c as unknown as { xgroup: (...args: unknown[]) => Promise<unknown> }
+      const xgroup = raw.xgroup.bind(c)
+      let creates = 0
+      raw.xgroup = (...args) => {
+        if (args[0] === 'CREATE' && args[1] === tp) creates++
+        return xgroup(...args)
+      }
+
+      await t.subscribe(tp, async () => ({ status: 'ack' }), { group: 'g' })
+      await wait(1500)
+
+      expect(creates).toBeGreaterThanOrEqual(2)
+      expect(creates).toBeLessThanOrEqual(4)
+      expect(logs.errors.filter((line) => line.includes(`on ${tp}`)).length).toBeLessThanOrEqual(2)
+      const started = Date.now()
+      await t.onDestroy?.()
+      expect(Date.now() - started).toBeLessThan(2000)
+    }, 10_000)
+
+    it('the last unsubscribe on a pair forgets its known position', async () => {
+      const { t, tp } = await setup()
+      const lastRead = (t as unknown as { lastRead: Map<string, Map<string, string>> }).lastRead
+      const first = await t.subscribe(tp, async () => ({ status: 'ack' }), { group: 'g' })
+      const second = await t.subscribe(tp, async () => ({ status: 'ack' }), { group: 'g' })
+      expect(lastRead.get(tp)?.has('g')).toBe(true)
+
+      await first.unsubscribe()
+      expect(lastRead.get(tp)?.has('g')).toBe(true)
+      await second.unsubscribe()
+      expect(lastRead.has(tp)).toBe(false)
     })
   })
 })
