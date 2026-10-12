@@ -3,7 +3,7 @@ import type { Feature } from '../types.js'
 export const jwtAuthFeature: Feature = {
   id: 'jwt-auth',
   label: 'JWT Auth',
-  hint: 'JWT authentication strategy',
+  hint: 'JWT and local auth providers',
   group: 'core',
   packages: {
     '@miiajs/auth': '^0.1.0',
@@ -33,8 +33,8 @@ declare module '@miiajs/core' {
     'src/auth/auth.module.ts': `import { Module } from '@miiajs/core'
 import { AuthController } from './auth.controller.js'
 import { AuthService } from './auth.service.js'
-import { JwtAuth } from './strategies/jwt.strategy.js'
-import { LocalAuth } from './strategies/local.strategy.js'
+import { JwtAuth } from './providers/jwt-auth.provider.js'
+import { LocalAuth } from './providers/local-auth.provider.js'
 
 @Module({
   controllers: [AuthController],
@@ -59,8 +59,8 @@ export class AuthService {
 import type { RequestContext } from '@miiajs/core'
 import { AuthGuard } from '@miiajs/auth'
 import { AuthService } from './auth.service.js'
-import { JwtAuth } from './strategies/jwt.strategy.js'
-import { LocalAuth } from './strategies/local.strategy.js'
+import { JwtAuth } from './providers/jwt-auth.provider.js'
+import { LocalAuth } from './providers/local-auth.provider.js'
 
 @Controller('/auth')
 export class AuthController {
@@ -79,7 +79,7 @@ export class AuthController {
   }
 }
 `,
-    'src/auth/strategies/jwt.strategy.ts': `import { type AuthProvider, fromHeader } from '@miiajs/auth'
+    'src/auth/providers/jwt-auth.provider.ts': `import { type AuthProvider, fromHeader } from '@miiajs/auth'
 import { inject, Injectable, type RequestContext, UnauthorizedException } from '@miiajs/core'
 import { JwtService } from '@miiajs/jwt'
 
@@ -95,7 +95,7 @@ export class JwtAuth implements AuthProvider {
   }
 }
 `,
-    'src/auth/strategies/local.strategy.ts': `import { Injectable, UnauthorizedException } from '@miiajs/core'
+    'src/auth/providers/local-auth.provider.ts': `import { Injectable, UnauthorizedException } from '@miiajs/core'
 import type { AuthProvider } from '@miiajs/auth'
 import type { RequestContext } from '@miiajs/core'
 

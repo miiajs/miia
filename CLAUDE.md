@@ -323,7 +323,7 @@ Commands: `miia dev`, `miia build`, `miia start`, `miia check`, `miia new`, `mii
 
 **Generate:** `miia g <schematic> <name>` creates individual artifacts with auto-registration in the parent `@Module`. Schematics: `module` (m), `controller` (c), `service` (s), `resource` (r), `middleware`, `guard`. The `resource` schematic creates a module + controller + service with CRUD endpoints. Flags: `--path`, `--flat`, `--dry-run`. Parent module discovery walks up from the target directory; also checks `src/app/app.module.ts` as fallback.
 
-**New (scaffold wizard):** `miia new` runs an interactive wizard via `@clack/prompts`. Prompts: project name → runtime → package manager (pnpm/npm/yarn, skipped for Bun) → features (multiselect: Config, JWT Auth, Swagger, CORS, Serve Static) → database (single-select: Drizzle PG/MySQL/SQLite, Papr, Mongoose, None). Features that need env config auto-select Config. Scaffold generates pre-wired `app.module.ts`, `main.ts`, `.env`, and feature-specific files (auth strategies, env schema, etc.). Flags: `--dry-run`, `--skip-install`.
+**New (scaffold wizard):** `miia new` runs an interactive wizard via `@clack/prompts`. Prompts: project name → runtime → package manager (pnpm/npm/yarn, skipped for Bun) → features (multiselect: Config, JWT Auth, Swagger, CORS, Serve Static) → database (single-select: Drizzle PG/MySQL/SQLite, Papr, Mongoose, None). Features that need env config auto-select Config. Scaffold generates pre-wired `app.module.ts`, `main.ts`, `.env`, and feature-specific files (auth providers, env schema, etc.). Flags: `--dry-run`, `--skip-install`.
 
 ### Logger
 
