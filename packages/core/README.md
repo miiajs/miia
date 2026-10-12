@@ -27,10 +27,13 @@ Up to **9% faster** than Hono | Up to **33% faster** than NestJS+Fastify \*
 | `@miiajs/config` | ConfigModule, ConfigService, validated env |
 | `@miiajs/serve-static` | Static file serving with Range, ETag, charset, SPA fallback |
 | `@miiajs/cli` | Dev server, build, start, type checking, project scaffolding |
+| `@miiajs/testing` | `TestApp` harness for unit and integration tests |
 | `@miiajs/node-server` | Node.js HTTP server adapter |
 | `@miiajs/uws-server` | uWebSockets.js HTTP server adapter |
 | `@miiajs/auth` | Auth primitives - `AuthProvider`, `AuthGuard`, token extractors |
 | `@miiajs/jwt` | Injectable JWT sign/verify service (jose wrapper) |
+| `@miiajs/rate-limit` | Fixed-window rate limiting - guard, decorators, perimeter middleware |
+| `@miiajs/multipart` | Streaming `multipart/form-data` uploads with per-file limits |
 | `@miiajs/messaging` | Decorator-driven message bus, retry, DLQ, idempotency, named buses |
 | `@miiajs/messaging-redis` | Redis Streams transport for `@miiajs/messaging` |
 | `@miiajs/drizzle` | Drizzle ORM integration (PostgreSQL, MySQL, SQLite) |

@@ -87,6 +87,7 @@ await app.listen(3000)
 | `@miiajs/papr` | MongoDB integration via Papr |
 | `@miiajs/mongoose` | MongoDB integration via Mongoose |
 | `@miiajs/swagger` | OpenAPI 3.1 spec generation, Swagger UI |
+| `@miiajs/testing` | `TestApp` harness for unit and integration tests |
 | `@miiajs/cli` | Dev CLI: `dev`, `build`, `start`, `check`, `new`, `generate` |
 
 ## Requirements
