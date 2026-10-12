@@ -14,10 +14,10 @@ export class JwtService {
   }
 
   async sign(payload: JwtPayload, options?: JwtSignOptions): Promise<string> {
-    const alg = options?.algorithm ?? this.options.algorithm ?? 'HS256'
-    const exp = options?.expiresIn ?? this.options.expiresIn ?? '1h'
-
     const key = await this.resolveSignKey(options)
+
+    const alg = options?.algorithm ?? this.options.algorithm ?? (key instanceof Uint8Array ? 'HS256' : 'RS256')
+    const exp = options?.expiresIn ?? this.options.expiresIn ?? '1h'
 
     let builder = new SignJWT(payload).setProtectedHeader({ alg }).setIssuedAt().setExpirationTime(exp)
 

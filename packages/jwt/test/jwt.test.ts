@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { Container, runInContainerContext } from '@miiajs/core'
-import { SignJWT } from 'jose'
+import { SignJWT, decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair } from 'jose'
 import { JWT_OPTIONS } from '../src/constants.js'
 import { JwtService } from '../src/jwt.service.js'
 import type { JwtOptions } from '../src/jwt.types.js'
@@ -83,5 +83,36 @@ describe('JwtService - standalone construction', () => {
     })
 
     expect(payload.sub).toBe('dave')
+  })
+})
+
+describe('JwtService.sign - default algorithm', () => {
+  it('defaults to RS256 with a PEM private key', async () => {
+    const { privateKey, publicKey } = await generateKeyPair('RS256', { extractable: true })
+    const svc = new JwtService({ privateKey: await exportPKCS8(privateKey), publicKey: await exportSPKI(publicKey) })
+
+    const token = await svc.sign({ sub: 'frank' })
+    expect(decodeProtectedHeader(token).alg).toBe('RS256')
+
+    const payload = await svc.verify<{ sub: string }>(token)
+    expect(payload.sub).toBe('frank')
+  })
+
+  it('defaults to RS256 with a CryptoKey private key', async () => {
+    const { privateKey, publicKey } = await generateKeyPair('RS256', { extractable: true })
+    const svc = new JwtService({ privateKey, publicKey })
+
+    const token = await svc.sign({ sub: 'grace' })
+    expect(decodeProtectedHeader(token).alg).toBe('RS256')
+
+    const payload = await svc.verify<{ sub: string }>(token)
+    expect(payload.sub).toBe('grace')
+  })
+
+  it('defaults to HS256 with a secret', async () => {
+    const svc = new JwtService({ secret })
+
+    const token = await svc.sign({ sub: 'heidi' })
+    expect(decodeProtectedHeader(token).alg).toBe('HS256')
   })
 })
