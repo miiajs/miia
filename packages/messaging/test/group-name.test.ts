@@ -2,6 +2,9 @@ import { describe, expect, it } from 'bun:test'
 import { hostname } from 'node:os'
 import { deriveGroupName } from '../src/group-name.js'
 
+const registry = globalThis as unknown as Record<symbol, string | undefined>
+const TOKEN = Symbol.for('miia.messaging.processToken')
+
 describe('deriveGroupName', () => {
   it('auto-derives without appName as <topic>__<ctor>_<method>', () => {
     expect(
@@ -52,7 +55,7 @@ describe('deriveGroupName', () => {
     ).toBe('override')
   })
 
-  it('appends __<hostname>_<pid> when broadcast is true', () => {
+  it('appends __<hostname>_<pid>_<token> when broadcast is true', () => {
     const result = deriveGroupName({
       topic: 'cache.invalidate',
       ctorName: 'CacheService',
@@ -60,7 +63,8 @@ describe('deriveGroupName', () => {
       appName: null,
       broadcast: true,
     })
-    expect(result).toBe(`cache.invalidate__CacheService_flush__${hostname()}_${process.pid}`)
+    expect(registry[TOKEN]).toMatch(/^[0-9a-f]{8}$/)
+    expect(result).toBe(`cache.invalidate__CacheService_flush__${hostname()}_${process.pid}_${registry[TOKEN]}`)
   })
 
   it('combines appName prefix and broadcast suffix', () => {
@@ -71,12 +75,11 @@ describe('deriveGroupName', () => {
       appName: 'svc',
       broadcast: true,
     })
-    expect(result).toBe(`svc:cache.invalidate__CacheService_flush__${hostname()}_${process.pid}`)
+    expect(result).toBe(`svc:cache.invalidate__CacheService_flush__${hostname()}_${process.pid}_${registry[TOKEN]}`)
   })
 
-  it('does not append random suffix - hostname+pid is the full per-process identity', () => {
-    // The orphan-cleanup logic in transports relies on the suffix being stable
-    // (only host+pid). Random component would prevent matching prior incarnations.
+  it('draws the token once per process', () => {
+    // Every broadcast group of the process carries the same owner, so one liveness key covers them all.
     const a = deriveGroupName({
       topic: 't',
       ctorName: 'C',
@@ -92,5 +95,16 @@ describe('deriveGroupName', () => {
       broadcast: true,
     })
     expect(a).toBe(b)
+  })
+
+  it('reads the token from globalThis, so two copies of the package in one process agree', () => {
+    const own = registry[TOKEN]
+    registry[TOKEN] = 'cafebabe'
+    try {
+      const result = deriveGroupName({ topic: 't', ctorName: 'C', methodName: 'm', appName: null, broadcast: true })
+      expect(result).toBe(`t__C_m__${hostname()}_${process.pid}_cafebabe`)
+    } finally {
+      registry[TOKEN] = own
+    }
   })
 })

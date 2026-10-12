@@ -32,7 +32,7 @@ export interface OnMeta extends DiscoverableMethodMeta {
   mode?: DispatchMode
   /**
    * Cluster-wide fan-out for this handler. When `true`, the auto-derived group
-   * is suffixed with `__<hostname>_<pid>` so every replica gets a unique broker
+   * is suffixed with `__<hostname>_<pid>_<token>` so every replica gets a unique broker
    * group and the broker delivers a copy of each message to every replica.
    * Mutually exclusive with `group` - explicit `group` is for shared work
    * across handlers/replicas, broadcast replicates work to every replica.

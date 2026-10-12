@@ -1,4 +1,13 @@
+import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
+
+const PROCESS_TOKEN = Symbol.for('miia.messaging.processToken')
+
+/** Random per process, kept on `globalThis` so two copies of this package in one process agree on it. */
+function processToken(): string {
+  const registry = globalThis as unknown as Record<symbol, string | undefined>
+  return (registry[PROCESS_TOKEN] ??= randomUUID().slice(0, 8))
+}
 
 export interface DeriveGroupNameInput {
   topic: string
@@ -13,8 +22,8 @@ export interface DeriveGroupNameInput {
   explicitGroup?: string
   /**
    * Cluster-wide fan-out opt-in. When `true`, the group is suffixed with
-   * `__<hostname>_<pid>` so every replica gets a unique broker group and
-   * the broker delivers a copy of each message to every replica. Mutually
+   * `__<hostname>_<pid>_<token>` so every replica gets a unique broker group
+   * and the broker delivers a copy of each message to every replica. Mutually
    * exclusive with `explicitGroup`.
    */
   broadcast?: boolean
@@ -25,13 +34,14 @@ export interface DeriveGroupNameInput {
  *
  * Resolution order:
  * - `explicitGroup` provided → returned as-is (no `appName` prefix, no broadcast suffix)
- * - `broadcast: true` → `${appName ? appName + ':' : ''}${topic}__${ctor}_${method}__${hostname}_${pid}`
+ * - `broadcast: true` → `${appName ? appName + ':' : ''}${topic}__${ctor}_${method}__${hostname}_${pid}_${token}`
  * - default → `${appName ? appName + ':' : ''}${topic}__${ctor}_${method}`
  *
- * The `hostname_pid` suffix doubles as the owner id the Redis transport's orphan
- * cleanup looks up as a liveness key, so its shape and that key change together.
- * Replicas that share both hostname and pid share one group: copies are split
- * between them, and the first to shut down destroys it for the other.
+ * `token` is 8 random hex characters drawn once per process, so replicas that
+ * share hostname and pid (host-network containers running as pid 1) still get
+ * a group each. The `hostname_pid_token` suffix doubles as the owner id of the
+ * Redis transport's liveness key, which the transport reads back off the group
+ * name - its owner pattern and this shape change together.
  */
 export function deriveGroupName(input: DeriveGroupNameInput): string {
   if (input.explicitGroup) return input.explicitGroup
@@ -41,7 +51,7 @@ export function deriveGroupName(input: DeriveGroupNameInput): string {
     : `${input.topic}__${input.ctorName}_${input.methodName}`
 
   if (input.broadcast) {
-    return `${base}__${hostname()}_${process.pid}`
+    return `${base}__${hostname()}_${process.pid}_${processToken()}`
   }
   return base
 }

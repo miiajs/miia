@@ -294,7 +294,7 @@ describe('Dispatch modes', () => {
       expect(groups).toEqual(['my-pool', 'svc:topic__Auto_run'])
     })
 
-    it('broadcast option appends hostname/pid to group and sets broadcast flag', async () => {
+    it('broadcast option appends hostname/pid/token to group and sets broadcast flag', async () => {
       const t = stubTransport({ supportedModes: ['batch', 'sliding'], defaultMode: 'batch' })
 
       @Injectable()
@@ -313,7 +313,7 @@ describe('Dispatch modes', () => {
 
       const opt = t.subscribes[0]?.options
       expect(opt?.broadcast).toBe(true)
-      expect(opt?.group).toMatch(/^cache\.invalidate__Cache_run__.+_\d+$/)
+      expect(opt?.group).toMatch(/^cache\.invalidate__Cache_run__.+_\d+_[0-9a-f]{8}$/)
     })
 
     it('broadcast + group throws at onReady (mutually exclusive)', async () => {

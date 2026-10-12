@@ -39,6 +39,14 @@ import { parseEnvelopeFromFields } from './serialization.js'
 /** Derived from the writer so the dead-letter check cannot drift from the naming it is checking for. */
 const DLQ_SUFFIX = dlqTopic('')
 
+/**
+ * Owner suffix of a broadcast group, `__<host>_<pid>_<token>` or the older `__<host>_<pid>`; the owner part is its
+ * liveness key name. An owner starting with `_` or containing `__` belongs to a sibling handler whose method extends
+ * ours (`handle_`, `handle__v2`).
+ */
+const OWNER_SUFFIX = '__([^_](?:(?!__).)*_\\d+(?:_[0-9a-f]{8})?)$'
+const OWNER_PATTERN = new RegExp(OWNER_SUFFIX)
+
 export interface RedisStreamsTransportOptions {
   /** Redis URL (e.g. `redis://localhost:6379`). Mutually exclusive with `client`. */
   url?: string
@@ -102,8 +110,10 @@ interface ActiveSub {
   group: string
   mode: DispatchMode
   concurrency: number
-  /** Group name carries a per-process suffix: triggers orphan cleanup on subscribe and `XGROUP DESTROY` on shutdown. */
+  /** Group name carries a per-process suffix: `XGROUP DESTROY` on shutdown. */
   isBroadcast: boolean
+  /** The owner a broadcast group's name ends in: its liveness key and orphan cleanup. Unset when the name has none. */
+  aliveOwner?: string
   /** Where a recreated group starts when this process knows no position for it. */
   initialPosition: InitialPosition
   handler: (envelope: MessageEnvelope) => Promise<HandlerResult>
@@ -220,8 +230,11 @@ export class RedisStreamsTransport implements MessageTransport {
   /** `topic -> group -> highest known position`: at subscribe, then the last entry read. A lost group resumes there. */
   private lastRead = new Map<string, Map<string, string>>()
   private seedWarned = false
-  /** Present and fresh while this process lives - what keeps its broadcast groups out of other processes' cleanup. */
-  private readonly aliveKey = `${ALIVE_KEY_PREFIX}${hostname()}_${process.pid}`
+  /**
+   * Owners read off the broadcast group names this transport holds - one per process, unless names were built by hand.
+   * Their liveness keys stay fresh while this process lives, which keeps their groups out of other processes' cleanup.
+   */
+  private aliveOwners = new Set<string>()
   private aliveRefreshMs = ALIVE_REFRESH_MS
   /** The one-off second orphan cleanup: a predecessor that crashed just before we started still had a live key. */
   private aliveRecheckMs = ALIVE_TTL_MS + ALIVE_REFRESH_MS
@@ -481,13 +494,10 @@ export class RedisStreamsTransport implements MessageTransport {
    * Destroy this handler's broadcast groups whose owner is gone, from any host: a live owner keeps its liveness key
    * fresh, a crashed one lets it expire. Does nothing while liveness is off.
    */
-  private async cleanupBroadcastOrphans(topic: string, currentGroup: string): Promise<void> {
-    const suffix = `__${hostname()}_${process.pid}`
-    if (!currentGroup.endsWith(suffix)) return // not formed by our broadcast derivation - skip rather than guess
-    const base = currentGroup.slice(0, -suffix.length)
-    // `<base>__<host>_<pid>` from any host; the owner part is its liveness key name. An owner starting with `_` or
-    // containing `__` is a sibling handler whose method extends ours (`handle_`, `handle__v2`) - skip it.
-    const pattern = new RegExp(`^${escapeRegex(base)}__([^_](?:(?!__).)*_\\d+)$`)
+  private async cleanupBroadcastOrphans(topic: string, currentGroup: string, owner: string): Promise<void> {
+    const base = currentGroup.slice(0, -`__${owner}`.length)
+    // `<base>__<owner>` from any host, in either shape.
+    const pattern = new RegExp(`^${escapeRegex(base)}${OWNER_SUFFIX}`)
 
     let groups: Array<[string, ...unknown[]]>
     try {
@@ -593,18 +603,42 @@ export class RedisStreamsTransport implements MessageTransport {
    */
   private async recoverGroup(sub: ActiveSub): Promise<void> {
     const known = this.lastRead.get(sub.topic)?.get(sub.group)
-    if (sub.isBroadcast) this.markAlive().catch(() => {})
+    if (sub.aliveOwner) this.markAlive(sub.aliveOwner).catch(() => {})
     const start = known ?? (sub.isBroadcast ? '$' : await this.groupStartId(sub.initialPosition))
     await this.createGroup(sub.topic, sub.group, start, sub.isBroadcast)
   }
 
   /**
-   * Start refreshing this process's liveness key, once per transport. The key is never deleted - it expires
-   * `ALIVE_TTL_MS` after the last refresh, and the groups it protects are destroyed on graceful shutdown anyway.
+   * Write `owner`'s liveness key and keep it fresh, on one refresh timer per transport. The key is never deleted - it
+   * expires `ALIVE_TTL_MS` after the last refresh, and the groups it protects are destroyed on graceful shutdown anyway.
    */
-  private async startLiveness(): Promise<void> {
-    if (this.stopping || this.aliveTimer || this.aliveDisabled) return
-    // Armed before the first await, so two concurrent first subscribes cannot start two.
+  private async startLiveness(owner: string): Promise<void> {
+    if (this.stopping || this.aliveDisabled || this.aliveOwners.has(owner)) return
+    // Claimed before the first await, so two concurrent subscribes cannot write it twice or start two timers.
+    this.aliveOwners.add(owner)
+    if (!this.aliveTimer) this.armLiveness()
+    try {
+      await this.markAlive(owner)
+    } catch (err) {
+      this.aliveOwners.delete(owner)
+      const msg = String(err)
+      const denied = msg.includes('NOPERM')
+      if (denied || this.aliveOwners.size === 0) {
+        clearInterval(this.aliveTimer)
+        clearTimeout(this.aliveRecheck)
+        this.aliveTimer = undefined
+        this.aliveRecheck = undefined
+      }
+      if (!denied) throw err
+      this.aliveDisabled = true
+      this.logger.warn(
+        `SET on ${ALIVE_KEY_PREFIX}${owner} rejected - broadcast orphan cleanup is off. Grant SET and EXISTS on ` +
+          `${ALIVE_KEY_PREFIX}* to turn it on: ${msg}`,
+      )
+    }
+  }
+
+  private armLiveness(): void {
     this.aliveTimer = setInterval(() => {
       if (this.aliveTick) return
       const tick = this.markAlive()
@@ -625,34 +659,21 @@ export class RedisStreamsTransport implements MessageTransport {
       this.aliveRecheck = undefined
       void this.recheckOrphans()
     }, this.aliveRecheckMs)
-    try {
-      await this.markAlive()
-    } catch (err) {
-      clearInterval(this.aliveTimer)
-      clearTimeout(this.aliveRecheck)
-      this.aliveTimer = undefined
-      this.aliveRecheck = undefined
-      const msg = String(err)
-      if (!msg.includes('NOPERM')) throw err
-      this.aliveDisabled = true
-      this.logger.warn(
-        `SET on ${this.aliveKey} rejected - broadcast orphan cleanup is off. Grant SET and EXISTS on ` +
-          `${ALIVE_KEY_PREFIX}* to turn it on: ${msg}`,
-      )
-    }
   }
 
-  private async markAlive(): Promise<void> {
+  /** Write the liveness key of `owner`, or of every owner this transport holds. */
+  private async markAlive(owner?: string): Promise<void> {
     if (this.aliveDisabled) return
-    await this.client.set(this.aliveKey, '1', 'PX', ALIVE_TTL_MS)
+    const owners = owner === undefined ? [...this.aliveOwners] : [owner]
+    await Promise.all(owners.map((name) => this.client.set(`${ALIVE_KEY_PREFIX}${name}`, '1', 'PX', ALIVE_TTL_MS)))
   }
 
   /** Orphan cleanup again, for the groups of predecessors whose keys were still alive when this process subscribed. */
   private async recheckOrphans(): Promise<void> {
     for (const sub of [...this.subs]) {
       if (this.stopping) return
-      if (!sub.isBroadcast || sub.abort.signal.aborted) continue
-      await this.cleanupBroadcastOrphans(sub.topic, sub.group).catch((err) =>
+      if (!sub.aliveOwner || sub.abort.signal.aborted) continue
+      await this.cleanupBroadcastOrphans(sub.topic, sub.group, sub.aliveOwner).catch((err) =>
         this.logger.warn(`orphan re-check failed for ${sub.group} on ${sub.topic}: ${String(err)}`),
       )
     }
@@ -776,11 +797,14 @@ export class RedisStreamsTransport implements MessageTransport {
     // Defensive default - the bus resolves and validates `mode` upstream, but direct callers may omit it.
     const mode: DispatchMode = options.mode ?? this.defaultMode
     const isBroadcast = options.broadcast === true
+    // Read off the name rather than computed here: whichever copy of the bus formed it, the key matches the group.
+    const aliveOwner = isBroadcast ? OWNER_PATTERN.exec(group)?.[1] : undefined
 
-    // The liveness key exists before our group does, so no other process ever sees the group without it.
-    if (isBroadcast) {
-      await this.startLiveness()
-      await this.cleanupBroadcastOrphans(topic, group)
+    // The liveness key exists before our group does, so no other process ever sees the group without it. A broadcast
+    // group whose name carries no owner gets no key and no orphan cleanup.
+    if (aliveOwner) {
+      await this.startLiveness(aliveOwner)
+      await this.cleanupBroadcastOrphans(topic, group, aliveOwner)
     }
 
     const initialPosition = options.initialPosition ?? 'latest'
@@ -811,7 +835,18 @@ export class RedisStreamsTransport implements MessageTransport {
     }
 
     const abort = new AbortController()
-    const sub: ActiveSub = { topic, group, mode, concurrency, isBroadcast, initialPosition, handler, abort, lanes }
+    const sub: ActiveSub = {
+      topic,
+      group,
+      mode,
+      concurrency,
+      isBroadcast,
+      aliveOwner,
+      initialPosition,
+      handler,
+      abort,
+      lanes,
+    }
     this.subs.push(sub)
     for (const [i, lane] of lanes.entries()) {
       this.runConsumerLoop(sub, lane, perLaneCount, i).catch((err) => {

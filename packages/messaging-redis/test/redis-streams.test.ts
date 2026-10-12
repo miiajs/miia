@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
-import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
+import { deriveGroupName, type MessageEnvelope, type HandlerResult } from '@miiajs/messaging'
 import { Redis } from 'ioredis'
 import { ALIVE_KEY_PREFIX } from '../src/constants.js'
 import { RedisStreamsTransport } from '../src/redis-streams-transport.js'
@@ -27,6 +27,14 @@ closeClientsAfterEach()
  * than as a failure anyone could read. Retry behaviour itself lives in `retry.test.ts`.
  */
 const NO_HOUSEKEEPING = 60_000
+
+/** A broadcast group named the way the bus names it, this process's owner suffix included. */
+function broadcastGroup(tp: string, ctorName = 'Service', methodName = 'run'): string {
+  return deriveGroupName({ topic: tp, ctorName, methodName, appName: null, broadcast: true })
+}
+
+/** `<hostname>_<pid>_<token>`: the owner this process's broadcast groups end in, and its liveness key name. */
+const OWN_OWNER = broadcastGroup('t').slice('t__Service_run__'.length)
 
 function envelope(topic: string, payload: unknown = {}): MessageEnvelope {
   return {
@@ -595,21 +603,24 @@ d('RedisStreamsTransport', () => {
       try {
         // Pre-create an "orphan" group as if it was left by a previous pid on this host.
         const host = (await import('node:os')).hostname()
-        const myPid = String(process.pid)
-        const orphanPid = String(Number(myPid) + 99999) // definitely not us
+        const orphanPid = String(process.pid + 99999) // definitely not us
         const base = `${tp}__OrphanService_run`
         const orphanGroup = `${base}__${host}_${orphanPid}`
-        const currentGroup = `${base}__${host}_${myPid}`
+        // A dead predecessor whose name carries a token, the shape groups have now.
+        const tokenOrphanGroup = `${orphanGroup}_${randomUUID().slice(0, 8)}`
+        const currentGroup = broadcastGroup(tp, 'OrphanService', 'run')
 
         // Stream + group must exist for cleanup target to exist.
         await c.xgroup('CREATE', tp, orphanGroup, '$', 'MKSTREAM').catch((err) => {
           if (!String(err).includes('BUSYGROUP')) throw err
         })
+        await c.xgroup('CREATE', tp, tokenOrphanGroup, '$', 'MKSTREAM')
         // Liveness keys are per host + pid and outlive their tests, so make sure this pid's has expired.
         await c.del(`${ALIVE_KEY_PREFIX}${host}_${orphanPid}`)
 
         const before = await listGroupNames(c, tp)
         expect(before).toContain(orphanGroup)
+        expect(before).toContain(tokenOrphanGroup)
 
         // Now subscribe with the current-pid broadcast group; cleanup runs.
         await t.subscribe(tp, async () => ({ status: 'ack' }), {
@@ -622,6 +633,7 @@ d('RedisStreamsTransport', () => {
         const after = await listGroupNames(c, tp)
         expect(after).toContain(currentGroup)
         expect(after).not.toContain(orphanGroup)
+        expect(after).not.toContain(tokenOrphanGroup)
       } finally {
         await t.onDestroy?.()
         await drainKeys(testClient(), tp)
@@ -637,7 +649,7 @@ d('RedisStreamsTransport', () => {
       try {
         const base = `${tp}__Service_run`
         const otherHostGroup = `${base}__other-${randomUUID().slice(0, 8)}_999`
-        const currentGroup = `${base}__${hostname()}_${process.pid}`
+        const currentGroup = broadcastGroup(tp)
         await c.xgroup('CREATE', tp, otherHostGroup, '$', 'MKSTREAM')
 
         await t.subscribe(tp, async () => ({ status: 'ack' }), { group: currentGroup, broadcast: true })
@@ -661,7 +673,7 @@ d('RedisStreamsTransport', () => {
       try {
         const base = `${tp}__Service_run`
         const otherHostGroup = `${base}__${owner}`
-        const currentGroup = `${base}__${hostname()}_${process.pid}`
+        const currentGroup = broadcastGroup(tp)
         await c.xgroup('CREATE', tp, otherHostGroup, '$', 'MKSTREAM')
         await c.set(`${ALIVE_KEY_PREFIX}${owner}`, '1', 'PX', 30_000)
 
@@ -689,13 +701,41 @@ d('RedisStreamsTransport', () => {
       try {
         const base = `${tp}__Service_run`
         const siblingGroup = `${base}__${owner}`
-        const currentGroup = `${base}__${hostname()}_${process.pid}`
+        const currentGroup = broadcastGroup(tp)
         await c.xgroup('CREATE', tp, siblingGroup, '$', 'MKSTREAM')
         await c.set(`${ALIVE_KEY_PREFIX}${owner}`, '1', 'PX', 30_000)
 
         await t.subscribe(tp, async () => ({ status: 'ack' }), { group: currentGroup, broadcast: true })
 
         expect(await listGroupNames(c, tp)).toContain(siblingGroup)
+      } finally {
+        await t.onDestroy?.()
+        const cleanup = testClient()
+        await cleanup.del(`${ALIVE_KEY_PREFIX}${owner}`)
+        await drainKeys(cleanup, tp)
+      }
+    })
+
+    it('keeps a live replica that shares this hostname and pid', async () => {
+      // Host-network containers that all run as pid 1: only the token tells them apart.
+      const c = testClient()
+      const tp = `miia-test:bcast-twin:${randomUUID()}`
+      const t = new RedisStreamsTransport({ client: c, blockMs: 200 })
+      await t.onInit?.()
+
+      const owner = `${hostname()}_${process.pid}_${randomUUID().slice(0, 8)}`
+      try {
+        const twinGroup = `${tp}__Service_run__${owner}`
+        const currentGroup = broadcastGroup(tp)
+        expect(twinGroup).not.toBe(currentGroup)
+        await c.xgroup('CREATE', tp, twinGroup, '$', 'MKSTREAM')
+        await c.set(`${ALIVE_KEY_PREFIX}${owner}`, '1', 'PX', 30_000)
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: currentGroup, broadcast: true })
+
+        const after = await listGroupNames(c, tp)
+        expect(after).toContain(currentGroup)
+        expect(after).toContain(twinGroup)
       } finally {
         await t.onDestroy?.()
         const cleanup = testClient()
@@ -712,9 +752,8 @@ d('RedisStreamsTransport', () => {
 
       try {
         const host = (await import('node:os')).hostname()
-        const myPid = String(process.pid)
         const unrelatedGroup = `${tp}__OtherHandler_other__${host}_999`
-        const currentGroup = `${tp}__MyHandler_run__${host}_${myPid}`
+        const currentGroup = broadcastGroup(tp, 'MyHandler', 'run')
 
         await c.xgroup('CREATE', tp, unrelatedGroup, '$', 'MKSTREAM').catch((err) => {
           if (!String(err).includes('BUSYGROUP')) throw err
@@ -743,9 +782,7 @@ d('RedisStreamsTransport', () => {
       const t = new RedisStreamsTransport({ client: c, blockMs: 200, drainTimeoutMs: 200 })
       await t.onInit?.()
 
-      const host = (await import('node:os')).hostname()
-      const myPid = String(process.pid)
-      const currentGroup = `${tp}__Cache_flush__${host}_${myPid}`
+      const currentGroup = broadcastGroup(tp, 'Cache', 'flush')
 
       await t.subscribe(tp, async () => ({ status: 'ack' }), {
         group: currentGroup,
@@ -802,7 +839,7 @@ d('RedisStreamsTransport', () => {
     })
 
     describe('liveness', () => {
-      const ownKey = `${ALIVE_KEY_PREFIX}${hostname()}_${process.pid}`
+      const ownKey = `${ALIVE_KEY_PREFIX}${OWN_OWNER}`
       const opened: Array<{ t: RedisStreamsTransport; tp: string; keys: string[] }> = []
 
       afterEach(async () => {
@@ -835,7 +872,7 @@ d('RedisStreamsTransport', () => {
         const logs = captureLogs(t)
         await t.onInit?.()
         opened.push({ t, tp, keys })
-        const group = `${tp}__Service_run__${hostname()}_${process.pid}`
+        const group = broadcastGroup(tp)
         return { c, t, internals: t as unknown as Internals, logs, tp, group }
       }
 
@@ -874,6 +911,33 @@ d('RedisStreamsTransport', () => {
         expect(ttl).toBeLessThanOrEqual(30_000)
       })
 
+      it('writes the key of the owner the group name carries, for every owner it holds', async () => {
+        const owners = [`a-${randomUUID().slice(0, 8)}_1_0000000a`, `b-${randomUUID().slice(0, 8)}_2`]
+        const keys = owners.map((owner) => `${ALIVE_KEY_PREFIX}${owner}`)
+        const { c, t, internals, tp } = await setup(keys)
+        internals.aliveRefreshMs = 100
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: `${tp}__A_run__${owners[0]}`, broadcast: true })
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: `${tp}__B_run__${owners[1]}`, broadcast: true })
+        expect(await c.exists(...keys)).toBe(2)
+        await c.del(...keys)
+
+        await waitFor(async () => (await c.exists(...keys)) === 2, 'both keys to be written again')
+      })
+
+      it('a broadcast group whose name carries no owner gets no liveness key and no orphan cleanup', async () => {
+        const { c, t, internals, tp } = await setup()
+        const sets = spy(c, 'set')
+        const checks = spy(c, 'exists')
+        await orphan(c, tp, `other-${randomUUID().slice(0, 8)}_999`)
+
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: `${tp}-custom`, broadcast: true })
+
+        expect(sets.filter(([key]) => String(key).startsWith(ALIVE_KEY_PREFIX))).toHaveLength(0)
+        expect(checks).toHaveLength(0)
+        expect(internals.aliveTimer).toBeUndefined()
+      })
+
       it('work-group subscriptions never touch the liveness key', async () => {
         const { c, t, internals, tp } = await setup()
         const sets = spy(c, 'set')
@@ -900,7 +964,10 @@ d('RedisStreamsTransport', () => {
         const sets = spy(c, 'set', noperm)
 
         await t.subscribe(tp, async () => ({ status: 'ack' }), { group, broadcast: true })
-        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: `${group}x`, broadcast: true })
+        await t.subscribe(tp, async () => ({ status: 'ack' }), {
+          group: broadcastGroup(tp, 'Service', 'other'),
+          broadcast: true,
+        })
         await wait(250)
 
         expect(sets).toHaveLength(1)
@@ -1262,7 +1329,7 @@ d('RedisStreamsTransport', () => {
 
     it('a broadcast group destroyed under its subscriber comes back without replaying what was read', async () => {
       const { c, t, tp } = await setup()
-      const group = `${tp}__Cache_flush__${hostname()}_${process.pid}`
+      const group = broadcastGroup(tp, 'Cache', 'flush')
       const received: string[] = []
       await t.subscribe(tp, collect(received), { group, broadcast: true })
       await add(c, tp, 'A')
@@ -1464,7 +1531,7 @@ d('RedisStreamsTransport', () => {
             broadcast.push(e)
             return { status: 'ack' }
           },
-          { group: `${base}__${hostname()}_${process.pid}`, broadcast: true },
+          { group: broadcastGroup(bcastTp), broadcast: true },
         )
         const groups = (await c.xinfo('GROUPS', bcastTp)) as unknown[][]
         expect(groups.map((row) => String(row[row.indexOf('name') + 1]))).not.toContain(orphan)
