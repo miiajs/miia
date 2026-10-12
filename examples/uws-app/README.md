@@ -10,7 +10,7 @@ cd examples/uws-app
 bun run dev
 ```
 
-This example runs only on Node.js (`miia dev --runtime node`) - uWebSockets.js does not load on Bun or Deno.
+This example runs only on Node.js 22, 24 or 26 (`miia dev --runtime node`) - uWebSockets.js ships no binaries for other Node.js lines and does not load on Bun or Deno.
 
 ## Endpoints
 

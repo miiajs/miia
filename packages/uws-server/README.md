@@ -8,6 +8,8 @@ uWebSockets.js HTTP server adapter for MiiaJS.
 npm install @miiajs/uws-server uWebSockets.js
 ```
 
+Runs on Node.js 22, 24 and 26 only: uWebSockets.js ships native binaries for those lines and does not load on Bun or Deno.
+
 ## Documentation
 
 **[miiajs.com/docs/packages/uws-server](https://miiajs.com/docs/packages/uws-server)**

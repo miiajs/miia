@@ -19,3 +19,11 @@ security updates.
 |---------|-----------|
 | 0.1.x   | ✅        |
 | < 0.1   | ❌        |
+
+## Runtime versions
+
+The `engines` field of each package names the oldest runtime the code works on, not a security
+baseline. Every supported Node.js, Bun and Deno line receives security fixes, often in the HTTP
+stack a Miia server runs on, so run the latest patch release of your line. For example, Node.js
+24.17.0 and 24.18.1 fixed http2 header memory retention, response queue poisoning in `http.Agent`,
+and requests over the maximum header count.

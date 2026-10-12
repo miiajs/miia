@@ -41,9 +41,9 @@
   ],
   "sideEffects": false,
   "engines": {
-    "node": ">=24.18.1",
+    "node": ">=22.12.0",
     "bun": ">=1.4.0",
-    "deno": ">=2.6.1"
+    "deno": ">=2.0.0"
   },
   "peerDependencies": {
     "@miiajs/core": ">=0.7.0 <1.0.0"

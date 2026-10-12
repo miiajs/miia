@@ -92,8 +92,10 @@ await app.listen(3000)
 
 ## Requirements
 
-- Node.js >= 24.18.1, Bun >= 1.4.0, or Deno >= 2.6.1
-- TypeScript >= 5.7
+- Node.js >= 22.12.0, Bun >= 1.4.0, or Deno >= 2.0.0
+  - On Deno, `@miiajs/serve-static` needs 2.5.0+, and projects run with `@miiajs/cli` need 2.4.0+
+  - `@miiajs/uws-server` runs on Node.js 22, 24 and 26 only
+- TypeScript >= 6.0
 
 ## Documentation
 
