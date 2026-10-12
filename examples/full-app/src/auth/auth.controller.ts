@@ -16,7 +16,7 @@ export class AuthController {
 
   @Post('register')
   @ApiOperation({ summary: 'Register a new user', description: 'Creates a user account with the default "user" role.' })
-  @ApiResponse(201, { description: 'Created user record (without password hash).', schema: UserResponseSchema })
+  @ApiResponse(201, { description: 'Access token for the new account.', schema: AccessTokenResponseSchema })
   @ApiResponse(409, { description: 'Email already registered.' })
   @Status(201)
   @ValidateBody(RegisterSchema)
@@ -28,7 +28,7 @@ export class AuthController {
   @Post('/login')
   @ApiOperation({
     summary: 'Exchange credentials for a JWT',
-    description: 'Accepts email/password via the Local strategy and returns an access token on success.',
+    description: 'Accepts email/password via the Local provider and returns an access token on success.',
   })
   @ApiBody(LoginSchema)
   @ApiResponse(200, { description: 'Access token envelope.', schema: AccessTokenResponseSchema })
@@ -53,7 +53,7 @@ export class AuthController {
   @Post('/login-cookie')
   @ApiOperation({
     summary: 'Log in and set a session cookie',
-    description: 'Validates credentials via the Local strategy and stores the JWT in an httpOnly cookie.',
+    description: 'Validates credentials via the Local provider and stores the JWT in an httpOnly cookie.',
   })
   @ApiBody(LoginSchema)
   @ApiResponse(200, { description: 'Session cookie set.' })
