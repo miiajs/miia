@@ -46,10 +46,6 @@ export interface RedisStreamsTransportOptions {
   retry?: Partial<RetryConfig>
   /** Housekeeping cadence, and so the granularity of backoff timing and crash detection. Default 1000ms. */
   retryIntervalMs?: number
-  /** @deprecated Renamed to `retryIntervalMs`. Still honored, below it and above `reclaimIntervalMs`. */
-  retrySchedulerIntervalMs?: number
-  /** @deprecated Renamed to `retryIntervalMs`. Lowest precedence of the three; its default also dropped 30s -> 1s. */
-  reclaimIntervalMs?: number
   /**
    * Floor for the retry horizon, in ms. Default 60000. The horizon is the idle threshold at which a pending entry
    * counts as abandoned, so this is also the crash-detection latency.
@@ -243,7 +239,7 @@ export class RedisStreamsTransport implements MessageTransport {
     }
     this.retry = { ...DEFAULT_RETRY, ...options.retry }
     this.consumerName = options.consumerName ?? `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`
-    this.retryIntervalMs = this.resolveRetryInterval(options)
+    this.retryIntervalMs = options.retryIntervalMs ?? DEFAULT_RETRY_INTERVAL_MS
     this.minIdleMs = options.minIdleMs ?? DEFAULT_MIN_IDLE_MS
     this.horizonMs = this.resolveHorizon()
     this.heartbeatIntervalMs = Math.max(MIN_HEARTBEAT_INTERVAL_MS, Math.floor(this.horizonMs / 2))
@@ -251,18 +247,6 @@ export class RedisStreamsTransport implements MessageTransport {
     this.drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS
 
     this.registerLuaCommands()
-  }
-
-  private resolveRetryInterval(options: RedisStreamsTransportOptions): number {
-    const deprecated = options.retrySchedulerIntervalMs ?? options.reclaimIntervalMs
-    if (deprecated !== undefined) {
-      this.logger.warn(
-        '`retrySchedulerIntervalMs` / `reclaimIntervalMs` are deprecated - retry scheduling and idle reclaim are ' +
-          'one pass now. Use `retryIntervalMs`. Precedence: retryIntervalMs > retrySchedulerIntervalMs > ' +
-          'reclaimIntervalMs.',
-      )
-    }
-    return options.retryIntervalMs ?? deprecated ?? DEFAULT_RETRY_INTERVAL_MS
   }
 
   private resolveHorizon(): number {

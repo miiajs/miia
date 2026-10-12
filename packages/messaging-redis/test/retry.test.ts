@@ -1097,51 +1097,13 @@ d('RedisStreamsTransport retry', () => {
     }
   }, 15_000)
 
-  it('still retries when only the deprecated retrySchedulerIntervalMs is set', async () => {
-    const probe = testClient()
-    const tp = `miia-test:retry-deprecated-alias:${randomUUID()}`
-    const t = new RedisStreamsTransport({
-      client: testClient(),
-      retry: { backoffMs: 50, maxAttempts: 3 },
-      retrySchedulerIntervalMs: 50,
-      minIdleMs: HORIZON_MS,
-      blockMs: 100,
-    })
-    await t.onInit?.()
-
-    const attempts: number[] = []
-    try {
-      await t.subscribe(
-        tp,
-        async (e): Promise<HandlerResult> => {
-          attempts.push(e.meta.attempt)
-          if (e.meta.attempt < 3) return { status: 'nack', error: new Error('transient') }
-          return { status: 'ack' }
-        },
-        { group: 'g' },
-      )
-      await wait(50)
-
-      await t.publish(envelope(tp))
-      await waitFor(() => attempts.length === 3, 'three attempts on the deprecated cadence')
-
-      expect(attempts).toEqual([1, 2, 3])
-    } finally {
-      await t.onDestroy?.()
-      await drainKeys(probe, tp)
-    }
-  })
-
-  it('resolves the interval aliases as retryIntervalMs > retrySchedulerIntervalMs > reclaimIntervalMs', () => {
+  it('uses retryIntervalMs, defaulting to 1000ms', () => {
     const interval = (options: Partial<RedisStreamsTransportOptions>): number =>
       (new RedisStreamsTransport({ url: REDIS_URL!, ...options }) as unknown as { retryIntervalMs: number })
         .retryIntervalMs
 
     expect(interval({})).toBe(1000)
-    expect(interval({ reclaimIntervalMs: 222 })).toBe(222)
-    expect(interval({ retrySchedulerIntervalMs: 111 })).toBe(111)
-    expect(interval({ retrySchedulerIntervalMs: 111, reclaimIntervalMs: 222 })).toBe(111)
-    expect(interval({ retryIntervalMs: 10, retrySchedulerIntervalMs: 111, reclaimIntervalMs: 222 })).toBe(10)
+    expect(interval({ retryIntervalMs: 10 })).toBe(10)
   })
 
   it('throws at construction when the retry config yields a horizon above the ceiling', () => {
