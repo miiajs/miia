@@ -21,7 +21,8 @@ packages/
   serve-static/  - Static file serving (Range, ETag, charset, SPA fallback, dotfile guard)
   node-server/   - Node.js HTTP server (optimized + native modes)
   uws-server/    - uWebSockets.js HTTP server (optimized + native modes)
-  auth/          - Strategy-based auth, JWT (jose), Local
+  auth/          - AuthProvider interface, AuthGuard, token extractors
+  jwt/           - JwtModule + JwtService (sign/verify via jose)
   rate-limit/    - Fixed-window rate limiting: rateLimit middleware, RateLimitGuard, @RateLimit/@SkipRateLimit, pluggable stores
   multipart/     - Streaming multipart/form-data: @Multipart, ctx.parts, ctx.form(), @ValidateForm
   drizzle/       - Drizzle ORM integration (postgres/mysql/sqlite)
@@ -129,7 +130,7 @@ interface CanActivate {
 
 Returns `false` → `ForbiddenException` (403). Execution order: class guards → class middleware → method guards → method middleware → handler. Global guards (from `app.useGuard()`) run first of all, but only on **matched** routes - they are not invoked on 404s.
 
-`@SkipGuard(GuardClass)` excludes a guard from a route's pipeline at compile time. It works for **class/method-level guards AND global guards** - if the user registers `app.useGuard(AuthGuard)` and a method has `@SkipGuard(AuthGuard)`, that method bypasses the global guard entirely. Factory-wrapped guards (e.g. `AuthGuard('jwt')`) are unwrapped via the `GUARD_FACTORY` symbol, so skipping by the factory class also skips all its instances.
+`@SkipGuard(GuardClass)` excludes a guard from a route's pipeline at compile time. It works for **class/method-level guards AND global guards** - if the user registers `app.useGuard(AuthGuard(JwtAuth))` and a method has `@SkipGuard(AuthGuard)`, that method bypasses the global guard entirely. Factory-built guards (e.g. `AuthGuard(JwtAuth)`) carry the `GUARD_FACTORY` symbol, so skipping by the factory skips every guard it built.
 
 `GUARD_RESPONSES` (symbol from core) is a **static** on the guard class listing the statuses it rejects with: `static [GUARD_RESPONSES] = [401]`, or `[{ status: 403, description: '...' }]` (type `GuardResponseDeclaration`). Documentation-only - `@miiajs/swagger` reads it to emit guard responses per route; zero runtime effect. A guard without the marker contributes nothing to the spec. `AuthGuard` (`@miiajs/auth`) declares 401, rate-limit guards declare 429. `Router.globalGuards` exposes the guard classes captured at `compileAll()` so the spec builder sees `app.useGuard()` registrations too.
 
@@ -237,15 +238,15 @@ Unhandled errors in handlers are caught, logged, and returned as 500. An `Error`
 
 `cors(options?)` middleware in `@miiajs/core`. Options: `origin` (string/array/function), `methods`, `allowedHeaders`, `exposedHeaders`, `credentials`, `maxAge`. Handles OPTIONS preflight. Dynamic origins get `Vary: Origin` for CDN caching.
 
-### Auth: strategy-based with DI
+### Auth: AuthProvider + AuthGuard
 
-`@Strategy('name')` registers auth strategies as injectable providers. `AuthGuard(strategyName?)` creates a guard that resolves strategy from container and calls `strategy.validate(ctx)` to set `ctx.user`.
+`@miiajs/auth` ships primitives only. An `AuthProvider` is a plain `@Injectable()` class with `authenticate(ctx)` that returns the authenticated subject or throws an `HttpException`. `AuthGuard(Provider, ...more)` resolves the provider classes from the container when the guard is constructed and tries them in order: the first that resolves wins and its result goes to `ctx.user`. An `HttpException` moves on to the next provider (OR semantics), any other error is rethrown as a bug, and when all fail the last error is rethrown. For AND semantics stack guards: `@UseGuard(AuthGuard(JwtAuth), Roles('admin'))`. The guard declares `[GUARD_RESPONSES] = [401]`. `ctx.user` is not on `RequestContext` - apps add it with a `declare module '@miiajs/core'` augmentation.
 
-`@SkipGuard(AuthGuard)` (from `@miiajs/core`) excludes specific guards from a route's pipeline at compile time.
+Also exported: token extractors `fromHeader(header = 'authorization', scheme = 'Bearer')`, `fromCookie(name)`, `fromQuery(param)` (each returns a `TokenExtractor`, `(ctx) => string | null`) and `timingSafeEqual(a, b)`.
 
-**JWT** (`@miiajs/auth/jwt`): `JwtModule.configure()` with secret/keys, `JwtService` for sign/verify via `jose`. Token extractors: `fromHeader()`, `fromCookie()`, `fromQuery()`. Abstract `JwtStrategy` with `extractToken` + `authenticate()`.
+**JWT** is a separate package, `@miiajs/jwt`: `JwtModule.configure()` with `secret` or `privateKey`/`publicKey`, `JwtService.sign()` / `verify()` via `jose`. A JWT provider is a few lines of app code (`fromHeader()` + `verify()`), not something the package ships.
 
-**Local** (`@miiajs/auth/local`): Abstract `LocalStrategy` with configurable `usernameField`/`passwordField` and `authenticate(username, password)`.
+**Local** (username/password) and **OAuth2** are recipes in the docs (`2.auth/3.local.md`, `2.auth/4.oauth2.md`), not packages - by design, auth flows stay app code.
 
 ### Database: configure/register pattern
 

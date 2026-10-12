@@ -56,7 +56,7 @@ features:
       description: Per-app container with inject() - no global singletons, no hidden magic. Singleton, transient, and request scopes built in.
       icon: i-lucide-boxes
     - title: Auth & Guards
-      description: JWT and local strategies with composable guards. Protect routes at any level - skip specific guards when needed.
+      description: JWT and local auth providers with composable guards. Protect routes at any level - skip specific guards when needed.
       icon: i-lucide-lock-keyhole
     - title: Schema Validation
       description: Validate request body, query, and params with any ZodLike schema. Type-safe from request to handler, errors handled automatically.

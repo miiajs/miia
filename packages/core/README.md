@@ -29,7 +29,7 @@ Up to **9% faster** than Hono | Up to **33% faster** than NestJS+Fastify \*
 | `@miiajs/cli` | Dev server, build, start, type checking, project scaffolding |
 | `@miiajs/node-server` | Node.js HTTP server adapter |
 | `@miiajs/uws-server` | uWebSockets.js HTTP server adapter |
-| `@miiajs/auth` | Strategy primitives, AuthGuard, token extractors |
+| `@miiajs/auth` | Auth primitives - `AuthProvider`, `AuthGuard`, token extractors |
 | `@miiajs/jwt` | Injectable JWT sign/verify service (jose wrapper) |
 | `@miiajs/messaging` | Decorator-driven message bus, retry, DLQ, idempotency, named buses |
 | `@miiajs/messaging-redis` | Redis Streams transport for `@miiajs/messaging` |

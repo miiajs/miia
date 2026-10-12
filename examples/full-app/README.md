@@ -4,7 +4,7 @@ End-to-end [MiiaJS](../../README.md) example: Drizzle + Auth/JWT + Roles + Swagg
 
 ## What's inside
 
-- **Auth** (`src/auth/`) - JWT + Local strategies, register / login / me endpoints, password hashing with `@node-rs/argon2`
+- **Auth** (`src/auth/`) - JWT + Local auth providers, register / login / me endpoints, password hashing with `@node-rs/argon2`
 - **Roles guard** (`src/auth/guards/roles.guard.ts`) - custom method decorator `@Roles('admin')` backed by `CanActivate`
 - **Users CRUD** (`src/users/`) - paginated list, get by id, update (with policy), admin-only delete
 - **Drizzle + PostgreSQL** - schema at `src/users/user.table.ts`, connection via `DrizzleModule.configure`
@@ -109,7 +109,7 @@ src/
 │   ├── auth.service.ts     - argon2 hash + JWT issue
 │   ├── guards/
 │   │   └── roles.guard.ts  - CanActivate + @Roles() method decorator
-│   ├── providers/          - JwtAuth + LocalAuth strategies
+│   ├── providers/          - JwtAuth, JwtCookieAuth, LocalAuth providers
 │   └── schemas/            - register, login, access-token response
 ├── users/
 │   ├── users.module.ts
@@ -121,7 +121,7 @@ src/
 ├── common/
 │   └── middleware/         - requestLogger, responseTime
 └── types/
-    └── auth.d.ts           - module augmentation for ctx.user
+    └── core.d.ts           - module augmentation for ctx.user / ctx.requestId
 ```
 
 ## Production

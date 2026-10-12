@@ -77,7 +77,7 @@ await app.listen(3000)
 | `@miiajs/serve-static` | Static file serving with Range, ETag, charset, SPA fallback |
 | `@miiajs/node-server` | Node.js HTTP server |
 | `@miiajs/uws-server` | uWebSockets.js HTTP server |
-| `@miiajs/auth` | Strategy primitives, AuthGuard, token extractors |
+| `@miiajs/auth` | Auth primitives - `AuthProvider`, `AuthGuard`, token extractors |
 | `@miiajs/jwt` | Injectable JWT sign/verify service (jose wrapper) |
 | `@miiajs/rate-limit` | Fixed-window rate limiting: middleware, guard, decorators, pluggable stores |
 | `@miiajs/multipart` | Streaming `multipart/form-data`: part iterator, buffered form, `@ValidateForm` |
