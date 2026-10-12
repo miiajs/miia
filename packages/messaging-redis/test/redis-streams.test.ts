@@ -1325,4 +1325,51 @@ d('RedisStreamsTransport', () => {
       expect(lastRead.has(tp)).toBe(false)
     })
   })
+
+  describe('malformed entries', () => {
+    it('acks and skips entries that are not message envelopes, then keeps consuming', async () => {
+      const probe = testClient()
+      const tp = `miia-test:malformed:${randomUUID()}`
+      const t = new RedisStreamsTransport({ client: testClient(), blockMs: 200, retryIntervalMs: NO_HOUSEKEEPING })
+      const logs = captureLogs(t)
+      await t.onInit?.()
+
+      const received: MessageEnvelope[] = []
+      try {
+        await t.subscribe(
+          tp,
+          async (e) => {
+            received.push(e)
+            return { status: 'ack' }
+          },
+          { group: 'g' },
+        )
+
+        const malformed = [
+          '{}',
+          'null',
+          '42',
+          '"s"',
+          '[]',
+          '{"id":"x"}',
+          '{"id":1,"meta":{}}',
+          '{"id":"x","meta":null}',
+          '{',
+        ]
+        const bad: string[] = []
+        for (const data of malformed) bad.push((await probe.xadd(tp, '*', 'data', data))!)
+        bad.push((await probe.xadd(tp, '*', 'other', 'v'))!)
+        const valid = envelope(tp, { n: 1 })
+        await t.publish(valid)
+
+        await waitFor(() => received.length > 0, 'the valid entry behind the malformed ones')
+        await waitFor(async () => Number((await probe.xpending(tp, 'g'))[0]) === 0, 'every entry to be acked')
+        expect(received.map((e) => e.id)).toEqual([valid.id])
+        for (const id of bad) expect(logs.errors).toContain(`Failed to parse stream entry ${id}`)
+      } finally {
+        await t.onDestroy?.()
+        await drainKeys(probe, tp)
+      }
+    })
+  })
 })

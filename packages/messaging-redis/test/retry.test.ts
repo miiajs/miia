@@ -945,6 +945,45 @@ d('RedisStreamsTransport retry', () => {
     }
   })
 
+  it('acks an abandoned entry that is not a message envelope instead of failing the sweep', async () => {
+    const probe = testClient()
+    const tp = `miia-test:retry-malformed-abandoned:${randomUUID()}`
+    const t = new RedisStreamsTransport({
+      client: testClient(),
+      retry: { backoffMs: 50, maxAttempts: 1 },
+      retryIntervalMs: 50,
+      minIdleMs: HORIZON_MS,
+      blockMs: 100,
+    })
+    const logs = captureLogs(t)
+    await t.onInit?.()
+
+    const handled: MessageEnvelope[] = []
+    try {
+      await probe.xgroup('CREATE', tp, 'g', '$', 'MKSTREAM')
+      const id = (await probe.xadd(tp, '*', 'data', '{}'))!
+      expect(await takeAsDeadConsumer(probe, tp, 'g', 1)).toEqual([id])
+
+      await t.subscribe(
+        tp,
+        async (e) => {
+          handled.push(e)
+          return { status: 'ack' }
+        },
+        { group: 'g' },
+      )
+
+      await waitFor(async () => (await pending(probe, tp, 'g')).length === 0, 'the entry to be acked away')
+      expect(handled).toHaveLength(0)
+      expect(await probe.exists(`${tp}.dlq`)).toBe(0)
+      expect(sweepLines(logs, tp)).toHaveLength(0)
+      expect(logs.errors).toContain(`Failed to parse stream entry ${id}`)
+    } finally {
+      await t.onDestroy?.()
+      await drainKeys(probe, tp)
+    }
+  })
+
   it('logs a failing housekeeping channel once, not once per tick, and announces its recovery', async () => {
     const h = await sweepHarness()
     const sweeps = () => sweepLines(h.logs, h.topic)
