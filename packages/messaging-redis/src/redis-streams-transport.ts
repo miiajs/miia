@@ -32,7 +32,7 @@ import {
   MIN_HEARTBEAT_INTERVAL_MS,
   PENDING_PAGE,
 } from './constants.js'
-import { describeError } from './connection.js'
+import { describeError, resolveSocketTimeout } from './connection.js'
 import { DLQ_SCRIPT, PARK_RETRY_SCRIPT } from './retry-queue.js'
 import { parseEnvelopeFromFields } from './serialization.js'
 
@@ -59,6 +59,13 @@ export interface RedisStreamsTransportOptions {
    * messages wake the blocked read immediately, and shutdown disconnects the socket rather than waiting it out.
    */
   blockMs?: number
+  /**
+   * How long a connection may stay silent with a command outstanding before it is dropped and reconnected, in ms - its
+   * commands are resent. Default 10000, `0` disables. A lane gets `blockMs` on top, and none at all with `blockMs: 0`,
+   * which blocks forever. It bounds connecting too, so a server that accepts and never answers fails startup instead
+   * of hanging it. Not applied to a `client` you pass.
+   */
+  socketTimeoutMs?: number
   /**
    * Budget `onDestroy()` gives the running housekeeping pass and the in-flight handlers together, before forcing
    * cleanup. Default 5000ms, 0 skips the drain. A timed-out handler's entry stays in the PEL and is redelivered once
@@ -190,6 +197,7 @@ export class RedisStreamsTransport implements MessageTransport {
   private readonly horizonMs: number
   private readonly heartbeatIntervalMs: number
   private readonly blockMs: number
+  private readonly socketTimeoutMs: number
   private readonly drainTimeoutMs: number
   private pendingDeliveries = new Set<Promise<void>>()
   /**
@@ -228,6 +236,9 @@ export class RedisStreamsTransport implements MessageTransport {
     if (!options.client && !options.url) {
       throw new Error('[messaging-redis] Either `url` or `client` must be provided')
     }
+    // Before any client exists, so a bad value leaves nothing to close.
+    this.blockMs = options.blockMs ?? DEFAULT_BLOCK_MS
+    this.socketTimeoutMs = resolveSocketTimeout(options.socketTimeoutMs, this.blockMs)
     if (options.client) {
       if (options.client.options.replyMapping === 'resp3') {
         throw new Error(
@@ -241,6 +252,7 @@ export class RedisStreamsTransport implements MessageTransport {
       this.client = new Redis(options.url!, {
         lazyConnect: true,
         maxRetriesPerRequest: null,
+        socketTimeout: this.socketTimeoutMs || undefined,
       })
       this.ownsClient = true
       this.watchConnection(this.client)
@@ -251,7 +263,6 @@ export class RedisStreamsTransport implements MessageTransport {
     this.minIdleMs = options.minIdleMs ?? DEFAULT_MIN_IDLE_MS
     this.horizonMs = this.resolveHorizon()
     this.heartbeatIntervalMs = Math.max(MIN_HEARTBEAT_INTERVAL_MS, Math.floor(this.horizonMs / 2))
-    this.blockMs = options.blockMs ?? DEFAULT_BLOCK_MS
     this.drainTimeoutMs = options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS
 
     this.registerLuaCommands()
@@ -296,7 +307,7 @@ export class RedisStreamsTransport implements MessageTransport {
   async onInit(): Promise<void> {
     // A user-supplied client's lifecycle belongs to the user - never connect or quit it.
     if (this.ownsClient && this.client.status !== 'ready') {
-      await this.client.connect()
+      await this.connectOwned(this.client)
     }
     // Before the timers, so an error that fails it leaves nothing running.
     await this.checkServerVersion()
@@ -430,6 +441,34 @@ export class RedisStreamsTransport implements MessageTransport {
   private retireConnection(client: Redis): void {
     this.retiredClients.add(client)
     if (this.failingClients.delete(client) && this.failingClients.size === 0) this.failures.delete('redis connection')
+  }
+
+  /**
+   * Connect a client the transport owns. A failed connect is torn down - ioredis would keep reconnecting it in the
+   * background - and reported with the cause ioredis emitted, not the bare `Connection is closed.` it rejects with.
+   */
+  private async connectOwned(client: Redis): Promise<void> {
+    let cause: unknown
+    const capture = (err: unknown) => {
+      cause ??= err
+    }
+    client.on('error', capture)
+    try {
+      await client.connect()
+    } catch (err) {
+      this.retireConnection(client)
+      client.disconnect()
+      throw new Error(`[messaging-redis] Could not connect to Redis: ${describeError(cause ?? err)}`, {
+        cause: cause ?? err,
+      })
+    } finally {
+      client.off('error', capture)
+    }
+  }
+
+  /** A lane's `socketTimeout`: its BLOCK is silence by design, so it comes on top. `blockMs: 0` blocks forever. */
+  private get laneSocketTimeout(): number | undefined {
+    return this.socketTimeoutMs > 0 && this.blockMs > 0 ? this.blockMs + this.socketTimeoutMs : undefined
   }
 
   /** Sync in ioredis: tears the socket so the lane's in-flight BLOCK rejects. */
@@ -758,10 +797,11 @@ export class RedisStreamsTransport implements MessageTransport {
     try {
       for (let i = 0; i < laneCount; i++) {
         const consumer = mode === 'sliding' ? `${this.consumerName}:lane${i}` : this.consumerName
-        // lazyConnect override: we own the connect lifecycle even when the parent was eagerly connected.
-        const client = this.client.duplicate({ lazyConnect: true })
+        // lazyConnect override: we own the connect lifecycle even when the parent was eagerly connected. The timeout is
+        // passed even when unset, so a lane never inherits one set on your client, which knows nothing of `blockMs`.
+        const client = this.client.duplicate({ lazyConnect: true, socketTimeout: this.laneSocketTimeout })
         this.watchConnection(client)
-        await client.connect()
+        await this.connectOwned(client)
         lanes.push({ client, consumer })
       }
     } catch (err) {

@@ -5,7 +5,16 @@ import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
 import { Redis } from 'ioredis'
 import { ALIVE_KEY_PREFIX } from '../src/constants.js'
 import { RedisStreamsTransport } from '../src/redis-streams-transport.js'
-import { type CapturedLogs, captureLogs, closeClientsAfterEach, closedPort, testClient, waitFor } from './helpers.js'
+import {
+  type CapturedLogs,
+  captureLogs,
+  closeClientsAfterEach,
+  closedPort,
+  freezingProxy,
+  silentServer,
+  testClient,
+  waitFor,
+} from './helpers.js'
 
 const REDIS_URL = process.env.REDIS_TEST_URL
 const d = REDIS_URL ? describe : describe.skip
@@ -1484,7 +1493,7 @@ d('RedisStreamsTransport', () => {
       })
       const logs = captureLogs(t)
       try {
-        await expect(t.onInit()).rejects.toThrow()
+        await expect(t.onInit()).rejects.toThrow('Could not connect to Redis: ECONNREFUSED')
         await wait(300)
 
         const line = logs.errors.indexOf('Redis connection error')
@@ -1514,6 +1523,192 @@ d('RedisStreamsTransport', () => {
         await t.onDestroy()
         await drainKeys(testClient(), tp)
       }
+    })
+  })
+
+  describe('stalled connections', () => {
+    interface Internals {
+      client: Redis
+      subs: Array<{ lanes: Array<{ client: Redis }> }>
+    }
+
+    /** Errors whose detail carries ioredis' socket timeout. */
+    function timeouts(logs: CapturedLogs): string[] {
+      return logs.errorDetails.filter((detail) => detail.includes('Socket timeout'))
+    }
+
+    it('fails startup against a server that never answers, and stops connecting', async () => {
+      const server = await silentServer()
+      const t = new RedisStreamsTransport({
+        url: `redis://127.0.0.1:${server.port}`,
+        socketTimeoutMs: 300,
+        retryIntervalMs: NO_HOUSEKEEPING,
+      })
+      captureLogs(t)
+      try {
+        const started = Date.now()
+        const err = await t.onInit().then(
+          () => undefined,
+          (e: unknown) => e as Error,
+        )
+        expect(Date.now() - started).toBeLessThan(2000)
+        expect(err?.message).toContain('Could not connect to Redis')
+        expect(err?.message).toContain('Socket timeout')
+
+        const seen = server.connections()
+        await wait(1000)
+        expect(server.connections()).toBe(seen)
+      } finally {
+        await t.onDestroy()
+        await server.close()
+      }
+    })
+
+    it('drops a lane that stops answering and reads on a new connection', async () => {
+      const proxy = await freezingProxy()
+      const probe = testClient()
+      const tp = `miia-test:stall-lane:${randomUUID()}`
+      const t = new RedisStreamsTransport({
+        url: `redis://127.0.0.1:${proxy.port}`,
+        blockMs: 200,
+        socketTimeoutMs: 300,
+        retryIntervalMs: NO_HOUSEKEEPING,
+      })
+      const logs = captureLogs(t)
+      const received: string[] = []
+      try {
+        await t.onInit()
+        await t.subscribe(
+          tp,
+          async (e) => {
+            received.push(e.id)
+            return { status: 'ack' }
+          },
+          { group: 'g' },
+        )
+        // Connection 0 is the publisher, the rest are lanes.
+        expect(proxy.connections).toHaveLength(2)
+        for (const lane of proxy.connections.slice(1)) lane.freeze()
+        // Past the BLOCK a read sent before the freeze may still hold on the server: an entry added while it does is
+        // handed to the dead socket and only comes back through the sweep.
+        await wait(400)
+        const e = envelope(tp)
+        await probe.xadd(tp, '*', 'data', JSON.stringify(e))
+
+        await waitFor(() => received.includes(e.id), 'the entry on a new lane connection')
+        expect(timeouts(logs).length).toBeGreaterThan(0)
+        await waitFor(() => logs.logs.some((l) => l.startsWith('Redis connection recovered')), 'the recovery line')
+      } finally {
+        await t.onDestroy()
+        await proxy.close()
+        await drainKeys(probe, tp)
+      }
+    })
+
+    it('drops a publisher that stops answering and resends its ack', async () => {
+      const proxy = await freezingProxy()
+      const probe = testClient()
+      const tp = `miia-test:stall-pub:${randomUUID()}`
+      const t = new RedisStreamsTransport({
+        url: `redis://127.0.0.1:${proxy.port}`,
+        blockMs: 200,
+        socketTimeoutMs: 300,
+        retryIntervalMs: NO_HOUSEKEEPING,
+      })
+      const logs = captureLogs(t)
+      let handled = false
+      try {
+        await t.onInit()
+        await t.subscribe(
+          tp,
+          async () => {
+            handled = true
+            return { status: 'ack' }
+          },
+          { group: 'g' },
+        )
+        proxy.connections[0]!.freeze()
+        await probe.xadd(tp, '*', 'data', JSON.stringify(envelope(tp)))
+
+        await waitFor(() => handled, 'the delivery')
+        // The ack is stuck on the frozen publisher.
+        expect(Number((await probe.xpending(tp, 'g'))[0])).toBe(1)
+        await waitFor(
+          async () => Number((await probe.xpending(tp, 'g'))[0]) === 0,
+          'the ack after the publisher reconnected',
+        )
+        expect(timeouts(logs).length).toBeGreaterThan(0)
+      } finally {
+        await t.onDestroy()
+        await proxy.close()
+        await drainKeys(probe, tp)
+      }
+    })
+
+    it('gives the publisher socketTimeoutMs and a lane blockMs on top', async () => {
+      const tp = `miia-test:stall-options:${randomUUID()}`
+      const t = new RedisStreamsTransport({ url: REDIS_URL!, blockMs: 200, retryIntervalMs: NO_HOUSEKEEPING })
+      try {
+        await t.onInit()
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: 'g' })
+
+        const internals = t as unknown as Internals
+        expect(internals.client.options.socketTimeout).toBe(10_000)
+        expect(internals.subs[0]!.lanes[0]!.client.options.socketTimeout).toBe(10_200)
+      } finally {
+        await t.onDestroy()
+        await drainKeys(testClient(), tp)
+      }
+    })
+
+    it('gives a lane no socket timeout under blockMs 0, which blocks forever', async () => {
+      const tp = `miia-test:stall-block0:${randomUUID()}`
+      // Not even the one set on the client it duplicates.
+      const c = testClient({ socketTimeout: 100 })
+      const t = new RedisStreamsTransport({ client: c, blockMs: 0, retryIntervalMs: NO_HOUSEKEEPING })
+      try {
+        await t.onInit()
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: 'g' })
+
+        expect((t as unknown as Internals).subs[0]!.lanes[0]!.client.options.socketTimeout).toBeUndefined()
+      } finally {
+        await t.onDestroy()
+        await drainKeys(testClient(), tp)
+      }
+    })
+
+    it('leaves the socket timeout of a client you pass alone, and gives its lanes their own', async () => {
+      const c = testClient({ socketTimeout: 100 })
+      const tp = `miia-test:stall-client:${randomUUID()}`
+      const t = new RedisStreamsTransport({
+        client: c,
+        blockMs: 200,
+        socketTimeoutMs: 300,
+        retryIntervalMs: NO_HOUSEKEEPING,
+      })
+      try {
+        await t.onInit()
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: 'g' })
+
+        expect(c.options.socketTimeout).toBe(100)
+        expect((t as unknown as Internals).subs[0]!.lanes[0]!.client.options.socketTimeout).toBe(500)
+      } finally {
+        await t.onDestroy()
+        await drainKeys(testClient(), tp)
+      }
+    })
+
+    it('rejects a socketTimeoutMs setTimeout cannot hold', () => {
+      for (const socketTimeoutMs of [-1, 1.5, Number.NaN, 2 ** 31]) {
+        expect(() => new RedisStreamsTransport({ url: REDIS_URL!, socketTimeoutMs })).toThrow(
+          'socketTimeoutMs must be an integer >= 0',
+        )
+      }
+      expect(() => new RedisStreamsTransport({ url: REDIS_URL!, blockMs: 2 ** 31 - 1, socketTimeoutMs: 1 })).toThrow(
+        'blockMs + socketTimeoutMs at most 2147483647',
+      )
+      const disabled = new RedisStreamsTransport({ url: REDIS_URL!, socketTimeoutMs: 0 })
+      expect((disabled as unknown as Internals).client.options.socketTimeout).toBeUndefined()
     })
   })
 })

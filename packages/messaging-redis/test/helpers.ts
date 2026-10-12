@@ -140,3 +140,31 @@ export async function freezingProxy(listenPort = 0): Promise<FreezingProxy> {
     },
   }
 }
+
+export interface SilentServer {
+  port: number
+  /** Connections accepted so far. */
+  connections(): number
+  close(): Promise<void>
+}
+
+/** Accepts connections and never answers - a proxy that accepted and went silent. */
+export async function silentServer(): Promise<SilentServer> {
+  const sockets = new Set<Socket>()
+  let accepted = 0
+  const server = createServer((socket) => {
+    accepted++
+    sockets.add(socket)
+    socket.on('close', () => sockets.delete(socket))
+    socket.on('error', () => {})
+  })
+  const port = await listen(server)
+  return {
+    port,
+    connections: () => accepted,
+    close: async () => {
+      for (const socket of sockets) socket.destroy()
+      await new Promise((r) => server.close(r))
+    },
+  }
+}

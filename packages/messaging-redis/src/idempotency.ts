@@ -1,7 +1,7 @@
 import { Logger } from '@miiajs/core'
 import type { IdempotencyStore } from '@miiajs/messaging'
 import { Redis } from 'ioredis'
-import { describeError } from './connection.js'
+import { describeError, resolveSocketTimeout } from './connection.js'
 
 export interface RedisIdempotencyStoreOptions {
   /** Pre-built ioredis instance. Mutually exclusive with `url`. */
@@ -15,6 +15,11 @@ export interface RedisIdempotencyStoreOptions {
    * e.g. `'orders-svc:idem:'`, so claims do not collide across services.
    */
   keyPrefix?: string
+  /**
+   * How long the connection may stay silent with a command outstanding before it is dropped and reconnected, in ms -
+   * its commands are resent. Default 10000, `0` disables. `url` form only: a `client` you pass keeps its own settings.
+   */
+  socketTimeoutMs?: number
 }
 
 const DEFAULT_KEY_PREFIX = 'miia:idem:'
@@ -43,7 +48,8 @@ export class RedisIdempotencyStore implements IdempotencyStore {
       this.client = options.client
       this.ownsClient = false
     } else {
-      this.client = new Redis(options.url!, { lazyConnect: true })
+      const socketTimeoutMs = resolveSocketTimeout(options.socketTimeoutMs)
+      this.client = new Redis(options.url!, { lazyConnect: true, socketTimeout: socketTimeoutMs || undefined })
       this.ownsClient = true
       this.watchConnection()
     }

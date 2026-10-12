@@ -142,3 +142,46 @@ describe('RedisIdempotencyStore connection errors', () => {
     }
   })
 })
+
+describe('RedisIdempotencyStore socketTimeoutMs', () => {
+  function socketTimeout(store: RedisIdempotencyStore): number | undefined {
+    return (store as unknown as { client: Redis }).client.options.socketTimeout
+  }
+
+  it('gives its own client a socket timeout, 10s by default and none at 0', () => {
+    expect(socketTimeout(new RedisIdempotencyStore({ url: 'redis://127.0.0.1:1' }))).toBe(10_000)
+    expect(socketTimeout(new RedisIdempotencyStore({ url: 'redis://127.0.0.1:1', socketTimeoutMs: 300 }))).toBe(300)
+    expect(socketTimeout(new RedisIdempotencyStore({ url: 'redis://127.0.0.1:1', socketTimeoutMs: 0 }))).toBeUndefined()
+  })
+
+  it('rejects a socketTimeoutMs setTimeout cannot hold', () => {
+    for (const socketTimeoutMs of [-1, 1.5, Number.NaN, 2 ** 31]) {
+      expect(() => new RedisIdempotencyStore({ url: 'redis://127.0.0.1:1', socketTimeoutMs })).toThrow(
+        'socketTimeoutMs must be an integer >= 0',
+      )
+    }
+  })
+
+  const r = REDIS_URL ? it : it.skip
+  r('drops a connection that stops answering and resends the claim', async () => {
+    const proxy = await freezingProxy()
+    const store = new RedisIdempotencyStore({
+      url: `redis://127.0.0.1:${proxy.port}`,
+      keyPrefix: `miia-test-idem:${randomUUID()}:`,
+      socketTimeoutMs: 300,
+    })
+    const logs = captureStoreLogs(store)
+    try {
+      expect(await store.claim('a', 1000)).toBe(true)
+      proxy.connections[0]!.freeze()
+
+      const started = Date.now()
+      expect(await store.claim('b', 1000)).toBe(true)
+      expect(Date.now() - started).toBeLessThan(2000)
+      expect(logs.errorDetails[0]).toContain('Socket timeout')
+    } finally {
+      await store.onDestroy()
+      await proxy.close()
+    }
+  })
+})
