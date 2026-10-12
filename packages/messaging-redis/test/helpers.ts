@@ -1,4 +1,5 @@
 import { afterEach } from 'bun:test'
+import { connect, createServer, type Server, type Socket } from 'node:net'
 import type { LoggerService } from '@miiajs/core'
 import { Redis, type RedisOptions } from 'ioredis'
 import type { RedisStreamsTransport } from '../src/redis-streams-transport.js'
@@ -72,4 +73,70 @@ export function captureLogs(transport: RedisStreamsTransport): CapturedLogs {
   }
   ;(transport as unknown as { logger: LoggerService }).logger = recorder
   return captured
+}
+
+function listen(server: Server, port = 0): Promise<number> {
+  return new Promise((resolve) =>
+    server.listen(port, '127.0.0.1', () => resolve((server.address() as { port: number }).port)),
+  )
+}
+
+/** A port nothing listens on: bound once, so it was free, then closed again. */
+export async function closedPort(): Promise<number> {
+  const server = createServer()
+  const port = await listen(server)
+  await new Promise((r) => server.close(r))
+  return port
+}
+
+export interface FreezingProxy {
+  port: number
+  /** One per accepted connection, in the order they arrived. */
+  connections: Array<{ freeze(): void }>
+  close(): Promise<void>
+}
+
+/**
+ * A TCP proxy to the test Redis whose connections can be frozen: the socket stays open and forwards nothing either
+ * way, the way a half-open connection behaves. Upstream closes with the client side, so a dropped socket frees both.
+ */
+export async function freezingProxy(listenPort = 0): Promise<FreezingProxy> {
+  const target = new URL(REDIS_URL!)
+  const sockets = new Set<Socket>()
+  const connections: FreezingProxy['connections'] = []
+  const server = createServer((client) => {
+    const upstream = connect(Number(target.port || 6379), target.hostname)
+    let frozen = false
+    connections.push({
+      freeze: () => {
+        frozen = true
+      },
+    })
+    client.on('data', (data) => {
+      if (!frozen) upstream.write(data)
+    })
+    upstream.on('data', (data) => {
+      if (!frozen) client.write(data)
+    })
+    const end = () => {
+      client.destroy()
+      upstream.destroy()
+      sockets.delete(client)
+      sockets.delete(upstream)
+    }
+    for (const socket of [client, upstream]) {
+      sockets.add(socket)
+      socket.on('close', end)
+      socket.on('error', end)
+    }
+  })
+  const port = await listen(server, listenPort)
+  return {
+    port,
+    connections,
+    close: async () => {
+      for (const socket of sockets) socket.destroy()
+      await new Promise((r) => server.close(r))
+    },
+  }
 }

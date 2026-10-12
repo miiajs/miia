@@ -1,11 +1,11 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
 import { Redis } from 'ioredis'
 import { ALIVE_KEY_PREFIX } from '../src/constants.js'
 import { RedisStreamsTransport } from '../src/redis-streams-transport.js'
-import { type CapturedLogs, captureLogs, closeClientsAfterEach, testClient, waitFor } from './helpers.js'
+import { type CapturedLogs, captureLogs, closeClientsAfterEach, closedPort, testClient, waitFor } from './helpers.js'
 
 const REDIS_URL = process.env.REDIS_TEST_URL
 const d = REDIS_URL ? describe : describe.skip
@@ -1471,6 +1471,48 @@ d('RedisStreamsTransport', () => {
         await t.onDestroy?.()
         await drainKeys(c, tp)
         await drainKeys(c, bcastTp)
+      }
+    })
+  })
+
+  describe('connection errors', () => {
+    it('logs a refused connection through the logger instead of an unhandled ioredis error', async () => {
+      const unhandled = spyOn(console, 'error')
+      const t = new RedisStreamsTransport({
+        url: `redis://localhost:${await closedPort()}`,
+        retryIntervalMs: NO_HOUSEKEEPING,
+      })
+      const logs = captureLogs(t)
+      try {
+        await expect(t.onInit()).rejects.toThrow()
+        await wait(300)
+
+        const line = logs.errors.indexOf('Redis connection error')
+        expect(line).toBeGreaterThanOrEqual(0)
+        expect(logs.errorDetails[line]).toContain('ECONNREFUSED')
+        expect(unhandled.mock.calls.filter(([first]) => String(first).includes('Unhandled error event'))).toEqual([])
+      } finally {
+        await t.onDestroy()
+        unhandled.mockRestore()
+      }
+      expect(logs.logs.filter((line) => line.includes('recovered'))).toEqual([])
+    })
+
+    it('adds no error listener to a client you pass, and one to each lane', async () => {
+      const c = testClient()
+      const tp = `miia-test:conn-listeners:${randomUUID()}`
+      const before = c.listenerCount('error')
+      const t = new RedisStreamsTransport({ client: c, blockMs: 200, retryIntervalMs: NO_HOUSEKEEPING })
+      try {
+        await t.onInit()
+        await t.subscribe(tp, async () => ({ status: 'ack' }), { group: 'g', mode: 'sliding', concurrency: 2 })
+
+        expect(c.listenerCount('error')).toBe(before)
+        const lanes = (t as unknown as { subs: Array<{ lanes: Array<{ client: Redis }> }> }).subs[0]!.lanes
+        expect(lanes.map((lane) => lane.client.listenerCount('error'))).toEqual([1, 1])
+      } finally {
+        await t.onDestroy()
+        await drainKeys(testClient(), tp)
       }
     })
   })

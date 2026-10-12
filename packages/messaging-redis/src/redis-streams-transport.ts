@@ -32,6 +32,7 @@ import {
   MIN_HEARTBEAT_INTERVAL_MS,
   PENDING_PAGE,
 } from './constants.js'
+import { describeError } from './connection.js'
 import { DLQ_SCRIPT, PARK_RETRY_SCRIPT } from './retry-queue.js'
 import { parseEnvelopeFromFields } from './serialization.js'
 
@@ -199,10 +200,14 @@ export class RedisStreamsTransport implements MessageTransport {
   private inFlight = new Map<string, Map<string, Map<string, string>>>()
   /**
    * `channel -> current failure run`, one entry per unit that can fail on its own: each (topic, group) sweep and its
-   * lanes' group, the heartbeat, the liveness key. Only ever read back whole, so the key doubles as the channel's log
-   * name.
+   * lanes' group, the heartbeat, the liveness key, the connections of the clients the transport owns. Only ever read
+   * back whole, so the key doubles as the channel's log name.
    */
   private failures = new Map<string, FailureRun>()
+  /** Owned clients whose connection is failing right now. The `redis connection` run lasts while any of them is. */
+  private failingClients = new Set<Redis>()
+  /** Clients the transport has let go of. ioredis can still emit a timeout or EPIPE after `disconnect()`. */
+  private retiredClients = new WeakSet<Redis>()
   private timeFallbackWarned = false
   /** `topic -> group -> highest known position`: at subscribe, then the last entry read. A lost group resumes there. */
   private lastRead = new Map<string, Map<string, string>>()
@@ -238,6 +243,7 @@ export class RedisStreamsTransport implements MessageTransport {
         maxRetriesPerRequest: null,
       })
       this.ownsClient = true
+      this.watchConnection(this.client)
     }
     this.retry = { ...DEFAULT_RETRY, ...options.retry }
     this.consumerName = options.consumerName ?? `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`
@@ -364,7 +370,7 @@ export class RedisStreamsTransport implements MessageTransport {
     const subsSnapshot = this.subs
     this.subs = []
     for (const sub of subsSnapshot) sub.abort.abort()
-    for (const sub of subsSnapshot) for (const lane of sub.lanes) lane.client.disconnect()
+    for (const sub of subsSnapshot) for (const lane of sub.lanes) this.closeLane(lane)
 
     const deadline = Date.now() + this.drainTimeoutMs
     if (this.drainTimeoutMs > 0) {
@@ -388,6 +394,7 @@ export class RedisStreamsTransport implements MessageTransport {
         .catch((err) => this.logger.warn(`xgroup destroy failed for ${sub.group} on ${sub.topic}: ${String(err)}`))
     }
 
+    if (this.ownsClient) this.retireConnection(this.client)
     if (this.ownsClient && this.client.status !== 'end') {
       await this.client.quit().catch(() => {
         /* swallow quit errors - connection already closing */
@@ -395,6 +402,40 @@ export class RedisStreamsTransport implements MessageTransport {
     }
     // Last, so a channel that recovered during the drain still gets to say so.
     this.failures.clear()
+    this.failingClients.clear()
+  }
+
+  /**
+   * Route an owned client's connection errors through the failure log - without a listener, ioredis prints a stack
+   * from every client on every reconnect attempt. The run ends when the last failing client is ready again.
+   */
+  private watchConnection(client: Redis): void {
+    client.on('error', (err) => {
+      if (this.retiredClients.has(client)) return
+      this.failingClients.add(client)
+      this.reportFailure('redis connection', 'Redis connection error', describeError(err))
+    })
+    client.on('ready', () => {
+      if (!this.failingClients.delete(client) || this.failingClients.size > 0) return
+      // Unlike the housekeeping channels, said even after a single failure: the error line alone reads as still down.
+      const run = this.failures.get('redis connection')
+      this.failures.delete('redis connection')
+      if (!run) return
+      const tail = run.count > 1 ? ` after ${run.count} consecutive failures` : ''
+      this.logger.log(`Redis connection recovered${tail}`)
+    })
+  }
+
+  /** Stop listening to a client the transport is letting go of. Its share of the run is dropped without a line. */
+  private retireConnection(client: Redis): void {
+    this.retiredClients.add(client)
+    if (this.failingClients.delete(client) && this.failingClients.size === 0) this.failures.delete('redis connection')
+  }
+
+  /** Sync in ioredis: tears the socket so the lane's in-flight BLOCK rejects. */
+  private closeLane(lane: SubLane): void {
+    this.retireConnection(lane.client)
+    lane.client.disconnect()
   }
 
   /**
@@ -719,12 +760,13 @@ export class RedisStreamsTransport implements MessageTransport {
         const consumer = mode === 'sliding' ? `${this.consumerName}:lane${i}` : this.consumerName
         // lazyConnect override: we own the connect lifecycle even when the parent was eagerly connected.
         const client = this.client.duplicate({ lazyConnect: true })
+        this.watchConnection(client)
         await client.connect()
         lanes.push({ client, consumer })
       }
     } catch (err) {
       // Mid-spawn failure: tear down already-connected lanes before bubbling.
-      for (const lane of lanes) lane.client.disconnect()
+      for (const lane of lanes) this.closeLane(lane)
       throw err
     }
 
@@ -755,8 +797,8 @@ export class RedisStreamsTransport implements MessageTransport {
             if (known?.size === 0) this.lastRead.delete(topic)
           }
         }
-        // Sync in ioredis: tears the socket so each lane's in-flight BLOCK rejects and the loop exits via `aborted`.
-        for (const lane of sub.lanes) lane.client.disconnect()
+        // Each lane's in-flight BLOCK rejects and the loop exits via `aborted`.
+        for (const lane of sub.lanes) this.closeLane(lane)
       },
     }
   }

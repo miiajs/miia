@@ -1,5 +1,7 @@
+import { Logger } from '@miiajs/core'
 import type { IdempotencyStore } from '@miiajs/messaging'
 import { Redis } from 'ioredis'
+import { describeError } from './connection.js'
 
 export interface RedisIdempotencyStoreOptions {
   /** Pre-built ioredis instance. Mutually exclusive with `url`. */
@@ -29,6 +31,9 @@ export class RedisIdempotencyStore implements IdempotencyStore {
   private client: Redis
   private ownsClient: boolean
   private prefix: string
+  private logger = new Logger('RedisIdempotencyStore')
+  /** Connection errors since the client was last ready. Only the first of an outage is logged. */
+  private connectionErrors = 0
 
   constructor(options: RedisIdempotencyStoreOptions) {
     if (!options.client && !options.url) {
@@ -40,6 +45,7 @@ export class RedisIdempotencyStore implements IdempotencyStore {
     } else {
       this.client = new Redis(options.url!, { lazyConnect: true })
       this.ownsClient = true
+      this.watchConnection()
     }
     this.prefix = options.keyPrefix ?? DEFAULT_KEY_PREFIX
   }
@@ -51,6 +57,17 @@ export class RedisIdempotencyStore implements IdempotencyStore {
 
   async release(id: string): Promise<void> {
     await this.client.del(`${this.prefix}${id}`)
+  }
+
+  /** Without a listener, ioredis prints a stack on every reconnect attempt. A `client` you pass keeps its own. */
+  private watchConnection(): void {
+    this.client.on('error', (err) => {
+      if (this.connectionErrors++ === 0) this.logger.error('Redis connection error', describeError(err))
+    })
+    this.client.on('ready', () => {
+      if (this.connectionErrors > 1) this.logger.log(`Redis connection recovered after ${this.connectionErrors} errors`)
+      this.connectionErrors = 0
+    })
   }
 
   async onDestroy(): Promise<void> {

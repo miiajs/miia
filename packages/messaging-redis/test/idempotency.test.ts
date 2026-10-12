@@ -1,7 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { randomUUID } from 'node:crypto'
+import type { LoggerService } from '@miiajs/core'
 import { Redis } from 'ioredis'
 import { RedisIdempotencyStore } from '../src/idempotency.js'
+import { closedPort, freezingProxy, waitFor } from './helpers.js'
 
 const REDIS_URL = process.env.REDIS_TEST_URL
 const d = REDIS_URL ? describe : describe.skip
@@ -68,5 +70,75 @@ d('RedisIdempotencyStore', () => {
 
   it('throws when neither url nor client is provided', () => {
     expect(() => new RedisIdempotencyStore({} as never)).toThrow(/either `url` or `client`/)
+  })
+})
+
+interface StoreLogs {
+  errors: string[]
+  errorDetails: string[]
+  logs: string[]
+}
+
+function captureStoreLogs(store: RedisIdempotencyStore): StoreLogs {
+  const captured: StoreLogs = { errors: [], errorDetails: [], logs: [] }
+  const recorder: LoggerService = {
+    log: (message) => {
+      captured.logs.push(message)
+    },
+    warn: () => {},
+    error: (message, trace) => {
+      captured.errors.push(message)
+      captured.errorDetails.push(trace ?? '')
+    },
+    debug: () => {},
+  }
+  ;(store as unknown as { logger: LoggerService }).logger = recorder
+  return captured
+}
+
+describe('RedisIdempotencyStore connection errors', () => {
+  it('logs the first error of an outage through the logger instead of an unhandled ioredis error', async () => {
+    const unhandled = spyOn(console, 'error')
+    const store = new RedisIdempotencyStore({ url: `redis://localhost:${await closedPort()}` })
+    const logs = captureStoreLogs(store)
+    const client = (store as unknown as { client: Redis }).client
+    let seen = 0
+    client.on('error', () => seen++)
+    try {
+      // Not awaited: the offline queue holds it through every reconnect attempt.
+      store.claim('a', 60_000).catch(() => {})
+      await waitFor(() => seen >= 3, 'three connection errors')
+
+      expect(logs.errors).toEqual(['Redis connection error'])
+      expect(logs.errorDetails[0]).toContain('ECONNREFUSED')
+      expect(unhandled.mock.calls.filter(([first]) => String(first).includes('Unhandled error event'))).toEqual([])
+    } finally {
+      client.disconnect()
+      unhandled.mockRestore()
+    }
+  })
+
+  const r = REDIS_URL ? it : it.skip
+  r('logs one recovery line when the connection comes back', async () => {
+    const port = await closedPort()
+    const store = new RedisIdempotencyStore({
+      url: `redis://127.0.0.1:${port}`,
+      keyPrefix: `miia-test-idem:${randomUUID()}:`,
+    })
+    const logs = captureStoreLogs(store)
+    const client = (store as unknown as { client: Redis }).client
+    let seen = 0
+    client.on('error', () => seen++)
+    const claim = store.claim('a', 1000)
+    await waitFor(() => seen >= 2, 'two connection errors')
+    // Redis shows up on the port the store keeps retrying.
+    const proxy = await freezingProxy(port)
+    try {
+      expect(await claim).toBe(true)
+      expect(logs.logs).toEqual([`Redis connection recovered after ${seen} errors`])
+    } finally {
+      await store.onDestroy()
+      await proxy.close()
+    }
   })
 })
