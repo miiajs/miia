@@ -1137,10 +1137,12 @@ d('RedisStreamsTransport', () => {
       }
     })
 
-    async function setup(): Promise<{ c: Redis; t: RedisStreamsTransport; logs: CapturedLogs; tp: string }> {
+    async function setup(
+      blockMs = 200,
+    ): Promise<{ c: Redis; t: RedisStreamsTransport; logs: CapturedLogs; tp: string }> {
       const c = testClient()
       const tp = `miia-test:nogroup:${randomUUID()}`
-      const t = new RedisStreamsTransport({ client: c, blockMs: 200, retryIntervalMs: NO_HOUSEKEEPING })
+      const t = new RedisStreamsTransport({ client: c, blockMs, retryIntervalMs: NO_HOUSEKEEPING })
       const logs = captureLogs(t)
       await t.onInit?.()
       opened.push({ t, tp })
@@ -1168,7 +1170,8 @@ d('RedisStreamsTransport', () => {
     }
 
     it('a stream deleted under a live subscriber comes back without replaying what was read', async () => {
-      const { c, t, tp } = await setup()
+      // A long BLOCK, so only a read woken by the DEL itself reports the loss within `waitFor`'s timeout.
+      const { c, t, logs, tp } = await setup(30_000)
       const received: string[] = []
       await t.subscribe(tp, collect(received), { group: 'g' })
       await add(c, tp, 'A')
@@ -1178,7 +1181,8 @@ d('RedisStreamsTransport', () => {
       await wait(10)
 
       await c.del(tp)
-      // Redis 6.2 does not wake a blocked read on DEL - it notices on the next entry added to the key.
+      // The blocked read wakes on the DEL itself, before anything is added to the key again.
+      await waitFor(() => logs.errors.some((line) => line.endsWith('is gone, recreating it')), 'the recovery line')
       await add(c, tp, 'B')
 
       await waitFor(() => received.includes('B'), 'B after the stream was deleted', RECOVERY_MS)
@@ -1261,31 +1265,6 @@ d('RedisStreamsTransport', () => {
       await waitFor(() => received.includes('B'), 'B after the group was destroyed', RECOVERY_MS)
       expect(received).toEqual(['A', 'B'])
       expect(await groupNames(c, tp)).toContain(group)
-    }, 10_000)
-
-    it("recovers from Redis 7.0's UNBLOCKED reply to a read on a deleted stream", async () => {
-      const { c, t, logs, tp } = await setup()
-      const duplicate = c.duplicate.bind(c)
-      c.duplicate = ((...args: Parameters<Redis['duplicate']>) => {
-        const lane = duplicate(...args)
-        const raw = lane as unknown as { xreadgroup: (...a: unknown[]) => Promise<unknown> }
-        const read = raw.xreadgroup.bind(lane)
-        let first = true
-        raw.xreadgroup = (...a) => {
-          if (!first) return read(...a)
-          first = false
-          return Promise.reject(new Error('UNBLOCKED the stream key no longer exists'))
-        }
-        return lane
-      }) as Redis['duplicate']
-      const received: string[] = []
-
-      await t.subscribe(tp, collect(received), { group: 'g' })
-      await waitFor(() => logs.errors.some((line) => line.endsWith('is gone, recreating it')), 'the recovery line')
-      await add(c, tp, 'A')
-
-      await waitFor(() => received.includes('A'), 'A after the recovery', RECOVERY_MS)
-      expect(logs.errors.filter((line) => line.startsWith('Consumer loop error'))).toHaveLength(0)
     }, 10_000)
 
     it('a lane that never sees its group backs off instead of spinning', async () => {
@@ -1373,6 +1352,59 @@ d('RedisStreamsTransport', () => {
     })
   })
 
+  describe('server version', () => {
+    const opened: RedisStreamsTransport[] = []
+
+    afterEach(async () => {
+      for (const t of opened.splice(0)) await t.onDestroy?.()
+    })
+
+    async function init(hello?: () => Promise<unknown>): Promise<CapturedLogs> {
+      const c = testClient()
+      if (hello) {
+        // ioredis sends HELLO itself while connecting, so the stub goes in once the handshake is done.
+        await c.ping()
+        const raw = c as unknown as { call: (...args: unknown[]) => Promise<unknown> }
+        const call = raw.call.bind(c)
+        raw.call = (...args) => (String(args[0]).toUpperCase() === 'HELLO' ? hello() : call(...args))
+      }
+      const t = new RedisStreamsTransport({ client: c, retryIntervalMs: NO_HOUSEKEEPING })
+      opened.push(t)
+      const logs = captureLogs(t)
+      await t.onInit?.()
+      return logs
+    }
+
+    it('warns once on a server older than 7.2 and still starts', async () => {
+      const logs = await init(async () => ['server', 'redis', 'version', '6.2.0', 'proto', 3])
+
+      expect(logs.warns).toHaveLength(1)
+      expect(logs.warns[0]).toContain('6.2.0')
+      expect(logs.warns[0]).toContain('7.2')
+    })
+
+    it('warns once when HELLO is denied and still starts', async () => {
+      const logs = await init(() =>
+        Promise.reject(new Error("NOPERM User limited has no permissions to run the 'hello' command")),
+      )
+
+      expect(logs.warns).toHaveLength(1)
+      expect(logs.warns[0]).toStartWith('Could not check the Redis version')
+    })
+
+    it('fails to start on any other HELLO error', async () => {
+      await expect(init(() => Promise.reject(new Error('Connection is closed.')))).rejects.toThrow(
+        'Connection is closed.',
+      )
+    })
+
+    it('says nothing on a supported server', async () => {
+      const logs = await init()
+
+      expect(logs.warns).toEqual([])
+    })
+  })
+
   describe('client protocol', () => {
     it('rejects a client created with replyMapping resp3', () => {
       const resp3 = new Redis(REDIS_URL!, { replyMapping: 'resp3', lazyConnect: true })
@@ -1397,7 +1429,7 @@ d('RedisStreamsTransport', () => {
       await t.onInit?.()
 
       try {
-        // `HELLO` without a version reports the connection's protocol; 6.2's `CLIENT INFO` has no `resp=` field.
+        // `HELLO` without a version reports the connection's protocol.
         const hello = (await c.call('HELLO')) as unknown[]
         expect(hello[hello.indexOf('proto') + 1]).toBe(2)
 

@@ -55,8 +55,7 @@ export interface RedisStreamsTransportOptions {
   consumerName?: string
   /**
    * `XREADGROUP BLOCK` timeout in ms. Default 5000. Governs idle Redis traffic and error-recovery cadence only - new
-   * messages wake the blocked read immediately, and shutdown disconnects the socket rather than waiting it out. On
-   * Redis 6.2 it also bounds how late a lane notices its stream was deleted while nothing is published to it.
+   * messages wake the blocked read immediately, and shutdown disconnects the socket rather than waiting it out.
    */
   blockMs?: number
   /**
@@ -107,8 +106,6 @@ interface ActiveSub {
 type StreamReadResult = Array<[string, Array<[string, string[]]>]>
 /** `XPENDING` extended-form row: id, consumer, idle ms, delivery count. */
 type PendingEntry = [string, string, number, number]
-/** `XCLAIM` reply row. Redis < 7 returns `null` for an entry trimmed while pending. */
-type ClaimedEntry = [string, string[]] | null
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -162,8 +159,7 @@ interface RawCommands {
  *   `XREADGROUP` never queues a publish behind it.
  *
  * Attempt counter of record is the PEL delivery count, so it survives the process and a SIGKILL mid-handler costs an
- * attempt. Lua scripts run via ioredis `defineCommand()` (EVALSHA fast path). Requires Redis 6.2+ (`XPENDING ... IDLE`,
- * exclusive `(id` cursor).
+ * attempt. Lua scripts run via ioredis `defineCommand()` (EVALSHA fast path). Requires Redis 7.2+.
  *
  * Dispatch modes, connection budgeting, stream retention, and operational caveats:
  * https://miiajs.com/docs/packages/messaging/redis
@@ -296,6 +292,8 @@ export class RedisStreamsTransport implements MessageTransport {
     if (this.ownsClient && this.client.status !== 'ready') {
       await this.client.connect()
     }
+    // Before the timers, so an error that fails it leaves nothing running.
+    await this.checkServerVersion()
     this.retryTimer = setInterval(() => {
       // Skip rather than queue: overlapping passes would only contend on the same PEL window.
       if (this.retryPass || this.stopping) return
@@ -321,6 +319,35 @@ export class RedisStreamsTransport implements MessageTransport {
         })
       this.heartbeatTick = tick
     }, this.heartbeatIntervalMs)
+  }
+
+  /**
+   * Warn on a server older than 7.2, the supported minimum. `HELLO` without arguments reports the version without
+   * switching protocol, and as `@fast @connection` it passes ACLs that deny `INFO`. Only a denied or unknown `HELLO`
+   * skips the check - any other error fails `onInit()`, as it would fail the first command after it anyway.
+   */
+  private async checkServerVersion(): Promise<void> {
+    let reply: unknown
+    try {
+      reply = await this.client.call('HELLO')
+    } catch (err) {
+      const msg = String(err)
+      if (!msg.includes('NOPERM') && !/unknown command|unsupported command/i.test(msg)) throw err
+      this.logger.warn(`Could not check the Redis version (7.2+ is supported) - HELLO was rejected: ${msg}`)
+      return
+    }
+    const i = Array.isArray(reply) ? reply.indexOf('version') : -1
+    const version = i >= 0 ? String((reply as unknown[])[i + 1]) : ''
+    const match = /^(\d+)\.(\d+)/.exec(version)
+    if (!match) {
+      this.logger.warn('Could not check the Redis version (7.2+ is supported) - HELLO reported none')
+      return
+    }
+    const major = Number(match[1])
+    const minor = Number(match[2])
+    if (major < 7 || (major === 7 && minor < 2)) {
+      this.logger.warn(`Redis ${version} is older than 7.2, the supported minimum`)
+    }
   }
 
   async onDestroy(): Promise<void> {
@@ -444,7 +471,7 @@ export class RedisStreamsTransport implements MessageTransport {
 
   /**
    * Remember where the group stands right after subscribe, so a lane that has read nothing yet still recreates it from
-   * there rather than from `initialPosition`. Rows are parsed by field name: 7.x adds `entries-read` and `lag`.
+   * there rather than from `initialPosition`. Rows are parsed by field name, not position.
    */
   private async seedLastRead(topic: string, group: string): Promise<void> {
     let rows: unknown[][]
@@ -764,9 +791,9 @@ export class RedisStreamsTransport implements MessageTransport {
         if (sub.abort.signal.aborted) break
 
         // Group or stream gone (Redis restarted empty, flushed, key evicted, deleted by hand): recreate it and keep
-        // reading, with a backoff so a lane that keeps failing does not spin. 7.0 says UNBLOCKED here, not NOGROUP.
+        // reading, with a backoff so a lane that keeps failing does not spin.
         const msg = String(err)
-        if (msg.includes('NOGROUP') || msg.includes('no longer exists')) {
+        if (msg.includes('NOGROUP')) {
           const channel = `group ${sub.topic}/${sub.group}`
           this.reportFailure(channel, `Consumer group ${sub.group} on ${sub.topic} is gone, recreating it`, msg)
           if (!this.stopping) {
@@ -1068,16 +1095,8 @@ export class RedisStreamsTransport implements MessageTransport {
    * instead of a second delivery.
    */
   private async claim(topic: string, group: string, consumer: string, id: string): Promise<[string, string[]] | null> {
-    const reply = (await this.raw.xclaim(topic, group, consumer, this.horizonMs, id)) as ClaimedEntry[] | null
-    const entry = reply?.[0]
-    if (entry) return entry
-    if (reply && reply.length > 0) {
-      // Redis < 7 answers `[null]` for an entry trimmed out of the stream while still pending (7.x drops it from the
-      // PEL itself). The payload is gone either way - ack the ghost so the PEL stops pointing at it.
-      this.logger.error(`Pending entry ${id} on ${topic} no longer exists in the stream (trimmed); acking`)
-      await this.client.xack(topic, group, id)
-    }
-    return null
+    const reply = (await this.raw.xclaim(topic, group, consumer, this.horizonMs, id)) as [string, string[]][] | null
+    return reply?.[0] ?? null
   }
 
   /**
