@@ -39,7 +39,7 @@ async function drainKeys(client: Redis, prefix: string): Promise<void> {
 /** `XPENDING` extended-form row: id, consumer, idle ms, delivery count. */
 type PendingEntry = [string, string, number, number]
 
-// ioredis 5 types cover neither `XPENDING`'s extended form nor variadic ids in front of `JUSTID`.
+// ioredis types don't cover `XPENDING`'s extended form.
 interface RawRedis {
   xpending(...args: unknown[]): Promise<unknown>
   xclaim(...args: unknown[]): Promise<unknown>

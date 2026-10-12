@@ -137,8 +137,8 @@ interface LuaCommands {
   moveToDlq(streamKey: string, dlqKey: string, group: string, entryId: string, envelopeJson: string): Promise<number>
 }
 
-// ioredis 5 types don't cover `XPENDING`'s extended form or variadic ids in
-// front of `IDLE` / `JUSTID`, so both go through an untyped view.
+// ioredis types don't cover `XPENDING ... IDLE`, so it - and `XCLAIM` with
+// its variadic ids - goes through an untyped view.
 interface RawCommands {
   xpending(...args: unknown[]): Promise<unknown>
   xclaim(...args: unknown[]): Promise<unknown>
@@ -228,6 +228,12 @@ export class RedisStreamsTransport implements MessageTransport {
       throw new Error('[messaging-redis] Either `url` or `client` must be provided')
     }
     if (options.client) {
+      if (options.client.options.replyMapping === 'resp3') {
+        throw new Error(
+          "[messaging-redis] `client` was created with `replyMapping: 'resp3'`, but the transport parses ioredis' " +
+            "default reply shapes. Create it with the default `replyMapping` ('legacy').",
+        )
+      }
       this.client = options.client
       this.ownsClient = false
     } else {
@@ -722,7 +728,7 @@ export class RedisStreamsTransport implements MessageTransport {
             if (known?.size === 0) this.lastRead.delete(topic)
           }
         }
-        // Sync in ioredis 5: tears the socket so each lane's in-flight BLOCK rejects and the loop exits via `aborted`.
+        // Sync in ioredis: tears the socket so each lane's in-flight BLOCK rejects and the loop exits via `aborted`.
         for (const lane of sub.lanes) lane.client.disconnect()
       },
     }

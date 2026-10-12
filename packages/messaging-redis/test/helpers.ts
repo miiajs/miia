@@ -1,6 +1,6 @@
 import { afterEach } from 'bun:test'
 import type { LoggerService } from '@miiajs/core'
-import { Redis } from 'ioredis'
+import { Redis, type RedisOptions } from 'ioredis'
 import type { RedisStreamsTransport } from '../src/redis-streams-transport.js'
 
 const REDIS_URL = process.env.REDIS_TEST_URL
@@ -22,8 +22,8 @@ export function closeClientsAfterEach(): void {
 }
 
 /** A client closed for the test that opened it. Clients a transport builds for itself remain its own to close. */
-export function testClient(): Redis {
-  const client = new Redis(REDIS_URL!)
+export function testClient(options?: RedisOptions): Redis {
+  const client = new Redis(REDIS_URL!, options ?? {})
   open.push(client)
   return client
 }

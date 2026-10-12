@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
-import type { Redis } from 'ioredis'
+import { Redis } from 'ioredis'
 import { ALIVE_KEY_PREFIX } from '../src/constants.js'
 import { RedisStreamsTransport } from '../src/redis-streams-transport.js'
 import { type CapturedLogs, captureLogs, closeClientsAfterEach, testClient, waitFor } from './helpers.js'
@@ -1369,6 +1369,76 @@ d('RedisStreamsTransport', () => {
       } finally {
         await t.onDestroy?.()
         await drainKeys(probe, tp)
+      }
+    })
+  })
+
+  describe('client protocol', () => {
+    it('rejects a client created with replyMapping resp3', () => {
+      const resp3 = new Redis(REDIS_URL!, { replyMapping: 'resp3', lazyConnect: true })
+      try {
+        expect(() => new RedisStreamsTransport({ client: resp3 })).toThrow(/replyMapping: 'resp3'/)
+      } finally {
+        resp3.disconnect()
+      }
+    })
+
+    it('works over a RESP2 connection', async () => {
+      const c = testClient({ protocol: 2 })
+      const tp = `miia-test:resp2:${randomUUID()}`
+      const bcastTp = `miia-test:resp2-bcast:${randomUUID()}`
+      const t = new RedisStreamsTransport({
+        client: c,
+        retry: { backoffMs: 50, maxAttempts: 3 },
+        retryIntervalMs: 50,
+        minIdleMs: 300,
+        blockMs: 200,
+      })
+      await t.onInit?.()
+
+      try {
+        // `HELLO` without a version reports the connection's protocol; 6.2's `CLIENT INFO` has no `resp=` field.
+        const hello = (await c.call('HELLO')) as unknown[]
+        expect(hello[hello.indexOf('proto') + 1]).toBe(2)
+
+        const attempts: number[] = []
+        await t.subscribe(
+          tp,
+          async (e): Promise<HandlerResult> => {
+            attempts.push(e.meta.attempt)
+            if (e.meta.attempt < 2) return { status: 'nack', error: new Error('transient') }
+            return { status: 'ack' }
+          },
+          { group: 'g' },
+        )
+
+        // An orphan for the broadcast subscribe to find: the scan only sees it if XINFO GROUPS parses over RESP2.
+        const base = `${bcastTp}__Service_run`
+        const orphan = `${base}__other-${randomUUID().slice(0, 8)}_999`
+        await c.xgroup('CREATE', bcastTp, orphan, '$', 'MKSTREAM')
+        const broadcast: MessageEnvelope[] = []
+        await t.subscribe(
+          bcastTp,
+          async (e) => {
+            broadcast.push(e)
+            return { status: 'ack' }
+          },
+          { group: `${base}__${hostname()}_${process.pid}`, broadcast: true },
+        )
+        const groups = (await c.xinfo('GROUPS', bcastTp)) as unknown[][]
+        expect(groups.map((row) => String(row[row.indexOf('name') + 1]))).not.toContain(orphan)
+        await wait(50)
+
+        await t.publish(envelope(tp))
+        await t.publish(envelope(bcastTp, { n: 1 }))
+        await waitFor(() => attempts.length === 2, 'two attempts')
+        await waitFor(() => broadcast.length === 1, 'the broadcast message')
+        expect(attempts).toEqual([1, 2])
+        expect(broadcast[0]?.payload).toEqual({ n: 1 })
+      } finally {
+        await t.onDestroy?.()
+        await drainKeys(c, tp)
+        await drainKeys(c, bcastTp)
       }
     })
   })

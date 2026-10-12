@@ -51,11 +51,11 @@
   },
   "peerDependencies": {
     "@miiajs/core": ">=0.7.0 <1.0.0",
-    "ioredis": "^5.0.0"
+    "ioredis": "^6.0.0"
   },
   "devDependencies": {
     "@miiajs/core": "workspace:*",
-    "ioredis": "^5.4.1"
+    "ioredis": "^6.0.0"
   },
   "scripts": {
     "build": "tsc --build",
