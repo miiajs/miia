@@ -21,24 +21,6 @@ return 1
 `
 
 /**
- * Move every due entry (score <= now) from the legacy retry ZSET back into the main stream. Transitional: retries no
- * longer use a ZSET, this only covers entries a pre-PEL replica scheduled during a rolling deploy. Atomic because N
- * replicas draining with `ZRANGE + XADD + DEL` would publish every member N times. Remove in the next minor.
- *
- * KEYS[1] = main stream topic, KEYS[2] = retry ZSET key
- * ARGV[1] = now epoch ms, ARGV[2] = max entries to drain per call
- * Returns the number of entries moved.
- */
-export const DRAIN_RETRY_SCRIPT = `
-local due = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', ARGV[1], 'LIMIT', 0, tonumber(ARGV[2]))
-for _, envelope in ipairs(due) do
-  redis.call('XADD', KEYS[1], '*', 'data', envelope)
-  redis.call('ZREM', KEYS[2], envelope)
-end
-return #due
-`
-
-/**
  * XACK the failed entry and publish the envelope to the DLQ stream in one atomic step. The `XACK` return value is the
  * gate: 1 only for the caller that actually removed the entry from the PEL, 0 for everyone else - without it, two
  * replicas reaching the same exhausted entry in one window both write a DLQ record.

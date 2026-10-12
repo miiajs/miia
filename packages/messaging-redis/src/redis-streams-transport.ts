@@ -25,17 +25,14 @@ import {
   DEFAULT_DRAIN_TIMEOUT_MS,
   DEFAULT_MIN_IDLE_MS,
   DEFAULT_RETRY_INTERVAL_MS,
-  DRAIN_BATCH,
   FAILURE_LOG_BURST,
   FAILURE_LOG_WINDOW_MS,
   HEARTBEAT_BATCH,
-  LEGACY_DRAIN_INTERVAL_MS,
-  LEGACY_DRAIN_MAX_INTERVAL_MS,
   MAX_HORIZON_MS,
   MIN_HEARTBEAT_INTERVAL_MS,
   PENDING_PAGE,
 } from './constants.js'
-import { DLQ_SCRIPT, DRAIN_RETRY_SCRIPT, PARK_RETRY_SCRIPT } from './retry-queue.js'
+import { DLQ_SCRIPT, PARK_RETRY_SCRIPT } from './retry-queue.js'
 import { parseEnvelopeFromFields } from './serialization.js'
 
 /** Derived from the writer so the dead-letter check cannot drift from the naming it is checking for. */
@@ -81,16 +78,6 @@ export interface RedisStreamsTransportOptions {
 interface SubLane {
   client: Redis
   consumer: string
-}
-
-/** Per-topic schedule of the transitional legacy-ZSET drain. Keyed by topic: the ZSET is `${topic}:retry`. */
-interface LegacyDrain {
-  /** Live subscriptions on the topic - the schedule stops when the last one unsubscribes. */
-  refs: number
-  timer?: ReturnType<typeof setTimeout>
-  intervalMs: number
-  /** The drain currently in flight, if any. Never rejects. */
-  running?: Promise<void>
 }
 
 /** Failure run of one housekeeping channel: an unbroken streak of failures, and what it has already been let say. */
@@ -151,7 +138,6 @@ function backoffLevelMs(attempt: number, retry: RetryConfig): number {
 // TS doesn't learn those dynamically, so we keep them as a narrow cast target.
 interface LuaCommands {
   parkRetry(streamKey: string, group: string, entryId: string, consumer: string, idleMs: number): Promise<number>
-  drainRetry(streamKey: string, retryKey: string, nowMs: number, batchSize: number): Promise<number>
   moveToDlq(streamKey: string, dlqKey: string, group: string, entryId: string, envelopeJson: string): Promise<number>
 }
 
@@ -207,8 +193,6 @@ export class RedisStreamsTransport implements MessageTransport {
   private logger = new Logger('RedisStreamsTransport')
   private readonly consumerName: string
   private readonly retryIntervalMs: number
-  /** Cadence the legacy drain falls back to while entries are still moving. Never slower than its own base. */
-  private readonly legacyDrainFastMs: number
   private readonly minIdleMs: number
   private readonly horizonMs: number
   private readonly heartbeatIntervalMs: number
@@ -221,12 +205,10 @@ export class RedisStreamsTransport implements MessageTransport {
    * contain colons.
    */
   private inFlight = new Map<string, Map<string, Map<string, string>>>()
-  /** `topic -> legacy drain schedule`. One per topic, however many groups subscribe to it. */
-  private legacyDrains = new Map<string, LegacyDrain>()
   /**
    * `channel -> current failure run`, one entry per unit that can fail on its own: each (topic, group) sweep and its
-   * lanes' group, the heartbeat, the liveness key, each topic's legacy drain. Only ever read back whole, so the key
-   * doubles as the channel's log name.
+   * lanes' group, the heartbeat, the liveness key. Only ever read back whole, so the key doubles as the channel's log
+   * name.
    */
   private failures = new Map<string, FailureRun>()
   private timeFallbackWarned = false
@@ -262,7 +244,6 @@ export class RedisStreamsTransport implements MessageTransport {
     this.retry = { ...DEFAULT_RETRY, ...options.retry }
     this.consumerName = options.consumerName ?? `${hostname()}:${process.pid}:${randomUUID().slice(0, 8)}`
     this.retryIntervalMs = this.resolveRetryInterval(options)
-    this.legacyDrainFastMs = Math.min(this.retryIntervalMs, LEGACY_DRAIN_INTERVAL_MS)
     this.minIdleMs = options.minIdleMs ?? DEFAULT_MIN_IDLE_MS
     this.horizonMs = this.resolveHorizon()
     this.heartbeatIntervalMs = Math.max(MIN_HEARTBEAT_INTERVAL_MS, Math.floor(this.horizonMs / 2))
@@ -309,7 +290,6 @@ export class RedisStreamsTransport implements MessageTransport {
       defineCommand: (name: string, options: { numberOfKeys: number; lua: string }) => void
     }
     c.defineCommand('parkRetry', { numberOfKeys: 1, lua: PARK_RETRY_SCRIPT })
-    c.defineCommand('drainRetry', { numberOfKeys: 2, lua: DRAIN_RETRY_SCRIPT })
     c.defineCommand('moveToDlq', { numberOfKeys: 2, lua: DLQ_SCRIPT })
   }
 
@@ -358,9 +338,6 @@ export class RedisStreamsTransport implements MessageTransport {
     if (this.retryTimer) clearInterval(this.retryTimer)
     if (this.aliveRecheck) clearTimeout(this.aliveRecheck)
     this.aliveRecheck = undefined
-    const drains = [...this.legacyDrains.values()]
-    this.legacyDrains.clear()
-    for (const state of drains) if (state.timer) clearTimeout(state.timer)
 
     // Snapshot before clearing - the lane clients are still needed below. Order matters: abort so the loop's catch
     // sees it, disconnect to break the in-flight BLOCK, drain the running pass and its handlers on ONE budget (their
@@ -377,9 +354,6 @@ export class RedisStreamsTransport implements MessageTransport {
       if (this.retryPass && !(await this.awaitUntil(this.retryPass, deadline))) {
         this.logger.warn('Drain timeout: housekeeping pass still running')
       }
-      // Legacy drains are a round trip each and share the same budget - a quit under one only logs noise.
-      const running = drains.map((state) => state.running).filter((run) => run !== undefined)
-      if (running.length > 0) await this.awaitUntil(Promise.all(running), deadline)
       await this.waitForDrain(deadline)
     }
 
@@ -737,8 +711,6 @@ export class RedisStreamsTransport implements MessageTransport {
       throw err
     }
 
-    await this.startLegacyDrain(topic)
-
     const abort = new AbortController()
     const sub: ActiveSub = { topic, group, mode, concurrency, isBroadcast, initialPosition, handler, abort, lanes }
     this.subs.push(sub)
@@ -751,11 +723,10 @@ export class RedisStreamsTransport implements MessageTransport {
     return {
       unsubscribe: async () => {
         abort.abort()
-        // Release the drain ref only on the first call - `unsubscribe()` is idempotent by contract.
+        // Only the first call finds the sub - `unsubscribe()` is idempotent by contract.
         const idx = this.subs.indexOf(sub)
         if (idx >= 0) {
           this.subs.splice(idx, 1)
-          this.stopLegacyDrain(topic)
           // One sweep serves every subscription on the pair, so only the last one out drops the run: leaving it would
           // grow the map with every subscription that comes and goes, dropping it early would reset a live count.
           if (!this.subs.some((s) => s.topic === topic && s.group === group)) {
@@ -901,7 +872,7 @@ export class RedisStreamsTransport implements MessageTransport {
 
       // `meta.attempt` only carries the PEL delivery count to the handler. Skip the substitution when `lastError` is
       // set: that is a DLQ record, whose `attempt` describes the death of the original and would be clobbered by the
-      // `.dlq` stream's own delivery count of 1. Legacy ZSET envelopes have no `lastError`, so they get a fresh budget.
+      // `.dlq` stream's own delivery count of 1.
       if (envelope.meta.lastError === undefined) {
         envelope = { ...envelope, meta: { ...envelope.meta, attempt } }
       } else {
@@ -998,65 +969,6 @@ export class RedisStreamsTransport implements MessageTransport {
       meta: { ...envelope.meta, attempt, lastError: error.message },
     })
     await this.lua.moveToDlq(sub.topic, dlqTopic(sub.topic), sub.group, id, dlqEnvelope)
-  }
-
-  /**
-   * Transitional legacy-ZSET migration - see DRAIN_RETRY_SCRIPT. Keyed by topic, not by (topic, group): one
-   * `${topic}:retry` key serves every group, so N groups must not probe it N times. The first drain is awaited, which
-   * is what covers whatever a pre-PEL replica left behind before this process started; the rest ride the timer below,
-   * off the retry tick because the key usually does not exist and the probe was two thirds of idle traffic.
-   */
-  private async startLegacyDrain(topic: string): Promise<void> {
-    const existing = this.legacyDrains.get(topic)
-    if (existing) {
-      existing.refs++
-      return
-    }
-    const state: LegacyDrain = { refs: 1, intervalMs: LEGACY_DRAIN_INTERVAL_MS }
-    this.legacyDrains.set(topic, state)
-    if ((await this.drainLegacy(topic)) > 0) state.intervalMs = this.legacyDrainFastMs
-    this.scheduleLegacyDrain(topic, state)
-  }
-
-  private stopLegacyDrain(topic: string): void {
-    const state = this.legacyDrains.get(topic)
-    if (!state) return
-    if (--state.refs > 0) return
-    if (state.timer) clearTimeout(state.timer)
-    this.legacyDrains.delete(topic)
-    this.failures.delete(`legacy retry drain ${topic}`)
-  }
-
-  private scheduleLegacyDrain(topic: string, state: LegacyDrain): void {
-    state.timer = setTimeout(() => {
-      if (this.stopping || this.legacyDrains.get(topic) !== state) return
-      const run = this.drainLegacy(topic)
-        .then((moved) => {
-          // Backoff shape: straight back to the retry cadence the moment an entry moves, because an old replica is
-          // still writing; otherwise double up to the ceiling. Never stops - a long canary would strand messages.
-          state.intervalMs =
-            moved > 0 ? this.legacyDrainFastMs : Math.min(state.intervalMs * 2, LEGACY_DRAIN_MAX_INTERVAL_MS)
-        })
-        .finally(() => {
-          if (state.running === run) state.running = undefined
-          if (!this.stopping && this.legacyDrains.get(topic) === state) this.scheduleLegacyDrain(topic, state)
-        })
-      state.running = run
-    }, state.intervalMs)
-  }
-
-  /** Never rejects: a failed migration probe must not take down the schedule or the subscribe that started it. */
-  private drainLegacy(topic: string): Promise<number> {
-    return this.lua.drainRetry(topic, `${topic}:retry`, Date.now(), DRAIN_BATCH).then(
-      (moved) => {
-        this.reportSuccess(`legacy retry drain ${topic}`)
-        return moved
-      },
-      (err) => {
-        this.reportFailure(`legacy retry drain ${topic}`, `legacy retry drain failed for ${topic}`, String(err))
-        return 0
-      },
-    )
   }
 
   /** One housekeeping pass: a PEL sweep per subscribed (topic, group) pair. */

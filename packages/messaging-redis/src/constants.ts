@@ -21,8 +21,6 @@ export const CONSUMER_ERROR_BACKOFF_MS = 1000
 export const PENDING_PAGE = 50
 /** Max ids per heartbeat `XCLAIM`. */
 export const HEARTBEAT_BATCH = 100
-/** Max legacy ZSET entries moved back into the stream per pass. */
-export const DRAIN_BATCH = 100
 /**
  * How long a housekeeping channel stays quiet after its first logged failure. 60s: an outage costs a line a minute per
  * channel instead of one per `retryIntervalMs` tick, and a log read mid-outage is never more than a minute stale.
@@ -34,14 +32,6 @@ export const FAILURE_LOG_WINDOW_MS = 60000
  * than one a tick.
  */
 export const FAILURE_LOG_BURST = 3
-/**
- * Base cadence of the transitional legacy-ZSET drain, off the retry tick. 10s: the key usually does not exist, and an
- * entry an old replica leaves behind is already waiting out its own backoff, so 10x cheaper than the 1s tick costs it
- * nothing that matters.
- */
-export const LEGACY_DRAIN_INTERVAL_MS = 10000
-/** Ceiling for the legacy-drain backoff: a stranded entry must still be picked up within a minute. */
-export const LEGACY_DRAIN_MAX_INTERVAL_MS = 60000
 /** Prefix of the per-process liveness key that keeps a broadcast group out of other processes' orphan cleanup. */
 export const ALIVE_KEY_PREFIX = 'miia:messaging:alive:'
 /** Liveness key TTL: a process that misses refreshes this long (crash, wedged loop, Redis down) looks dead. */
