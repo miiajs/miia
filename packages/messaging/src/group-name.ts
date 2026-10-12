@@ -28,9 +28,10 @@ export interface DeriveGroupNameInput {
  * - `broadcast: true` → `${appName ? appName + ':' : ''}${topic}__${ctor}_${method}__${hostname}_${pid}`
  * - default → `${appName ? appName + ':' : ''}${topic}__${ctor}_${method}`
  *
- * The broadcast suffix uses only `hostname` + `pid` (no random component) so that
- * orphan-cleanup logic in transports can reliably match previous-incarnation
- * groups by stable host pattern when the process restarts.
+ * The `hostname_pid` suffix doubles as the owner id the Redis transport's orphan
+ * cleanup looks up as a liveness key, so its shape and that key change together.
+ * Replicas that share both hostname and pid share one group: copies are split
+ * between them, and the first to shut down destroys it for the other.
  */
 export function deriveGroupName(input: DeriveGroupNameInput): string {
   if (input.explicitGroup) return input.explicitGroup
