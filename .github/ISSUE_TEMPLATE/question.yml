@@ -14,4 +14,4 @@ body:
     id: context
     attributes:
       label: Package and runtime
-      placeholder: '@miiajs/core 0.2.0, Bun 1.3.x'
+      placeholder: '@miiajs/core 0.8.0, Bun 1.4.x'

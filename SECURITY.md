@@ -15,11 +15,6 @@ for critical issues.
 During the `0.x` pre-release phase, only the latest minor version receives
 security updates.
 
-| Version | Supported |
-|---------|-----------|
-| 0.1.x   | ✅        |
-| < 0.1   | ❌        |
-
 ## Runtime versions
 
 The `engines` field of each package names the oldest runtime the code works on, not a security
