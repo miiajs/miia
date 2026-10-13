@@ -256,6 +256,21 @@ describe('SpecBuilder', () => {
     expect(spec.paths['/users'].post.responses['201'].description).toBe('Created')
   })
 
+  it('should document 200 for a POST without @Status', () => {
+    @Controller('/users')
+    class UserController {
+      @Post('/')
+      create(_ctx: RequestContext) {}
+    }
+
+    const builder = new SpecBuilder()
+    const spec = builder.build([{ controller: UserController, prefix: 'users' }], { title: 'Test', version: '1.0.0' })
+
+    const responses = spec.paths['/users'].post.responses
+    expect(responses['200'].description).toBe('OK')
+    expect(responses['201']).toBeUndefined()
+  })
+
   it('should auto-add 422 when validation is present', () => {
     @Controller('/users')
     class UserController {
@@ -484,7 +499,7 @@ describe('SpecBuilder', () => {
   it('should skip the default success response when an explicit one is declared', () => {
     @Controller('/users')
     class UserController {
-      @ApiResponse(200, { description: 'Accepted for processing' })
+      @ApiResponse(202, { description: 'Accepted for processing' })
       @Post('/')
       create(_ctx: RequestContext) {}
     }
@@ -492,7 +507,7 @@ describe('SpecBuilder', () => {
     const builder = new SpecBuilder()
     const spec = builder.build([{ controller: UserController, prefix: 'users' }], { title: 'Test', version: '1.0.0' })
 
-    expect(Object.keys(spec.paths['/users'].post.responses)).toEqual(['200'])
+    expect(Object.keys(spec.paths['/users'].post.responses)).toEqual(['202'])
   })
 
   it('should omit content for statuses that carry no body', () => {

@@ -194,7 +194,7 @@ export class SpecBuilder {
         !!routeBodySchema || !!querySchemaMap?.get(route.handlerName) || !!paramsSchemaMap?.get(route.handlerName)
 
       operation.responses = this.buildResponses(
-        customStatus ?? (method === 'post' ? 201 : 200),
+        customStatus ?? 200,
         explicitResponses,
         collectGuardResponses(activeGuards),
         hasValidation,

@@ -275,7 +275,7 @@ Decorators: `@ApiTag`, `@ApiOperation`, `@ApiResponse`, `@ApiParam`, `@ApiQuery`
 Response rules:
 - **422** is added only when the route declares a real `body`/`query`/`params` schema. `@ApiBody` alone adds none - it documents, it does not validate - so a route whose own code answers 422 declares `@ApiResponse(422)`.
 - **Guard responses** come from `GUARD_RESPONSES` on the guard class - global + class + method guards, minus anything `@SkipGuard`/`@SkipRateLimit` removed. No blanket 403; an unmarked guard adds nothing. An explicit `@ApiResponse` of the same status wins.
-- **Default success response** (`@Status(code)`, else 201 for POST / 200 otherwise) is suppressed by any explicit `@ApiResponse` with a 2xx or 3xx status. Description comes from the status table; `content` is attached only for 2xx except 204/205, so redirects and 204 have no phantom JSON body.
+- **Default success response** (`@Status(code)`, else 200) is suppressed by any explicit `@ApiResponse` with a 2xx or 3xx status. Description comes from the status table; `content` is attached only for 2xx except 204/205, so redirects and 204 have no phantom JSON body.
 
 Schema conversion prefers the schema's own `toJSONSchema()` (zod 4) / `toJsonSchema()` export, duck-typed - no zod dependency; zod 3 and raw JSON Schema fall back to the manual walker. Bodies/params use `io: 'input'`, responses `io: 'output'`; `format` is merged from the output side so `z.string().trim().pipe(z.email())` keeps `format: email`. `$defs`, `.meta({ id })` schemas, and recursive schemas are lifted into `components.schemas` with refs rewritten (name clashes get `_Input`/`_Output`, then `_2`).
 
