@@ -315,6 +315,115 @@ describe('body limit - adapter error contract', () => {
   })
 })
 
+describe('body limit - Bun maxRequestBodySize error', () => {
+  // Bun rejects every body read past maxRequestBodySize with a plain Error.
+  function bunRequest(path: string, message = 'Request body exceeded maxRequestBodySize'): Request {
+    const req = new Request(`http://localhost${path}`, {
+      method: 'POST',
+      body: '{}',
+      headers: { 'content-type': 'application/json' },
+    })
+    for (const method of ['text', 'arrayBuffer']) {
+      Object.defineProperty(req, method, { value: () => Promise.reject(new Error(message)) })
+    }
+    return req
+  }
+
+  function capturingApp(controller: new () => unknown, errors: string[]): Miia {
+    @Module({ controllers: [controller] })
+    class M {}
+
+    return new Miia({
+      logger: {
+        log() {},
+        error(message) {
+          errors.push(message)
+        },
+        warn() {},
+      },
+    }).register(M)
+  }
+
+  it('answers 413 before the body schema runs', async () => {
+    let calls = 0
+    const schema = {
+      safeParse(value: unknown) {
+        calls++
+        return { success: true as const, data: value }
+      },
+    }
+
+    @Controller('/')
+    class Ctrl {
+      @Post('/items', { body: schema })
+      create() {
+        return { ok: true }
+      }
+    }
+
+    const errors: string[] = []
+    const res = await capturingApp(Ctrl, errors).fetch(bunRequest('/items'))
+    expect(res.status).toBe(413)
+    expect((await res.json()).message).toBe('Request body exceeded maxRequestBodySize')
+    expect(calls).toBe(0)
+    expect(errors).toEqual([])
+  })
+
+  it('answers 413 from ctx.text()', async () => {
+    let observed: unknown
+    @Controller('/')
+    class Ctrl {
+      @Post('/items')
+      async create(ctx: RequestContext) {
+        try {
+          return await ctx.text()
+        } catch (error) {
+          observed = error
+          throw error
+        }
+      }
+    }
+
+    const errors: string[] = []
+    const res = await capturingApp(Ctrl, errors).fetch(bunRequest('/items'))
+    expect(res.status).toBe(413)
+    expect(observed).toBeInstanceOf(PayloadTooLargeException)
+    expect(errors).toEqual([])
+  })
+
+  it('answers 413 from a raw read without logging an unhandled error', async () => {
+    @Controller('/')
+    class Ctrl {
+      @Post('/items')
+      async create(ctx: RequestContext) {
+        await ctx.req.arrayBuffer()
+        return { ok: true }
+      }
+    }
+
+    const errors: string[] = []
+    const res = await capturingApp(Ctrl, errors).fetch(bunRequest('/items'))
+    expect(res.status).toBe(413)
+    expect(errors).toEqual([])
+  })
+
+  it('leaves any other plain Error a 500', async () => {
+    @Controller('/')
+    class Ctrl {
+      @Post('/items')
+      async create(ctx: RequestContext) {
+        await ctx.req.arrayBuffer()
+        return { ok: true }
+      }
+    }
+
+    const errors: string[] = []
+    const res = await capturingApp(Ctrl, errors).fetch(bunRequest('/items', 'Request body exceeded the limit'))
+    expect(res.status).toBe(500)
+    expect(errors).toEqual(['Unhandled error'])
+  })
+})
+
 describe('body limit - narrowing the adapter slot on a chunked body', () => {
   // Stands in for node-server/uws-server, whose request objects own the body
   // stream and expose `_bodyLimit` for the limit to be written into.

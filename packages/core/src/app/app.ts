@@ -635,6 +635,8 @@ export class Miia {
       // adapter cap is exceeded mid-stream (chunked bodies). They do not
       // depend on core, so they cannot throw PayloadTooLargeException itself.
       httpError = new PayloadTooLargeException(error.message)
+    } else if (isBunBodyLimitError(error)) {
+      httpError = new PayloadTooLargeException(error.message)
     } else {
       this.logger.error('Unhandled error', error instanceof Error ? error.stack : String(error), 'RequestHandler')
       httpError = new InternalServerException()
@@ -734,7 +736,9 @@ class Context implements RequestContext {
   }
 
   text(): Promise<string> {
-    return (this._textPromise ??= this.req.text())
+    return (this._textPromise ??= this.req.text().catch((error: unknown) => {
+      throw isBunBodyLimitError(error) ? new PayloadTooLargeException(error.message) : error
+    }))
   }
 
   _setBody(value: unknown): void {
@@ -750,6 +754,11 @@ function parseJsonBody(text: string): unknown {
   } catch {
     throw new BadRequestException('Malformed JSON body')
   }
+}
+
+/** Bun rejects an oversized body with a plain Error; this is the only way to recognise it. */
+function isBunBodyLimitError(error: unknown): error is Error {
+  return error instanceof Error && error.message === 'Request body exceeded maxRequestBodySize'
 }
 
 /** Normalize the `trustProxy` option into a lowercased trusted-header list, or `false`. */
