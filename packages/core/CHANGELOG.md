@@ -1,5 +1,132 @@
 # @miiajs/core
 
+## 0.8.0
+
+### Minor Changes
+
+- [`3ed3fb2`](https://github.com/miiajs/miia/commit/3ed3fb2178fc3489d99c5317e7deaa075aed0086) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Answer malformed JSON with 400 everywhere and read an empty body as no body
+
+  `ctx.json()` now reads the body through `ctx.text()` and parses it itself. A non-empty body that is not valid JSON
+  rejects with `BadRequestException` (400, `Malformed JSON body`) on every route. Before, a route without a schema
+  answered 500 and a route with a `body` schema answered 422 (`Body validation failed`); the schema no longer runs on
+  such a body.
+
+  An empty body, or none at all (a GET, a HEAD), makes `ctx.json()` resolve to `undefined` instead of rejecting with a
+  `SyntaxError` that ended in a 500. On a route with a `body` schema the schema gets `undefined`, so a required object
+  answers 422. Code that relied on `ctx.json().catch(() => fallback)` for an empty body now gets `undefined` rather than
+  the fallback; use `(await ctx.json()) ?? fallback` instead.
+
+  `ctx.json()` and `ctx.text()` share one read of the body, so they can be called in any order on the same request on
+  every runtime. Before, the second call threw `body already used` on Bun, Deno and streaming bodies. After a `body`
+  schema runs, `ctx.json()` returns the validated data while `ctx.text()` returns the raw text. The raw stream
+  (`ctx.req.body`, `ctx.req.formData()`, `ctx.req.arrayBuffer()`) is still available only before the first call to
+  either helper.
+
+- [`84f5045`](https://github.com/miiajs/miia/commit/84f50455207e88af0fa234150473b92c4d7366c0) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Move request schemas into the route decorator
+
+  `@ValidateBody`, `@ValidateQuery` and `@ValidateParams` (core) and `@ValidateForm` (multipart) are removed, with no
+  aliases. A route's schemas now go into its HTTP method decorator: `@Post(path?, { body, query, params })`, or
+  `@Post({ ... })` for a route at the controller prefix. GET, HEAD and OPTIONS take `query` and `params` only. The option
+  types `RouteOptions` and `RouteOptionsWithoutBody` are exported from `@miiajs/core`. `@Multipart` now only says how the
+  body is read and within which limits; the route's `body` schema validates the form.
+
+  **Migration.** Move each schema into the route decorator and drop the old import. Handlers read the data the same way
+  as before: `ctx.json<T>()`, `ctx.query`, `ctx.params`, `ctx.form<T>()`.
+
+  ```ts
+  // Before
+  @Post('/')
+  @ValidateBody(CreateUser)
+  create(ctx: RequestContext) {}
+
+  @Get('/')
+  @ValidateQuery(Paging)
+  list(ctx: RequestContext) {}
+
+  @Patch(':id')
+  @ValidateParams(IdParams)
+  @ValidateBody(UpdateUser)
+  update(ctx: RequestContext) {}
+
+  @Post('avatar')
+  @Multipart({ maxFileSize: MAX, maxFiles: 1 })
+  @ValidateForm(AvatarForm)
+  upload(ctx: MultipartContext) {}
+
+  // After
+  @Post('/', { body: CreateUser })
+  create(ctx: RequestContext) {}
+
+  @Get({ query: Paging })
+  list(ctx: RequestContext) {}
+
+  @Patch(':id', { params: IdParams, body: UpdateUser })
+  update(ctx: RequestContext) {}
+
+  @Post('avatar', { body: AvatarForm })
+  @Multipart({ maxFileSize: MAX, maxFiles: 1 })
+  upload(ctx: MultipartContext) {}
+  ```
+
+  **Behaviour changes.**
+
+  - The order is fixed: params, then query, then body. Before, decorator order decided it, so `@ValidateParams` above
+    `@ValidateBody` checked the body first. Invalid params together with an invalid body now answer
+    `'Params validation failed'` instead of `'Body validation failed'`.
+  - Validation runs after every guard and every route middleware, right before the handler. A method-level `@Use` used
+    to run before or after a `@Validate*` depending on decorator order; it now sees the raw `ctx.params`, `ctx.query` and
+    body before `await next()` and the validated ones after it.
+  - Some mistakes now throw a `TypeError` when the class is defined: a `body` schema on GET, HEAD or OPTIONS; a GET, HEAD
+    or OPTIONS route and a `body` schema on the same handler, in either decorator order; two different schemas for the
+    same key on one handler. Routes stacked on one method share its schemas.
+  - A multipart form that fails its schema answers `'Body validation failed'`, not `'Form validation failed'`.
+  - `BODY_SCHEMAS`, `QUERY_SCHEMAS` and `PARAMS_SCHEMAS` now turn on runtime validation: the router builds the validation
+    step from them, so a custom decorator that writes them gets its routes validated.
+
+  **`@ApiBody` and 422.** `@ApiBody` no longer writes `BODY_SCHEMAS` and no longer adds a 422 response on its own. It
+  keeps its own key, only documents, and overrides the route's `body` schema and content type in the spec whatever the
+  decorator order. The spec gets a 422 only when the route declares a `body`, `query` or `params` schema, so a route
+  whose own code answers 422 behind an `@ApiBody` should declare `@ApiResponse(422)`. The request body's content type is
+  the `@ApiBody` option, else the route's body reader (`multipart/form-data` under `@Multipart`), else `application/json`.
+
+  **Body readers.** `BODY_READERS` (`Map<handlerName, BodyReader>`) and the `BodyReader` type
+  (`{ contentType, read(ctx), commit(ctx, data) }`) are new exports of `@miiajs/core`. A reader decides what a route's
+  `body` schema validates and where the validated data goes; `contentType` is what the spec shows. Without one the
+  built-in JSON reader is used: malformed JSON answers 400 before the schema runs, an empty body reaches the schema as
+  `undefined`, and an oversized body stays a 413. `@Multipart` registers a form reader.
+
+### Patch Changes
+
+- [`5db0281`](https://github.com/miiajs/miia/commit/5db02816b14ba46dade720ab55360235bbdca493) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Map Bun's oversized-body error to 413 inside the app
+
+  Bun rejects a body over `maxRequestBodySize` with a plain `Error`. Core now recognises it by its message and turns it
+  into `PayloadTooLargeException` (413) in `ctx.text()`, `ctx.json()` and the error handler. A route with a `body` schema
+  no longer runs the schema on `null` and answers 422, and multipart (`ctx.parts`, `ctx.form()`) and raw reads
+  (`ctx.req.arrayBuffer()`, `ctx.req.body`) no longer log an unhandled error and build a 500. The client already got
+  Bun's own 413; this changes what the app sees.
+
+- [`36d1f60`](https://github.com/miiajs/miia/commit/36d1f6056e2e19e7fec5d26c25ebc7a43693bdc9) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Lower the runtime floors to what the packages need.
+
+  Node moves from `24.18.1` to `22.12.0`. Nothing in the packages needs Node 24. 22.12.0 is the first
+  22.x release where `require(esm)` is on by default, so CommonJS code can `require()` these ESM-only
+  packages, and it is the floor `papr@17` declares. The old floor tracked the 24.17.0 and 24.18.1
+  security releases; `engines` cannot enforce a patch level, so that advice now lives in `SECURITY.md`.
+
+  Deno moves from `2.6.1` to `2.0.0`, with two exceptions. Projects that `@miiajs/cli` runs on Deno
+  need 2.4.0, the first release with the `--sloppy-imports` flag the CLI passes. `@miiajs/serve-static`
+  needs 2.5.0: on 2.0 through 2.4 Deno's `Readable.toWeb` throws an uncaught error once a file has been
+  sent and takes the process down.
+
+  `@miiajs/uws-server` now declares Node.js 22, 24 and 26 only, with no Bun or Deno range:
+  uWebSockets.js ships binaries for those three lines and never loaded anywhere else.
+  `@miiajs/node-server` drops its Deno range: Deno apps listen through `Deno.serve` and never need the
+  adapter, and it is not tested there.
+
+  Bun stays at `1.4.0`.
+
+  The documented TypeScript requirement moves from 5.7 to 6.0. The `ES2025` target that the docs and
+  `miia new` use does not exist before TypeScript 6.0, so 5.7 through 5.9 never worked with that setup.
+
 ## 0.7.0
 
 ## 0.6.1

@@ -1,6 +1,6 @@
 {
   "name": "@miiajs/rate-limit",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Rate limiting for MiiaJS - fixed-window limiter, in-memory store, middleware, guard, decorators, draft-6/legacy headers, optional block duration.",
@@ -47,7 +47,7 @@
     "deno": ">=2.0.0"
   },
   "peerDependencies": {
-    "@miiajs/core": ">=0.7.0 <1.0.0"
+    "@miiajs/core": ">=0.8.0 <1.0.0"
   },
   "devDependencies": {
     "@miiajs/core": "workspace:*",

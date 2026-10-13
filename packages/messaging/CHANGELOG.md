@@ -1,5 +1,74 @@
 # @miiajs/messaging
 
+## 0.8.0
+
+### Minor Changes
+
+- [`0481c5c`](https://github.com/miiajs/miia/commit/0481c5c596509a93090c46dc57a6d8a5b078dd0e) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Give every process its own broadcast group
+
+  Broadcast groups now end in `<hostname>_<pid>_<token>`, with a random token drawn once per process, where they ended in
+  `<hostname>_<pid>`. Replicas that share hostname and pid - host-network containers that all run as pid 1 - derived the
+  same group, split its copies between them, and the first to shut down destroyed it for the others. Each now gets its
+  own group and its own copy of every message. The token is kept on `globalThis`, so two copies of `@miiajs/messaging`
+  in one process agree on it.
+
+  The Redis transport reads the owner off each broadcast group's name instead of computing it, so its liveness key always
+  matches the group the bus formed, and its orphan cleanup recognises both shapes: groups left by releases before the
+  token are still removed once their owner is gone. A broadcast group subscribed directly under a name without that
+  suffix gets no liveness key and no orphan cleanup.
+
+- [`f513194`](https://github.com/miiajs/miia/commit/f5131942f31a0493790b6e7981b162133f969e2d) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Add `initialPosition` to choose where a new subscription starts reading
+
+  A consumer group created after entries were published never saw them: every group started at the end of the topic,
+  so a message published before a worker's first start, or before a new handler was deployed, was not delivered. That
+  stays the default, and it is now a choice per handler with a written contract.
+
+  `@On(topic, { initialPosition })` sets it per handler, `MessagingModule.configure({ initialPosition })` sets a bus
+  default. Values:
+
+  - `'latest'` - only entries published after the group is created. Default, no behaviour change.
+  - `'earliest'` - everything the broker still retains for the topic.
+  - `{ since: ms }` - entries from the last `since` milliseconds, plus everything after. `since` must be a positive
+    integer.
+
+  The position applies only when the broker-side group is created for the first time; an existing group is never moved.
+  Broadcast handlers always start at `'latest'` - the bus default does not reach them, and an explicit `'earliest'` or
+  `{ since }` on one throws at startup. Handlers on one bus that share an explicit `group` must resolve to the same
+  position, or startup throws.
+
+  **Transport contract.** `MessageTransport` gains an optional `supportedInitialPositions`, validated at startup like
+  `supportedModes`. A transport that does not declare it supports `'latest'` only, so a handler asking for more fails at
+  startup instead of silently starting at the end. `InMemoryTransport` declares all three - it retains nothing, so each
+  means "from now".
+
+  **Redis.** `XGROUP CREATE` starts at `$` for `'latest'`, `0` for `'earliest'`, and `<TIME - since>-0` for a window,
+  measured on the Redis clock (the process clock only when `TIME` is denied, with one warning). Creating a group now logs
+  `Created consumer group <group> on <topic> at <id>`.
+
+### Patch Changes
+
+- [`36d1f60`](https://github.com/miiajs/miia/commit/36d1f6056e2e19e7fec5d26c25ebc7a43693bdc9) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Lower the runtime floors to what the packages need.
+
+  Node moves from `24.18.1` to `22.12.0`. Nothing in the packages needs Node 24. 22.12.0 is the first
+  22.x release where `require(esm)` is on by default, so CommonJS code can `require()` these ESM-only
+  packages, and it is the floor `papr@17` declares. The old floor tracked the 24.17.0 and 24.18.1
+  security releases; `engines` cannot enforce a patch level, so that advice now lives in `SECURITY.md`.
+
+  Deno moves from `2.6.1` to `2.0.0`, with two exceptions. Projects that `@miiajs/cli` runs on Deno
+  need 2.4.0, the first release with the `--sloppy-imports` flag the CLI passes. `@miiajs/serve-static`
+  needs 2.5.0: on 2.0 through 2.4 Deno's `Readable.toWeb` throws an uncaught error once a file has been
+  sent and takes the process down.
+
+  `@miiajs/uws-server` now declares Node.js 22, 24 and 26 only, with no Bun or Deno range:
+  uWebSockets.js ships binaries for those three lines and never loaded anywhere else.
+  `@miiajs/node-server` drops its Deno range: Deno apps listen through `Deno.serve` and never need the
+  adapter, and it is not tested there.
+
+  Bun stays at `1.4.0`.
+
+  The documented TypeScript requirement moves from 5.7 to 6.0. The `ES2025` target that the docs and
+  `miia new` use does not exist before TypeScript 6.0, so 5.7 through 5.9 never worked with that setup.
+
 ## 0.7.0
 
 ### Patch Changes
