@@ -10,7 +10,7 @@ Inspired by Angular/NestJS architectural ideas - decorator-driven DI, controller
 - **TC39 decorators** - no reflect-metadata, no experimental flags
 - **Koa-style middleware** - onion model, replaces interceptors/pipes/filters
 - **Per-app DI container** - context-based `inject()`, no global singletons
-- **Zod-like validation** - optional, via `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
+- **Zod-like validation** - optional, schemas in the route decorator: `@Post('/', { body, query, params })`
 - **Database integrations** - Drizzle ORM (Postgres/MySQL/SQLite), MongoDB via Papr or Mongoose
 
 ## Installation
@@ -65,8 +65,9 @@ await app.listen(3000)
 > Body access uses `await ctx.json<T>()` / `await ctx.text()` with a per-request
 > cache - the same parsed value is returned on subsequent calls. The generic
 > parameter is a TypeScript hint only (no runtime validation). For runtime
-> validation of request bodies, use `@ValidateBody(schema)` - downstream
-> handlers see validated (and possibly transformed) data.
+> validation of request bodies, declare a schema on the route -
+> `@Post('/', { body: schema })` - and the handler sees validated (and
+> possibly transformed) data.
 
 ## Packages
 
@@ -80,7 +81,7 @@ await app.listen(3000)
 | `@miiajs/auth` | Auth primitives - `AuthProvider`, `AuthGuard`, token extractors |
 | `@miiajs/jwt` | Injectable JWT sign/verify service (jose wrapper) |
 | `@miiajs/rate-limit` | Fixed-window rate limiting: middleware, guard, decorators, pluggable stores |
-| `@miiajs/multipart` | Streaming `multipart/form-data`: part iterator, buffered form, `@ValidateForm` |
+| `@miiajs/multipart` | Streaming `multipart/form-data`: part iterator, buffered form, schema validation |
 | `@miiajs/messaging` | Decorator-driven event bus, retry, DLQ, idempotency, named buses |
 | `@miiajs/messaging-redis` | Redis Streams transport for `@miiajs/messaging` |
 | `@miiajs/drizzle` | Drizzle ORM integration (Postgres, MySQL, SQLite) |

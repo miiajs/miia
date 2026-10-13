@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
-import { BodyLimit, Controller, Miia, Module, Post, ValidateParams } from '@miiajs/core'
-import type { Constructor, ZodLike, ZodLikeIssue } from '@miiajs/core'
-import { Multipart, ValidateForm } from '../src/index.js'
+import { BODY_READERS, BodyLimit, Controller, getMeta, Miia, Module, Post } from '@miiajs/core'
+import type { BodyReader, Constructor, ZodLike, ZodLikeIssue } from '@miiajs/core'
+import { Multipart } from '../src/index.js'
 import type { MultipartContext } from '../src/index.js'
 import { buildBody, chunkedRequest, serialize } from './helpers.js'
 
@@ -187,16 +187,15 @@ describe('@Multipart - the two readers are exclusive', () => {
     expect(await res.json()).toEqual({ same: true, fields: { title: 'hello' } })
   })
 
-  it('lets @ValidateForm hand its data to the handler without tripping the guard', async () => {
+  it('lets a body schema hand its data to the handler without tripping the guard', async () => {
     const schema = {
       safeParse: (value: any) => ({ success: true as const, data: { ...value, checked: true } }),
     }
 
     @Controller('/upload')
     class Ctrl {
-      @Post('/validated')
+      @Post('/validated', { body: schema })
       @Multipart()
-      @ValidateForm(schema)
       async validated(ctx: MultipartContext) {
         return await ctx.form<any>()
       }
@@ -420,16 +419,14 @@ describe('@Multipart - decorator order', () => {
 
   @Controller('/orders')
   class Ctrl {
-    @Post('/:id/above')
+    @Post('/:id/above', { params: idSchema })
     @Multipart()
-    @ValidateParams(idSchema)
     above(ctx: MultipartContext) {
       return read(ctx)
     }
 
-    @Post('/:id/below')
-    @ValidateParams(idSchema)
     @Multipart()
+    @Post('/:id/below', { params: idSchema })
     below(ctx: MultipartContext) {
       return read(ctx)
     }
@@ -468,7 +465,7 @@ describe('@Multipart - decorator order', () => {
   })
 })
 
-describe('@ValidateForm', () => {
+describe('route body schema', () => {
   interface Upload {
     title: string
     doc: File
@@ -497,23 +494,20 @@ describe('@ValidateForm', () => {
 
   @Controller('/upload')
   class Ctrl {
-    @Post('/above')
-    @ValidateForm(uploadSchema)
+    @Post('/above', { body: uploadSchema })
     @Multipart()
     above(ctx: MultipartContext) {
       return describeUpload(ctx)
     }
 
-    @Post('/below')
     @Multipart()
-    @ValidateForm(uploadSchema)
+    @Post('/below', { body: uploadSchema })
     below(ctx: MultipartContext) {
       return describeUpload(ctx)
     }
 
-    @Post('/docs')
+    @Post('/docs', { body: docsSchema })
     @Multipart()
-    @ValidateForm(docsSchema)
     async docs(ctx: MultipartContext) {
       const { docs } = await ctx.form<{ docs: File[] }>()
       return { count: docs.length, names: docs.map((file) => file.name) }
@@ -550,7 +544,7 @@ describe('@ValidateForm', () => {
     expect(await res.json()).toEqual({
       statusCode: 422,
       error: 'Unprocessable Entity',
-      message: 'Form validation failed',
+      message: 'Body validation failed',
       details: [{ message: 'doc must be a file', path: ['doc'] }],
     })
   })
@@ -581,36 +575,103 @@ describe('@ValidateForm', () => {
     expect((await postForm(app, '/upload/below', titleOnly())).status).toBe(422)
   })
 
-  it('reports a route missing @Multipart', async () => {
+  it('rejects ctx.parts once the schema has read the form', async () => {
+    let captured: unknown
+
+    @Controller('/upload')
+    class Parts {
+      @Post('/parts', { body: uploadSchema })
+      @Multipart()
+      async parts(ctx: MultipartContext) {
+        try {
+          for await (const _part of ctx.parts) {
+            // drain
+          }
+        } catch (error) {
+          captured = error
+        }
+        return { ok: true }
+      }
+    }
+
+    const res = await postForm(bootstrap(Parts), '/upload/parts', attachment())
+    expect(res.status).toBe(200)
+    expect(captured).toBeInstanceOf(TypeError)
+    expect((captured as Error).message).toBe(
+      'ctx.parts cannot run after ctx.form() - the body is consumed once, in one of the two ways',
+    )
+  })
+
+  it('applies the multipart limits before the schema sees the form', async () => {
+    let parsed = 0
+    const counting: ZodLike = {
+      safeParse(data: unknown) {
+        parsed++
+        return { success: true as const, data }
+      },
+    }
+
+    @Controller('/upload')
+    class Limited {
+      @Post('/size', { body: counting })
+      @Multipart({ maxFileSize: 16 })
+      size() {
+        return { ok: true }
+      }
+
+      @Post('/type', { body: counting })
+      @Multipart({ allowedTypes: ['image/*'] })
+      type() {
+        return { ok: true }
+      }
+    }
+
+    const app = bootstrap(Limited)
+
+    const oversized = new FormData()
+    oversized.append('doc', new File(['x'.repeat(64)], 'a.txt', { type: 'text/plain' }))
+    const tooLarge = await postForm(app, '/upload/size', oversized)
+    expect(tooLarge.status).toBe(413)
+    expect((await tooLarge.json()).details).toEqual({ limit: 'maxFileSize' })
+
+    const unsupported = await postForm(app, '/upload/type', attachment())
+    expect(unsupported.status).toBe(415)
+    expect(parsed).toBe(0)
+
+    const image = new FormData()
+    image.append('doc', new File(['payload'], 'a.png', { type: 'image/png' }))
+    expect((await postForm(app, '/upload/type', image)).status).toBe(200)
+    expect(parsed).toBe(1)
+  })
+
+  it('reads JSON without @Multipart, so a form answers 422 instead of 500', async () => {
+    let seen: unknown
+    const objectSchema: ZodLike = {
+      safeParse(data: unknown) {
+        seen = data
+        if (typeof data !== 'object' || data === null) {
+          return { success: false as const, error: { issues: [{ message: 'expected an object', path: [] }] } }
+        }
+        return { success: true as const, data }
+      },
+    }
+
     @Controller('/upload')
     class Bare {
-      @Post('/bare')
-      @ValidateForm(uploadSchema)
+      @Post('/bare', { body: objectSchema })
       bare() {
         return { ok: true }
       }
     }
 
-    let captured: unknown
-    const app = bootstrap(Bare).use(async (_ctx, next) => {
-      try {
-        await next()
-      } catch (error) {
-        captured = error
-        throw error
-      }
-    })
-
-    const res = await postForm(app, '/upload/bare', attachment())
-    expect(res.status).toBe(500)
-    expect((captured as Error).message).toBe(
-      '@ValidateForm on "bare" needs @Multipart on the same method - there is no form to validate',
-    )
+    const res = await postForm(bootstrap(Bare), '/upload/bare', attachment())
+    expect(res.status).toBe(422)
+    expect((await res.json()).message).toBe('Body validation failed')
+    expect(seen).toBeNull()
   })
 })
 
 describe('decorator metadata', () => {
-  const passthrough: ZodLike = { safeParse: (data: unknown) => ({ success: true as const, data }) }
   const fakeContext = (name: string) =>
     ({
       kind: 'method',
@@ -622,8 +683,15 @@ describe('decorator metadata', () => {
 
   it('names the missing polyfill instead of failing inside a metadata write', () => {
     expect(() => Multipart({})(() => {}, fakeContext('upload'))).toThrow(/@Multipart cannot read decorator metadata/)
-    expect(() => ValidateForm(passthrough)(() => {}, fakeContext('upload'))).toThrow(
-      /@ValidateForm cannot read decorator metadata/,
-    )
+  })
+
+  it('registers the form reader for the handler', () => {
+    class Ctrl {
+      @Multipart()
+      upload() {}
+    }
+
+    const readers = getMeta<Map<string, BodyReader>>(Ctrl, BODY_READERS)
+    expect(readers?.get('upload')?.contentType).toBe('multipart/form-data')
   })
 })

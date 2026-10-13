@@ -1,12 +1,5 @@
-import {
-  addToMapMeta,
-  BODY_LIMITS,
-  createMethodDecorator,
-  METHOD_MW,
-  setInMapMeta,
-  UnprocessableException,
-} from '@miiajs/core'
-import type { Middleware, RequestContext, ZodLike } from '@miiajs/core'
+import { addToMapMeta, BODY_LIMITS, BODY_READERS, createMethodDecorator, METHOD_MW, setInMapMeta } from '@miiajs/core'
+import type { BodyReader, Middleware, RequestContext } from '@miiajs/core'
 import { collectForm } from './form.js'
 import { createPartStream, DEFAULT_FIELDS_BUDGET } from './parser.js'
 import type { FormResult, MultipartOptions, MultipartPart } from './types.js'
@@ -60,6 +53,16 @@ type StatefulContext = RequestContext & {
  * runs, whether or not it reads the body, and whatever is left unread is
  * discarded once the handler returns.
  *
+ * A `body` schema on the route decorator (`@Post('/x', { body })`) buffers the
+ * whole form and validates it as a flat object - text fields as strings (last
+ * value wins) next to files under their own names, a single `File` or a
+ * `File[]` when the name repeats - which is how a multipart body is described
+ * in OpenAPI, so a schema reads as
+ * `z.object({ title: z.string(), doc: z.instanceof(File) })`. A failed parse
+ * answers 422 with the schema's issues; a successful one replaces the cached
+ * form, so `ctx.form<T>()` returns the schema's data and `ctx.parts` throws a
+ * `TypeError`. Without a schema the handler picks `ctx.parts` or `ctx.form()`.
+ *
  * Body budget: an explicit `bodyLimit` wins; otherwise
  * `maxFileSize * maxFiles + fieldsBudget` becomes the route's limit when both
  * are finite; with neither, a `@BodyLimit` on the route (or its controller)
@@ -75,46 +78,23 @@ export const Multipart = createMethodDecorator<[options?: MultipartOptions]>((_t
   const bodyLimit = options.bodyLimit ?? deriveBodyLimit(options)
   if (bodyLimit !== undefined) setInMapMeta(metadata, BODY_LIMITS, name, bodyLimit)
 
-  // Options come from the metadata, not from this closure: the state may be
-  // built by whichever multipart middleware the decorator order put outside.
+  setInMapMeta(metadata, BODY_READERS, name, formReader)
+
+  // Options come from the metadata, not from this closure: a @BodyLimit
+  // applied after @Multipart can still become the budget.
   const mw: Middleware = (ctx, next) => withMultipartState(ctx, runtimeOptions(metadata, name), () => next())
   addToMapMeta(metadata, METHOD_MW, name, [mw])
 })
 
 /**
- * Validates the buffered form against a schema. What the schema sees is a flat
- * object - text fields as strings (last value wins) next to files under their
- * own names, a single `File` or a `File[]` when the name repeats - which is how
- * a multipart body is described in OpenAPI, so a schema reads as
- * `z.object({ title: z.string(), doc: z.instanceof(File) })`.
- *
- * A failed parse answers 422 with the schema's issues; a successful one
- * replaces the cached form, so `ctx.form<T>()` returns the schema's data
- * instead of the raw `FormResult`. The method also needs `@Multipart` - in
- * either order.
+ * How a route's `body` schema reads this body: the buffered form, flattened,
+ * and the validated result back into the form cache.
  */
-export const ValidateForm = createMethodDecorator<[schema: ZodLike]>((_target, context, schema) => {
-  const name = String(context.name)
-  const metadata = metadataOf(context, 'ValidateForm')
-
-  const mw: Middleware = async (ctx, next) => {
-    const declared = metadata[MULTIPART_OPTIONS] as Map<string, MultipartOptions> | undefined
-    if (!declared?.has(name)) {
-      throw new Error(`@ValidateForm on "${name}" needs @Multipart on the same method - there is no form to validate`)
-    }
-
-    await withMultipartState(ctx, runtimeOptions(metadata, name), async (state) => {
-      const result = schema.safeParse(flattenForm(await (ctx as StatefulContext).form()))
-      if (!result.success) {
-        throw new UnprocessableException('Form validation failed', result.error.issues)
-      }
-
-      state.setForm(result.data)
-      await next()
-    })
-  }
-  addToMapMeta(metadata, METHOD_MW, name, [mw])
-})
+const formReader: BodyReader = {
+  contentType: 'multipart/form-data',
+  read: async (ctx) => flattenForm(await (ctx as StatefulContext).form()),
+  commit: (ctx, data) => (ctx as StatefulContext)[MULTIPART_STATE]!.setForm(data),
+}
 
 /** Fields and files side by side under their own names, the way a schema reads them. */
 function flattenForm({ files, fields }: FormResult): Record<string, unknown> {
@@ -127,11 +107,9 @@ function flattenForm({ files, fields }: FormResult): Record<string, unknown> {
 
 /**
  * Runs the rest of the pipeline with `ctx.parts` and `ctx.form()` in place.
- * Both multipart middlewares call it, so the decorator order does not matter.
  *
- * Whoever built the state disposes of it: an outer `@ValidateForm` answering
- * 422 keeps the `@Multipart` middleware from ever running, so the stream would
- * otherwise be left behind by the one middleware that could not clean up.
+ * Whoever built the state disposes of it, whichever way the request ends -
+ * including a 422 from the route's `body` schema, which runs inside this call.
  */
 async function withMultipartState(
   ctx: RequestContext,

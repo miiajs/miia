@@ -16,7 +16,6 @@ import {
   UnauthorizedException,
   Use,
   UseGuard,
-  ValidateBody,
   GUARD_FACTORY,
 } from '../src/index.js'
 
@@ -1161,7 +1160,7 @@ describe('Miia Application', () => {
     })
   })
 
-  describe('@ValidateBody', () => {
+  describe('route body schema', () => {
     it('should auto-parse and validate JSON body', async () => {
       const schema: ZodLike = {
         safeParse(data: unknown) {
@@ -1175,8 +1174,7 @@ describe('Miia Application', () => {
 
       @Controller('/')
       class Ctrl {
-        @Post('/echo')
-        @ValidateBody(schema)
+        @Post('/echo', { body: schema })
         async echo(ctx: RequestContext) {
           return { received: await ctx.json() }
         }
@@ -1197,7 +1195,7 @@ describe('Miia Application', () => {
       expect(res2.status).toBe(422)
     })
 
-    it('should expose validated data through ctx.json() after validator runs', async () => {
+    it('should expose validated data through ctx.json() after the schema runs', async () => {
       const schema: ZodLike = {
         safeParse(data: unknown) {
           const d = data as any
@@ -1210,8 +1208,7 @@ describe('Miia Application', () => {
 
       @Controller('/')
       class Ctrl {
-        @Post('/transform')
-        @ValidateBody(schema)
+        @Post('/transform', { body: schema })
         async handler(ctx: RequestContext) {
           return await ctx.json()
         }
@@ -1269,7 +1266,7 @@ describe('Miia Application', () => {
       expect(await res.json()).toEqual({ identity: true })
     })
 
-    it('ctx.json() is shared between middleware and @ValidateBody (no double parse)', async () => {
+    it('ctx.json() is shared between middleware and the route body schema (no double parse)', async () => {
       let middlewareBody: unknown = null
       let handlerBody: unknown = null
 
@@ -1286,8 +1283,7 @@ describe('Miia Application', () => {
 
       @Controller('/')
       class Ctrl {
-        @Post('/shared')
-        @ValidateBody(schema)
+        @Post('/shared', { body: schema })
         async handler(ctx: RequestContext) {
           handlerBody = await ctx.json()
           return { ok: true }

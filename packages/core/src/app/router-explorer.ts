@@ -2,20 +2,25 @@ import type { Container } from '../di-container.js'
 import { Logger } from '../logger.js'
 import {
   BODY_LIMITS,
+  BODY_READERS,
+  BODY_SCHEMAS,
   CLASS_GUARDS,
   CLASS_MW,
   getMeta,
   GUARD_FACTORY,
   METHOD_GUARDS,
   METHOD_MW,
+  PARAMS_SCHEMAS,
+  QUERY_SCHEMAS,
   ROUTES,
   SKIP_GUARDS,
   STATUSES,
 } from '../decorators/index.js'
 import { guardToMiddleware } from '../middleware.js'
 import type { Router } from '../router.js'
-import type { Constructor, Guard, Middleware, RequestContext, RouteDefinition } from '../types.js'
+import type { BodyReader, Constructor, Guard, Middleware, RequestContext, RouteDefinition, ZodLike } from '../types.js'
 import { joinPaths } from '../utils/index.js'
+import { createValidationMiddleware, jsonBodyReader } from '../validation.js'
 
 export class RouterExplorer {
   private logger = new Logger(RouterExplorer.name)
@@ -33,6 +38,10 @@ export class RouterExplorer {
     const guardMap = getMeta<Map<string, Guard[]>>(controller, METHOD_GUARDS)
     const statusMap = getMeta<Map<string, number>>(controller, STATUSES)
     const bodyLimitMap = getMeta<Map<string, number>>(controller, BODY_LIMITS)
+    const bodySchemaMap = getMeta<Map<string, ZodLike>>(controller, BODY_SCHEMAS)
+    const querySchemaMap = getMeta<Map<string, ZodLike>>(controller, QUERY_SCHEMAS)
+    const paramsSchemaMap = getMeta<Map<string, ZodLike>>(controller, PARAMS_SCHEMAS)
+    const bodyReaderMap = getMeta<Map<string, BodyReader>>(controller, BODY_READERS)
     const logPrefix = this.router.globalPrefix
 
     for (const route of routes) {
@@ -49,7 +58,18 @@ export class RouterExplorer {
       const ctrlGuardMws = this.resolveGuards(filterGuards(ctrlGuards, skipSet))
       const methodGuardMws = this.resolveGuards(filterGuards(methodGuards, skipSet))
 
+      const validation = createValidationMiddleware(
+        {
+          params: paramsSchemaMap?.get(route.handlerName),
+          query: querySchemaMap?.get(route.handlerName),
+          body: bodySchemaMap?.get(route.handlerName),
+        },
+        bodyReaderMap?.get(route.handlerName) ?? jsonBodyReader,
+      )
+
       const routeMws: Middleware[] = [...ctrlGuardMws, ...ctrlMws, ...methodGuardMws, ...methodMws]
+      // Last: guards and route middleware (@Multipart's form state among them) run first.
+      if (validation) routeMws.push(validation)
 
       const finalHandler = customStatus
         ? (ctx: RequestContext) => {

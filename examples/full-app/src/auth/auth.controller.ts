@@ -1,4 +1,4 @@
-import { Controller, Get, inject, Post, type RequestContext, Status, UseGuard, ValidateBody } from '@miiajs/core'
+import { Controller, Get, inject, Post, type RequestContext, Status, UseGuard } from '@miiajs/core'
 import { ApiBody, ApiOperation, ApiResponse, ApiSecurity, ApiTag } from '@miiajs/swagger'
 import { AuthService } from './auth.service.js'
 import { type RegisterInput, RegisterSchema } from './schemas/register.schema.js'
@@ -14,12 +14,11 @@ import { RateLimit } from '@miiajs/rate-limit'
 export class AuthController {
   private authService = inject(AuthService)
 
-  @Post('register')
+  @Post('register', { body: RegisterSchema })
   @ApiOperation({ summary: 'Register a new user', description: 'Creates a user account with the default "user" role.' })
   @ApiResponse(201, { description: 'Access token for the new account.', schema: AccessTokenResponseSchema })
   @ApiResponse(409, { description: 'Email already registered.' })
   @Status(201)
-  @ValidateBody(RegisterSchema)
   async register(ctx: RequestContext) {
     const data = await ctx.json<RegisterInput>()
     return this.authService.register(data)

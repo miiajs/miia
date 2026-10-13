@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { z } from 'zod'
 import type { CanActivate, RequestContext } from '@miiajs/core'
-import { Controller, Get, Module, Post, Status, ValidateBody } from '@miiajs/core'
+import { Controller, Get, Module, Post, Status } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { ApiOperation, ApiTag, SwaggerModule } from '../src/index.js'
 
@@ -19,9 +19,8 @@ class UserController {
     return []
   }
 
-  @Post('/')
+  @Post('/', { body: CreateUserSchema })
   @Status(201)
-  @ValidateBody(CreateUserSchema)
   @ApiOperation({ summary: 'Create user' })
   create(_ctx: RequestContext) {
     return { id: '1' }

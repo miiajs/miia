@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Status, ValidateBody, inject } from '@miiajs/core'
+import { Controller, Get, Post, Put, Delete, Status, inject } from '@miiajs/core'
 import type { RequestContext } from '@miiajs/core'
 import type { z } from 'zod'
 import { UserService } from './user.service'
@@ -21,15 +21,13 @@ export class UserController {
     return this.userService.findById(Number(ctx.params.id))
   }
 
-  @Post('/')
+  @Post('/', { body: CreateUserSchema })
   @Status(201)
-  @ValidateBody(CreateUserSchema)
   async create(ctx: RequestContext) {
     return this.userService.create(await ctx.json<CreateUserInput>())
   }
 
-  @Put('/:id')
-  @ValidateBody(UpdateUserSchema)
+  @Put('/:id', { body: UpdateUserSchema })
   async update(ctx: RequestContext) {
     return this.userService.update(Number(ctx.params.id), await ctx.json<UpdateUserInput>())
   }

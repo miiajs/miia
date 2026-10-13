@@ -24,7 +24,7 @@ packages/
   auth/          - AuthProvider interface, AuthGuard, token extractors
   jwt/           - JwtModule + JwtService (sign/verify via jose)
   rate-limit/    - Fixed-window rate limiting: rateLimit middleware, RateLimitGuard, @RateLimit/@SkipRateLimit, pluggable stores
-  multipart/     - Streaming multipart/form-data: @Multipart, ctx.parts, ctx.form(), @ValidateForm
+  multipart/     - Streaming multipart/form-data: @Multipart, ctx.parts, ctx.form(), form validation via route body schema
   drizzle/       - Drizzle ORM integration (postgres/mysql/sqlite)
   papr/          - MongoDB integration via Papr
   mongoose/      - MongoDB integration via Mongoose
@@ -96,7 +96,7 @@ DrizzleModule.configure((resolve) => {
 
 `Router` uses a trie structure. Static paths: O(1) lookup. Dynamic paths with `:param` or `*wildcard`: trie traversal. HEAD falls back to GET.
 
-HTTP method decorators: `@Get`, `@Post`, `@Put`, `@Patch`, `@Delete`, `@Head`, `@Options` - all accept optional path string.
+HTTP method decorators: `@Get`, `@Post`, `@Put`, `@Patch`, `@Delete`, `@Head`, `@Options` - all take `(path?, options?)` or `(options)`, where `options` holds the route's request schemas `{ body, query, params }` (see Validation below). GET/HEAD/OPTIONS options have no `body` key (`RouteOptionsWithoutBody`); POST/PUT/PATCH/DELETE take `RouteOptions`.
 
 `@Status(code)` sets default HTTP status for successful responses.
 
@@ -128,7 +128,7 @@ interface CanActivate {
 }
 ```
 
-Returns `false` → `ForbiddenException` (403). Execution order: class guards → class middleware → method guards → method middleware → handler. Global guards (from `app.useGuard()`) run first of all, but only on **matched** routes - they are not invoked on 404s.
+Returns `false` → `ForbiddenException` (403). Execution order: class guards → class middleware → method guards → method middleware → route schema validation → handler. Global guards (from `app.useGuard()`) run first of all, but only on **matched** routes - they are not invoked on 404s.
 
 `@SkipGuard(GuardClass)` excludes a guard from a route's pipeline at compile time. It works for **class/method-level guards AND global guards** - if the user registers `app.useGuard(AuthGuard(JwtAuth))` and a method has `@SkipGuard(AuthGuard)`, that method bypasses the global guard entirely. Factory-built guards (e.g. `AuthGuard(JwtAuth)`) carry the `GUARD_FACTORY` symbol, so skipping by the factory skips every guard it built.
 
@@ -151,9 +151,16 @@ Semantics to remember:
 - **Ordering:** `RateLimitModule.configure()` must be in the same module tree (`imports`) as the controllers using `@RateLimit` - a separate later `app.register()` constructs the guards before the options provider exists.
 - **`blockDuration`:** once exceeded, the key is blocked for that duration (the triggering request already gets `Retry-After` = blockDuration); after the block expires the client gets a fresh window. Optional geometric backoff (`blockBackoff` > 1 with a required `maxBlockDuration` ceiling, and `strikeReset` grace measured from the end of the block) grows the ban per repeat offence and resets strikes after a quiet period.
 
-### Validation: @ValidateBody, @ValidateQuery, @ValidateParams
+### Validation: route schemas `{ body, query, params }`
 
-Schema-based validation via `ZodLike` interface (compatible with Zod and any schema with `safeParse()`). `@ValidateBody` internally overrides the cached body so `await ctx.json<T>()` in the handler returns validated (and possibly transformed) data. `@ValidateQuery` / `@ValidateParams` replace `ctx.query` / `ctx.params` in place. Throws `UnprocessableException` (422) with validation issues on failure.
+Schemas go into the HTTP method decorator: `@Post('/', { body: CreateUser, query: Paging })`, `@Get({ query: Paging })` (no path = controller root), `@Patch(':id', { params, body })`. Any `ZodLike` (Zod or anything with `safeParse()`). The decorator writes them into `BODY_SCHEMAS` / `QUERY_SCHEMAS` / `PARAMS_SCHEMAS`, and `RouterExplorer` builds one validation middleware per route from them. Transforms replace `ctx.params` / `ctx.query` / the `ctx.json()` cache, so `await ctx.json<T>()` returns validated data. Failure -> `UnprocessableException` (422) with the issues in `details`: `'Params validation failed'`, `'Query validation failed'`, `'Body validation failed'`.
+
+Semantics to remember:
+- **Runs last, fixed order:** after global guards, class guards, class middleware, method guards and method middleware - right before the handler - and always params -> query -> body. A guard rejection (401/403) never reaches the schemas. A method-level `@Use` sees raw values before `await next()` and validated ones after.
+- **No schemas, no middleware:** a route without schemas gets no validation middleware and keeps its fast path.
+- **Decoration-time `TypeError`:** a `body` on GET/HEAD/OPTIONS (the types already forbid it; plain JS gets the throw); a GET/HEAD/OPTIONS route and a `body` schema on the same handler, in either decorator order; two different schemas for one key on one handler. Schemas belong to the handler, so stacked routes (`@Get('a') @Get('b')`) share them - a route without options shares them too, and the same schema twice is fine.
+- **Body readers:** `BODY_READERS` (`Map<handlerName, BodyReader>`, exported with the `BodyReader` type) decides how `body` is read. `BodyReader = { contentType, read(ctx), commit(ctx, data) }`: `read` returns the value the schema validates, `commit` stores the validated data where the handler's own accessor finds it, `contentType` is what the spec shows. Without an entry the built-in JSON reader is used (`ctx.json()` in, `ctx._setBody()` out): malformed JSON -> `null` -> 422, while `HttpException` and the adapters' `PayloadTooLargeError` pass through (413). `@Multipart` registers a form reader.
+- **The slots are live:** whatever writes `BODY_SCHEMAS` / `QUERY_SCHEMAS` / `PARAMS_SCHEMAS` turns on runtime validation, a custom decorator included. That is why `@ApiBody` writes its own swagger key instead.
 
 ### Request body access: ctx.json(), ctx.text()
 
@@ -176,7 +183,7 @@ async create(ctx: RequestContext) {
 `@Multipart(options?)` is the method decorator that opens a `multipart/form-data` route. It attaches two members to the context, both typed by the exported `MultipartContext` (the package does not augment `RequestContext` globally - same call as `ctx.user` in auth, annotate the handler parameter by hand):
 
 - **`ctx.parts` - streaming.** Async iterator of `FilePart | FieldPart`; a file part carries `stream` (`ReadableStream`) and `bytes()`. Backpressure is real - the source is read only when every queue the consumer can still drain is empty (reaches the socket on Bun/Deno/node-server/uws-server).
-- **`ctx.form<T>()` - buffered.** One pass over the whole body into `{ files: Record<string, File[]>, fields: Record<string, string> }` (repeated fields: last wins), cached per request like `ctx.json()`. `@ValidateForm(schema)` validates a **flat** object - text fields next to files under their own names, a `File` or a `File[]` - the way OpenAPI describes a multipart body, and replaces the cache, so `ctx.form<T>()` afterwards returns the schema's data. Failure -> `UnprocessableException` (422).
+- **`ctx.form<T>()` - buffered.** One pass over the whole body into `{ files: Record<string, File[]>, fields: Record<string, string> }` (repeated fields: last wins), cached per request like `ctx.json()`. A `body` schema on the route decorator (`@Post('/x', { body })`) validates a **flat** object - text fields (strings, last wins) next to files under their own names, a `File`, or a `File[]` only when the name repeats (a schema that always expects `z.array(...)` rejects a one-file upload) - the way OpenAPI describes a multipart body; the form `BodyReader` that `@Multipart` registers is what makes this work. Success replaces the cache, so `ctx.form<T>()` returns the schema's data and `ctx.parts` throws `TypeError`. Failure -> `UnprocessableException` (422) `'Body validation failed'`. Without `@Multipart` a `body` schema reads JSON, so a form request gets 422.
 
 The package writes nothing to disk and has no `node:*` import anywhere - the contract is standard web types (`ReadableStream`, `File`), so where the bytes go is the application's call; the `uploads` module in `examples/full-app` shows one local-disk path.
 
@@ -184,10 +191,10 @@ Parsing runs on `multipasta` (a `dependency`, not a peer) behind our own Web Str
 
 Semantics to remember:
 - **Body budget resolution:** explicit `bodyLimit` -> derived `maxFileSize × maxFiles + fieldsBudget` when both are finite -> `@BodyLimit` on the method or the controller -> nothing of its own, in which case the route's own body limit (its `@BodyLimit`, else the app default) is what a chunked body is counted against on node-server, and the adapter ceiling everywhere else. The winner is written into `BODY_LIMITS`, so `@Multipart` and `@BodyLimit` on the same method fight over one slot (last decorator applied wins) - do not combine them. Whatever the route ends up with also raises `Router.adapterBodyCeiling` for the **whole app** (`max(default, all route limits)`), so a generous upload route quietly lifts the 1MB default for every other route.
-- **Decorator order does not matter:** `@Multipart` and `@ValidateForm` both call the same idempotent `ensureState()` and read options from `context.metadata` at request time, not from the closure, so whichever middleware ends up outside builds the state.
+- **Decorator order does not matter:** route validation always runs after method middleware, so it runs inside the `@Multipart` middleware whichever of `@Post`/`@Multipart` is on top. `@Multipart` reads its options from `context.metadata` at request time, not from the closure, so a `@BodyLimit` applied after it can still become the budget.
 - **One part at a time:** advancing the iterator abandons the previous part and **errors** its stream rather than closing it - a half-read upload can never look complete. Collecting parts into an array and reading them later does not work.
-- **The body is consumed once:** `@Multipart` is incompatible with `@ValidateBody` / `ctx.json()` / `ctx.text()` on the same route. A non-multipart request is rejected with 400 before the handler runs, whether or not it touches `ctx.parts`. `ctx.parts` and `ctx.form()` exclude each other too, and the package enforces it - `ctx.parts` is handed out wrapped, so whichever runs second throws instead of returning an empty form or iterating zero times.
-- **Spec is written by hand:** `@ApiBody(schema, { contentType: 'multipart/form-data' })`. `@ValidateForm` deliberately does not write `BODY_SCHEMAS` (that is `@ApiBody`'s slot), so the spec's request body and its 422 come from `@ApiBody` alone.
+- **The body is consumed once:** `@Multipart` is incompatible with `ctx.json()` / `ctx.text()` on the same route (a route `body` schema reads through the form reader, not JSON). A non-multipart request is rejected with 400 by `@Multipart` before the handler runs - and before any route schema, which sits after it - whether or not it touches `ctx.parts`. `ctx.parts` and `ctx.form()` exclude each other too, and the package enforces it - `ctx.parts` is handed out wrapped, so whichever runs second throws instead of returning an empty form or iterating zero times.
+- **Spec:** the content type (`multipart/form-data`) comes from the form reader, the schema from the route's `body`, and the 422 from that schema. `z.instanceof(File)` converts to `{}`, so file fields are documented with `@ApiBody` (`format: 'binary'`), which has its own key and overrides the route schema in the spec in any decorator order.
 - **`allowedTypes`** gates **file** parts by media type - exact (`image/png`) or subtype wildcard (`image/*`), list and header both trimmed and lower-cased. Checked at the head of a part, before its body is read, so an oversized upload is refused on its header; failure is `UnsupportedMediaTypeException` (415) with `details: { mediaType, allowed }`. Fields are never checked - a part with no `Content-Type` is `text/plain` per RFC 7578 and would fail an image list; a file with none is compared as `application/octet-stream`. The header is client-supplied, so this is early refusal, not a content check.
 
 ### Connection info: ctx.conn, ctx.ip, trustProxy
@@ -263,9 +270,10 @@ All DB packages (`drizzle`, `papr`, `mongoose`) follow the same pattern:
 
 Decorators: `@ApiTag`, `@ApiOperation`, `@ApiResponse`, `@ApiParam`, `@ApiQuery`, `@ApiSecurity`, `@ApiHeader`, `@ApiExclude`.
 
-`SpecBuilder` auto-infers path params from route patterns, query params from `@ValidateQuery`, request bodies from `@ValidateBody`/`@ApiBody`, and adds a 422 response when validation is present.
+`SpecBuilder` auto-infers path params from route patterns, query params from the route's `query` schema, and the request body from `@ApiBody` (doc-only, own `API_BODY_SCHEMAS` key, wins in any decorator order) or else the route's `body` schema. Body content type: `@ApiBody`'s `contentType` option -> the route's `BODY_READERS` entry (`multipart/form-data` under `@Multipart`) -> `application/json`.
 
 Response rules:
+- **422** is added only when the route declares a real `body`/`query`/`params` schema. `@ApiBody` alone adds none - it documents, it does not validate - so a route whose own code answers 422 declares `@ApiResponse(422)`.
 - **Guard responses** come from `GUARD_RESPONSES` on the guard class - global + class + method guards, minus anything `@SkipGuard`/`@SkipRateLimit` removed. No blanket 403; an unmarked guard adds nothing. An explicit `@ApiResponse` of the same status wins.
 - **Default success response** (`@Status(code)`, else 201 for POST / 200 otherwise) is suppressed by any explicit `@ApiResponse` with a 2xx or 3xx status. Description comes from the status table; `content` is attached only for 2xx except 204/205, so redirects and 204 have no phantom JSON body.
 

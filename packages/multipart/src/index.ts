@@ -1,6 +1,6 @@
 // @miiajs/multipart - public API
 
-export { Multipart, ValidateForm } from './decorators.js'
+export { Multipart } from './decorators.js'
 export { createPartStream } from './parser.js'
 export type {
   FieldPart,

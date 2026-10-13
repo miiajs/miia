@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Delete, type RequestContext, serializeCookie, ValidateBody } from '@miiajs/core'
+import { Controller, Get, Put, Delete, type RequestContext, serializeCookie } from '@miiajs/core'
 import { SkipRateLimit } from '@miiajs/rate-limit'
 import { ApiOperation, ApiResponse, ApiTag } from '@miiajs/swagger'
 import { type PrefsInput, PrefsSchema } from './schemas/prefs.schema.js'
@@ -29,14 +29,13 @@ export class CookiesController {
     return { theme: ctx.cookies.get('theme') ?? 'light', present: ctx.cookies.has('theme') }
   }
 
-  @Put('/prefs')
+  @Put('/prefs', { body: PrefsSchema })
   @ApiOperation({
     summary: 'Persist a preference cookie',
     description: 'Validates the body and writes a 30-day theme cookie while returning a plain JSON object.',
   })
   @ApiResponse(200, { description: 'Preference stored.' })
   @ApiResponse(422, { description: 'Validation failed.' })
-  @ValidateBody(PrefsSchema)
   async writePrefs(ctx: RequestContext) {
     const { theme } = await ctx.json<PrefsInput>()
     // Demonstrates a jar write alongside an auto-JSON return (fast-path opt-out).

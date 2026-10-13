@@ -23,16 +23,7 @@ export type { DiscoveredMethod, DiscoverableMethodMeta } from './discovery/index
 export { Injectable, Controller, Module } from './decorators/index.js'
 export type { InjectableOptions } from './decorators/index.js'
 export { Get, Post, Put, Patch, Delete, Head, Options } from './decorators/index.js'
-export {
-  Use,
-  UseGuard,
-  SkipGuard,
-  BodyLimit,
-  ValidateBody,
-  ValidateQuery,
-  ValidateParams,
-  Status,
-} from './decorators/index.js'
+export { Use, UseGuard, SkipGuard, BodyLimit, Status } from './decorators/index.js'
 export {
   createClassDecorator,
   createMethodDecorator,
@@ -63,6 +54,7 @@ export {
   BODY_SCHEMAS,
   QUERY_SCHEMAS,
   PARAMS_SCHEMAS,
+  BODY_READERS,
 } from './decorators/index.js'
 
 // Router
@@ -119,6 +111,9 @@ export type {
   ConfiguredModule,
   ZodLike,
   ZodLikeIssue,
+  RouteOptions,
+  RouteOptionsWithoutBody,
+  BodyReader,
   HttpMethod,
   RouteDefinition,
   RequestContext,

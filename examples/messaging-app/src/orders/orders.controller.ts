@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Status, ValidateBody, inject, type RequestContext } from '@miiajs/core'
+import { Controller, Get, Post, Status, inject, type RequestContext } from '@miiajs/core'
 import { OrdersService } from './orders.service.js'
 import { OrderAnalyticsHandler, PaymentDlqHandler } from './handlers/index.js'
 import {
@@ -16,24 +16,21 @@ export class OrdersController {
   private analytics = inject(OrderAnalyticsHandler)
   private dlq = inject(PaymentDlqHandler)
 
-  @Post('/')
+  @Post('/', { body: PlaceOrderSchema })
   @Status(202)
-  @ValidateBody(PlaceOrderSchema)
   async place(ctx: RequestContext) {
     return this.orders.placeOrder(await ctx.json<PlaceOrderInput>())
   }
 
-  @Post('/duplicate-notification')
+  @Post('/duplicate-notification', { body: DuplicateNotificationSchema })
   @Status(202)
-  @ValidateBody(DuplicateNotificationSchema)
   async duplicateNotification(ctx: RequestContext) {
     const input = await ctx.json<DuplicateNotificationInput>()
     return this.orders.sendDuplicateNotification(input.orderId, input.customerEmail)
   }
 
-  @Post('/charge')
+  @Post('/charge', { body: ChargeSchema })
   @Status(202)
-  @ValidateBody(ChargeSchema)
   async charge(ctx: RequestContext) {
     const input = await ctx.json<ChargeInput>()
     return this.orders.chargePayment(input.orderId, input.amount)

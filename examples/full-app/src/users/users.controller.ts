@@ -10,9 +10,6 @@ import {
   Status,
   UnauthorizedException,
   UseGuard,
-  ValidateBody,
-  ValidateParams,
-  ValidateQuery,
 } from '@miiajs/core'
 import { ApiBody, ApiOperation, ApiResponse, ApiSecurity, ApiTag } from '@miiajs/swagger'
 import { UsersService } from './users.service.js'
@@ -38,24 +35,22 @@ export class UsersController {
   private usersService = inject(UsersService)
   private usersPolicy = inject(UsersPolicy)
 
-  @Get()
+  @Get({ query: ListUsersSchema })
   @ApiOperation({ summary: 'List users', description: 'Returns a paginated list of users.' })
   @ApiResponse(200, { description: 'Paginated users envelope.', schema: PaginatedUsersResponseSchema })
-  @ValidateQuery(ListUsersSchema)
   findAll(ctx: RequestContext) {
     return this.usersService.findAll(ctx.query as ListUsersQuery)
   }
 
-  @Get(':id')
+  @Get(':id', { params: UserIdParamsSchema })
   @ApiOperation({ summary: 'Get user by id' })
   @ApiResponse(200, { description: 'User record.', schema: UserResponseSchema })
   @ApiResponse(404, { description: 'User not found.' })
-  @ValidateParams(UserIdParamsSchema)
   findOne(ctx: RequestContext) {
     return this.usersService.findById(ctx.params.id)
   }
 
-  @Patch(':id')
+  @Patch(':id', { params: UserIdParamsSchema, body: UpdateUserSchema })
   @ApiOperation({
     summary: 'Update user',
     description: 'Users can update their own record. Only admins can update other users or change roles.',
@@ -63,8 +58,6 @@ export class UsersController {
   @ApiResponse(200, { description: 'Updated user record.', schema: UserResponseSchema })
   @ApiResponse(403, { description: 'Cannot modify another user, or non-admin tried to change a role.' })
   @ApiResponse(404, { description: 'User not found.' })
-  @ValidateParams(UserIdParamsSchema)
-  @ValidateBody(UpdateUserSchema)
   async update(ctx: RequestContext) {
     if (!ctx.user) throw new UnauthorizedException()
     const input = await ctx.json<UpdateUserInput>()
@@ -72,7 +65,7 @@ export class UsersController {
     return this.usersService.update(ctx.params.id, input)
   }
 
-  @Post(':id/avatar')
+  @Post(':id/avatar', { params: UserIdParamsSchema })
   @ApiOperation({
     summary: 'Upload user avatar',
     description: 'Multipart upload. Field "file". Max 2MB. Allowed MIME: image/png, image/jpeg, image/webp.',
@@ -89,7 +82,6 @@ export class UsersController {
   @ApiResponse(400, { description: 'Invalid or missing file.' })
   @ApiResponse(403, { description: 'Cannot modify another user.' })
   @ApiResponse(404, { description: 'User not found.' })
-  @ValidateParams(UserIdParamsSchema)
   async uploadAvatar(ctx: RequestContext) {
     if (!ctx.user) throw new UnauthorizedException()
     this.usersPolicy.assertCanUpdate(ctx.user, ctx.params.id, {})
@@ -108,14 +100,13 @@ export class UsersController {
     return this.usersService.uploadAvatar(ctx.params.id, file)
   }
 
-  @Delete(':id')
+  @Delete(':id', { params: UserIdParamsSchema })
   @ApiOperation({ summary: 'Delete user', description: 'Admin-only. Removes the user permanently.' })
   @ApiResponse(204, { description: 'User deleted.' })
   @ApiResponse(403, { description: 'Not an admin.' })
   @ApiResponse(404, { description: 'User not found.' })
   @Status(204)
   @Roles('admin')
-  @ValidateParams(UserIdParamsSchema)
   async remove(ctx: RequestContext) {
     await this.usersService.remove(ctx.params.id)
   }

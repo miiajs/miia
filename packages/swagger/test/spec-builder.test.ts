@@ -1,17 +1,19 @@
 import { describe, expect, it } from 'bun:test'
 import { z } from 'zod'
-import type { CanActivate, RequestContext } from '@miiajs/core'
+import type { BodyReader, CanActivate, RequestContext } from '@miiajs/core'
 import {
+  BODY_READERS,
   Controller,
+  createMethodDecorator,
+  Delete,
   Get,
   GUARD_FACTORY,
   GUARD_RESPONSES,
   Post,
+  setInMapMeta,
   SkipGuard,
   Status,
   UseGuard,
-  ValidateBody,
-  ValidateQuery,
 } from '@miiajs/core'
 import {
   ApiBody,
@@ -70,6 +72,20 @@ class ScopedRateLimitLikeGuard implements CanActivate {
 }
 ;(ScopedRateLimitLikeGuard as any)[GUARD_FACTORY] = RateLimitLikeFactory
 ;(ScopedRateLimitLikeGuard as any)[GUARD_RESPONSES] = [429]
+
+const MultipartLike = createMethodDecorator((_target, context) => {
+  setInMapMeta<BodyReader>(context.metadata!, BODY_READERS, String(context.name), {
+    contentType: 'multipart/form-data',
+    read: async () => null,
+    commit() {},
+  })
+})
+
+const FileUploadJsonSchema = {
+  type: 'object',
+  properties: { file: { type: 'string', format: 'binary' } },
+  required: ['file'],
+}
 
 describe('SpecBuilder', () => {
   it('should generate basic spec from controller', () => {
@@ -154,12 +170,11 @@ describe('SpecBuilder', () => {
     expect(spec.paths['/users'].get.description).toBe('Returns a list')
   })
 
-  it('should auto-extract body schema from @ValidateBody', () => {
+  it('should auto-extract body schema from the route body schema', () => {
     @Controller('/users')
     class UserController {
-      @Post('/')
+      @Post('/', { body: CreateUserSchema })
       @Status(201)
-      @ValidateBody(CreateUserSchema)
       create(_ctx: RequestContext) {}
     }
 
@@ -229,9 +244,8 @@ describe('SpecBuilder', () => {
   it('should use custom status from @Status', () => {
     @Controller('/users')
     class UserController {
-      @Post('/')
+      @Post('/', { body: CreateUserSchema })
       @Status(201)
-      @ValidateBody(CreateUserSchema)
       create(_ctx: RequestContext) {}
     }
 
@@ -245,8 +259,7 @@ describe('SpecBuilder', () => {
   it('should auto-add 422 when validation is present', () => {
     @Controller('/users')
     class UserController {
-      @Post('/')
-      @ValidateBody(CreateUserSchema)
+      @Post('/', { body: CreateUserSchema })
       create(_ctx: RequestContext) {}
     }
 
@@ -254,6 +267,130 @@ describe('SpecBuilder', () => {
     const spec = builder.build([{ controller: UserController, prefix: 'users' }], { title: 'Test', version: '1.0.0' })
 
     expect(spec.paths['/users'].post.responses['422']).toEqual({ description: 'Unprocessable Entity' })
+  })
+
+  it('should document the route body schema as application/json', () => {
+    @Controller('/users')
+    class UserController {
+      @Post('/', { body: CreateUserSchema })
+      create(_ctx: RequestContext) {}
+    }
+
+    const builder = new SpecBuilder()
+    const spec = builder.build([{ controller: UserController, prefix: 'users' }], { title: 'Test', version: '1.0.0' })
+
+    const requestBody = spec.paths['/users'].post.requestBody
+    expect(requestBody.required).toBe(true)
+    expect(Object.keys(requestBody.content)).toEqual(['application/json'])
+    expect(requestBody.content['application/json'].schema.required).toEqual(['name', 'email', 'password'])
+  })
+
+  it('should take the content type from the body reader registered for the route', () => {
+    @Controller('/uploads')
+    class UploadController {
+      @Post('/', { body: z.object({ title: z.string() }) })
+      @MultipartLike()
+      upload(_ctx: RequestContext) {}
+    }
+
+    const builder = new SpecBuilder()
+    const spec = builder.build([{ controller: UploadController, prefix: 'uploads' }], {
+      title: 'Test',
+      version: '1.0.0',
+    })
+
+    const requestBody = spec.paths['/uploads'].post.requestBody
+    expect(Object.keys(requestBody.content)).toEqual(['multipart/form-data'])
+    expect(requestBody.content['multipart/form-data'].schema).toEqual({
+      type: 'object',
+      properties: { title: { type: 'string' } },
+      required: ['title'],
+    })
+  })
+
+  it('should let @ApiBody override the route body schema and content type in either decorator order', () => {
+    @Controller('/uploads')
+    class UploadController {
+      @ApiBody(FileUploadJsonSchema, { contentType: 'multipart/form-data' })
+      @Post('/above', { body: CreateUserSchema })
+      above(_ctx: RequestContext) {}
+
+      @Post('/below', { body: CreateUserSchema })
+      @ApiBody(FileUploadJsonSchema, { contentType: 'multipart/form-data' })
+      below(_ctx: RequestContext) {}
+    }
+
+    const builder = new SpecBuilder()
+    const spec = builder.build([{ controller: UploadController, prefix: 'uploads' }], {
+      title: 'Test',
+      version: '1.0.0',
+    })
+
+    const above = spec.paths['/uploads/above'].post
+    const below = spec.paths['/uploads/below'].post
+    expect(above.requestBody).toEqual({
+      required: true,
+      content: { 'multipart/form-data': { schema: FileUploadJsonSchema } },
+    })
+    expect(below.requestBody).toEqual(above.requestBody)
+    expect(below.responses).toEqual(above.responses)
+  })
+
+  it('should add 422 for each schema the route validates against', () => {
+    @Controller('/items')
+    class ItemController {
+      @Post('/', { body: CreateUserSchema })
+      create(_ctx: RequestContext) {}
+
+      @Get('/', { query: SearchSchema })
+      search(_ctx: RequestContext) {}
+
+      @Delete('/:id', { params: z.object({ id: z.string().uuid() }) })
+      remove(_ctx: RequestContext) {}
+    }
+
+    const builder = new SpecBuilder()
+    const spec = builder.build([{ controller: ItemController, prefix: 'items' }], { title: 'Test', version: '1.0.0' })
+
+    const unprocessable = { description: 'Unprocessable Entity' }
+    expect(spec.paths['/items'].post.responses['422']).toEqual(unprocessable)
+    expect(spec.paths['/items'].get.responses['422']).toEqual(unprocessable)
+    expect(spec.paths['/items/{id}'].delete.responses['422']).toEqual(unprocessable)
+  })
+
+  it('should not add 422 for @ApiBody alone, since it does not validate', () => {
+    @Controller('/auth')
+    class AuthController {
+      @Post('/login')
+      @ApiBody(CreateUserSchema)
+      login(_ctx: RequestContext) {}
+
+      @Post('/register', { body: CreateUserSchema })
+      @ApiBody(CreateUserSchema, { description: 'New account' })
+      register(_ctx: RequestContext) {}
+    }
+
+    const builder = new SpecBuilder()
+    const spec = builder.build([{ controller: AuthController, prefix: 'auth' }], { title: 'Test', version: '1.0.0' })
+
+    expect(spec.paths['/auth/login'].post.requestBody).toBeDefined()
+    expect(spec.paths['/auth/login'].post.responses['422']).toBeUndefined()
+    expect(spec.paths['/auth/register'].post.responses['422']).toEqual({ description: 'Unprocessable Entity' })
+  })
+
+  it('should keep an explicit @ApiResponse(422) on a route with only @ApiBody', () => {
+    @Controller('/auth')
+    class AuthController {
+      @ApiResponse(422, { description: 'Rejected by the auth provider' })
+      @Post('/login')
+      @ApiBody(CreateUserSchema)
+      login(_ctx: RequestContext) {}
+    }
+
+    const builder = new SpecBuilder()
+    const spec = builder.build([{ controller: AuthController, prefix: 'auth' }], { title: 'Test', version: '1.0.0' })
+
+    expect(spec.paths['/auth/login'].post.responses['422']).toEqual({ description: 'Rejected by the auth provider' })
   })
 
   it('should not add responses for a guard that declares none', () => {
@@ -413,11 +550,10 @@ describe('SpecBuilder', () => {
     expect(spec.paths['/users'].get.security).toEqual([{ bearer: [] }])
   })
 
-  it('should auto-extract query params from @ValidateQuery', () => {
+  it('should auto-extract query params from the route query schema', () => {
     @Controller('/search')
     class SearchController {
-      @Get('/')
-      @ValidateQuery(SearchSchema)
+      @Get('/', { query: SearchSchema })
       search(_ctx: RequestContext) {}
     }
 
@@ -525,8 +661,7 @@ describe('SpecBuilder', () => {
 
     @Controller('/things')
     class ThingController {
-      @Post('/')
-      @ValidateBody(z.object({ inner: Inner }))
+      @Post('/', { body: z.object({ inner: Inner }) })
       create(_ctx: RequestContext) {}
 
       @ApiResponse(200, { schema: z.object({ inner: Inner }) })
@@ -563,8 +698,7 @@ describe('SpecBuilder', () => {
 
     @Controller('/trees')
     class TreeController {
-      @Post('/')
-      @ValidateBody(Node)
+      @Post('/', { body: Node })
       create(_ctx: RequestContext) {}
     }
 
@@ -586,8 +720,7 @@ describe('SpecBuilder', () => {
 
     @Controller('/trees')
     class TreeController {
-      @Get('/')
-      @ValidateQuery(Node)
+      @Get('/', { query: Node })
       search(_ctx: RequestContext) {}
     }
 

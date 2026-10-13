@@ -43,7 +43,7 @@ export interface RequestContext {
   readonly cookies: CookieJar
   /**
    * Returns the parsed JSON body, cached per request.
-   * After `@ValidateBody` runs, returns the validated (and possibly transformed) data.
+   * After the route's `body` schema runs, returns the validated (and possibly transformed) data.
    *
    * Only one body-consumption method (`json()` or `text()`) can be used per request.
    * Cross-format calls may work on node-server/uws-server for small bodies
@@ -58,7 +58,7 @@ export interface RequestContext {
    * Same single-consumption caveats as `json()` apply.
    */
   text(): Promise<string>
-  /** @internal Used by `@ValidateBody` to replace the cached parsed body. */
+  /** @internal Used by the built-in JSON body reader to store validated data. */
   _setBody(value: unknown): void
 }
 
@@ -109,6 +109,29 @@ export interface ZodLikeIssue {
 
 export interface ZodLike<T = any> {
   safeParse(data: unknown): { success: true; data: T } | { success: false; error: { issues: ZodLikeIssue[] } }
+}
+
+/** Request schemas for a route that takes a body: POST, PUT, PATCH, DELETE. */
+export interface RouteOptions {
+  body?: ZodLike
+  query?: ZodLike
+  params?: ZodLike
+}
+
+/** Request schemas for GET, HEAD and OPTIONS, which take no body. */
+export interface RouteOptionsWithoutBody {
+  query?: ZodLike
+  params?: ZodLike
+  body?: never
+}
+
+export interface BodyReader {
+  /** Media type for the spec, e.g. 'multipart/form-data'. */
+  contentType: string
+  /** Reads the raw body into the value the schema validates. */
+  read(ctx: RequestContext): Promise<unknown>
+  /** Stores validated data so the handler's own accessor returns it. */
+  commit(ctx: RequestContext, data: unknown): void
 }
 
 // ─── Route Metadata ──────────────────────────────────────────────

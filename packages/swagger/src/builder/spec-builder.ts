@@ -1,4 +1,4 @@
-import type { Constructor, RouteDefinition, Guard, ZodLike, GuardResponseDeclaration } from '@miiajs/core'
+import type { Constructor, RouteDefinition, Guard, ZodLike, GuardResponseDeclaration, BodyReader } from '@miiajs/core'
 import {
   getMeta,
   ROUTES,
@@ -8,6 +8,7 @@ import {
   BODY_SCHEMAS,
   QUERY_SCHEMAS,
   PARAMS_SCHEMAS,
+  BODY_READERS,
   SKIP_GUARDS,
   GUARD_FACTORY,
   GUARD_RESPONSES,
@@ -27,6 +28,7 @@ import {
   API_HEADERS,
   API_EXCLUDE,
   API_BODY_OPTIONS,
+  API_BODY_SCHEMAS,
 } from '../constants.js'
 import type {
   SwaggerSetupOptions,
@@ -111,8 +113,10 @@ export class SpecBuilder {
     // Routes
     const routes = getMeta<RouteDefinition[]>(controller, ROUTES) ?? []
     const statusMap = getMeta<Map<string, number>>(controller, STATUSES)
-    const bodySchemaMap = getMeta<Map<string, ZodLike | JsonSchema>>(controller, BODY_SCHEMAS)
+    const bodySchemaMap = getMeta<Map<string, ZodLike>>(controller, BODY_SCHEMAS)
+    const apiBodySchemaMap = getMeta<Map<string, ZodLike | JsonSchema>>(controller, API_BODY_SCHEMAS)
     const bodyOptionsMap = getMeta<Map<string, ApiBodyOptions>>(controller, API_BODY_OPTIONS)
+    const bodyReaderMap = getMeta<Map<string, BodyReader>>(controller, BODY_READERS)
     const querySchemaMap = getMeta<Map<string, ZodLike>>(controller, QUERY_SCHEMAS)
     const paramsSchemaMap = getMeta<Map<string, ZodLike>>(controller, PARAMS_SCHEMAS)
     const operationMap = getMeta<Map<string, ApiOperationOptions>>(controller, API_OPERATIONS)
@@ -155,10 +159,12 @@ export class SpecBuilder {
       if (parameters.length) operation.parameters = parameters
 
       // Request body
-      const bodySchema = bodySchemaMap?.get(route.handlerName)
+      const routeBodySchema = bodySchemaMap?.get(route.handlerName)
+      const bodySchema = apiBodySchemaMap?.get(route.handlerName) ?? routeBodySchema
       if (bodySchema) {
         const bodyOpts = bodyOptionsMap?.get(route.handlerName)
-        const contentType = bodyOpts?.contentType ?? 'application/json'
+        const contentType =
+          bodyOpts?.contentType ?? bodyReaderMap?.get(route.handlerName)?.contentType ?? 'application/json'
         operation.requestBody = {
           required: bodyOpts?.required ?? true,
           ...(bodyOpts?.description && { description: bodyOpts.description }),
@@ -183,8 +189,9 @@ export class SpecBuilder {
         [...globalGuards, ...classGuards, ...(methodGuardMap?.get(route.handlerName) ?? [])],
         skipSet,
       )
+      // Only a schema the route validates against can answer 422; @ApiBody documents, it does not validate.
       const hasValidation =
-        !!bodySchema || !!querySchemaMap?.get(route.handlerName) || !!paramsSchemaMap?.get(route.handlerName)
+        !!routeBodySchema || !!querySchemaMap?.get(route.handlerName) || !!paramsSchemaMap?.get(route.handlerName)
 
       operation.responses = this.buildResponses(
         customStatus ?? (method === 'post' ? 201 : 200),

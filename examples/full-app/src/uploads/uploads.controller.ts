@@ -1,6 +1,6 @@
 import { Controller, inject, Post, Status, UseGuard } from '@miiajs/core'
 import { AuthGuard } from '@miiajs/auth'
-import { Multipart, type MultipartContext, ValidateForm } from '@miiajs/multipart'
+import { Multipart, type MultipartContext } from '@miiajs/multipart'
 import { RateLimit } from '@miiajs/rate-limit'
 import { ApiBody, ApiOperation, ApiResponse, ApiSecurity, ApiTag } from '@miiajs/swagger'
 import { JwtAuth } from '../auth/providers/index.js'
@@ -54,7 +54,7 @@ export class UploadsController {
     return { fields, files }
   }
 
-  @Post('form')
+  @Post('form', { body: UploadFormSchema })
   @ApiOperation({
     summary: 'Buffered form with schema validation',
     description:
@@ -77,9 +77,8 @@ export class UploadsController {
   @ApiResponse(415, { description: 'The file declared a media type outside the allowed list.' })
   @ApiResponse(422, { description: 'Form failed schema validation.' })
   @Multipart({ maxFileSize: MAX_FILE_SIZE, maxFiles: 1, allowedTypes: ALLOWED_TYPES })
-  @ValidateForm(UploadFormSchema)
   async form(ctx: MultipartContext) {
-    // After @ValidateForm the cache holds the schema's data, not the raw FormResult.
+    // After the route's body schema runs, the cache holds the schema's data, not the raw FormResult.
     const { title, file } = await ctx.form<UploadFormInput>()
     return {
       title,

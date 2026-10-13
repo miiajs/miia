@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { Controller, Get, Post, Module, Injectable, UseGuard, ValidateBody, inject } from '@miiajs/core'
+import { Controller, Get, Post, Module, Injectable, UseGuard, inject } from '@miiajs/core'
 import type { CanActivate, RequestContext, Guard, Middleware } from '@miiajs/core'
 import { ForbiddenException } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'

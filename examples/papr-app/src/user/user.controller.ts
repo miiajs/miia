@@ -1,4 +1,4 @@
-import { Controller, Delete, Get, inject, Patch, Post, type RequestContext, Status, ValidateBody } from '@miiajs/core'
+import { Controller, Delete, Get, inject, Patch, Post, type RequestContext, Status } from '@miiajs/core'
 import { UserService } from './user.service'
 import { type CreateUserInput, CreateUserSchema, type UpdateUserInput, UpdateUserSchema } from './schemas'
 
@@ -21,15 +21,13 @@ export class UserController {
     return this.userService.findById(ctx.params.id)
   }
 
-  @Post('/')
+  @Post('/', { body: CreateUserSchema })
   @Status(201)
-  @ValidateBody(CreateUserSchema)
   async create(ctx: RequestContext) {
     return this.userService.create(await ctx.json<CreateUserInput>())
   }
 
-  @Patch('/:id')
-  @ValidateBody(UpdateUserSchema)
+  @Patch('/:id', { body: UpdateUserSchema })
   async update(ctx: RequestContext) {
     return this.userService.update(ctx.params.id, await ctx.json<UpdateUserInput>())
   }

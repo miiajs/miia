@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test'
 import { Miia } from '../src/app/index.js'
-import { Controller, Module, Get, Post, BodyLimit, ValidateBody, Use } from '../src/decorators/index.js'
+import { Controller, Module, Get, Post, BodyLimit, Use } from '../src/decorators/index.js'
 import { PayloadTooLargeException } from '../src/exceptions.js'
 import { countingLimitStream, applyBodyCeiling, DEFAULT_BODY_LIMIT } from '../src/body-limit.js'
 import type { Middleware, RequestContext } from '../src/types.js'
@@ -276,7 +276,7 @@ describe('body limit - adapter error contract', () => {
     expect(json.message).toBe('Request body exceeded 100 byte limit')
   })
 
-  it('@ValidateBody rethrows the body-limit error as 413 instead of degrading to 422', async () => {
+  it('a route body schema rethrows the body-limit error as 413 instead of degrading to 422', async () => {
     const schema = {
       safeParse(value: unknown) {
         return { success: true as const, data: value }
@@ -285,8 +285,7 @@ describe('body limit - adapter error contract', () => {
 
     @Controller('/')
     class Ctrl {
-      @Post('/items')
-      @ValidateBody(schema)
+      @Post('/items', { body: schema })
       create(_ctx: RequestContext) {
         return { ok: true }
       }
@@ -297,7 +296,7 @@ describe('body limit - adapter error contract', () => {
     const app = new Miia({ logger: false, maxBodySize: false }).register(M)
 
     // Chunked request (stream body, no CL) wrapped by the Deno-style ceiling:
-    // ctx.json() inside @ValidateBody hits the counting stream's 413.
+    // ctx.json() inside the body validation hits the counting stream's 413.
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         controller.enqueue(new TextEncoder().encode('x'.repeat(200)))

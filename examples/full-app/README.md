@@ -11,7 +11,7 @@ End-to-end [MiiaJS](../../README.md) example: Drizzle + Auth/JWT + Roles + Swagg
 - **Swagger** - OpenAPI 3.1 spec generated from decorators, UI at `/api/docs/`
 - **Global prefix** - the `/api` prefix comes from `new Miia({ globalPrefix: '/api' })` in `main.ts`, not from a module `prefix`, which is why the generated spec documents clean paths (`/users`, not `/api/users`). The landing redirect, the static mount and the docs endpoints opt out via `skipGlobalPrefix`, so they keep serving `/`, `/static/*` and `/api/docs/`
 - **Middleware** (`src/common/middleware/`) - `requestLogger`, `responseTime`, plus `cors()` from core
-- **Validation** - Zod schemas via `@ValidateBody`, `@ValidateQuery`, `@ValidateParams`
+- **Validation** - Zod schemas in the route decorator: `@Post('/', { body })`, `@Get({ query })`, `@Get(':id', { params })`
 - **Lifecycle hook** - `UsersService.onReady()` seeds a default admin in dev mode
 - **Static files** - `public/index.html` landing served via `@miiajs/serve-static`
 - **Cookies** (`src/cookies/`) - jar reads/writes, fluent multi-cookie chains, raw `serializeCookie`, plus a cookie-based JWT session (`login-cookie` / `me-cookie` / `logout`) in the auth module

@@ -1,16 +1,19 @@
-import { BODY_SCHEMAS, createMethodDecorator, setInMapMeta, type ZodLike } from '@miiajs/core'
-import { API_BODY_OPTIONS } from '../constants.js'
+import { createMethodDecorator, setInMapMeta, type ZodLike } from '@miiajs/core'
+import { API_BODY_OPTIONS, API_BODY_SCHEMAS } from '../constants.js'
 import type { ApiBodyOptions, JsonSchema } from '../types.js'
 
 /**
- * Document a route's request body for OpenAPI **without** running runtime
- * validation. Writes to the same `BODY_SCHEMAS` metadata key that `@ValidateBody`
- * uses, so `SpecBuilder` picks it up automatically.
+ * Document a route's request body for OpenAPI **without** validating it.
  *
- * Use when the request body is validated elsewhere (e.g. inside an auth
- * provider, a custom middleware, or consumed raw as a stream) but you still
- * want Swagger to show the expected shape. If you already apply `@ValidateBody`,
- * you don't need `@ApiBody` - the schema is discovered from the validator.
+ * In the spec it overrides the route's `body` schema (from `@Post('/', { body })`)
+ * and its content type, whatever the decorator order. On its own it adds no `422`
+ * response, because it says nothing about validation - declare `@ApiResponse(422)`
+ * if your own code answers with one.
+ *
+ * Use it when the body is checked elsewhere (e.g. inside an auth provider or a
+ * custom middleware), or when the schema converter cannot express the shape
+ * (e.g. multipart file fields as `format: 'binary'`). A route that validates its
+ * body through `{ body }` needs no `@ApiBody` - the schema is discovered from there.
  *
  * ## Content type
  *
@@ -39,7 +42,7 @@ import type { ApiBodyOptions, JsonSchema } from '../types.js'
  */
 export const ApiBody = createMethodDecorator<[schema: ZodLike | JsonSchema, options?: ApiBodyOptions]>(
   (_target, context, schema, options) => {
-    setInMapMeta(context.metadata!, BODY_SCHEMAS, String(context.name), schema)
+    setInMapMeta(context.metadata!, API_BODY_SCHEMAS, String(context.name), schema)
     if (options) {
       setInMapMeta(context.metadata!, API_BODY_OPTIONS, String(context.name), options)
     }

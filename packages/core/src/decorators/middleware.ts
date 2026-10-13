@@ -1,4 +1,4 @@
-import type { Guard, Middleware, ZodLike } from '../types.js'
+import type { Guard, Middleware } from '../types.js'
 import {
   CLASS_MW,
   METHOD_MW,
@@ -7,14 +7,10 @@ import {
   STATUSES,
   SKIP_GUARDS,
   BODY_LIMITS,
-  BODY_SCHEMAS,
-  QUERY_SCHEMAS,
-  PARAMS_SCHEMAS,
   addToMapMeta,
   setMeta,
   setInMapMeta,
 } from './metadata.js'
-import { HttpException, UnprocessableException } from '../exceptions.js'
 import { createMethodDecorator } from './create-decorator.js'
 import { createDecorator } from './create-decorator.js'
 
@@ -72,58 +68,6 @@ export const BodyLimit = createDecorator<[bytes: number]>((context, bytes) => {
   }
   const name = context.kind === 'class' ? '*' : String(context.name)
   setInMapMeta(context.metadata!, BODY_LIMITS, name, bytes)
-})
-
-// ─── @ValidateBody ───────────────────────────────────────────────
-
-export const ValidateBody = createMethodDecorator<[schema: ZodLike]>((_target, context, schema) => {
-  const mw: Middleware = async (ctx, next) => {
-    // Swallow malformed-body rejections into null (-> 422 via safeParse), but
-    // rethrow HttpExceptions and the adapters' body-limit errors (name
-    // 'PayloadTooLargeError') so an oversized body stays a 413, not a 422.
-    const body = await ctx.json().catch((e: unknown) => {
-      if (e instanceof HttpException || (e instanceof Error && e.name === 'PayloadTooLargeError')) throw e
-      return null
-    })
-    const result = schema.safeParse(body)
-    if (!result.success) {
-      throw new UnprocessableException('Body validation failed', result.error.issues)
-    }
-    ctx._setBody(result.data)
-    await next()
-  }
-  setInMapMeta(context.metadata!, BODY_SCHEMAS, String(context.name), schema)
-  addToMapMeta(context.metadata!, METHOD_MW, String(context.name), [mw])
-})
-
-// ─── @ValidateQuery ──────────────────────────────────────────────
-
-export const ValidateQuery = createMethodDecorator<[schema: ZodLike]>((_target, context, schema) => {
-  const mw: Middleware = async (ctx, next) => {
-    const result = schema.safeParse(ctx.query)
-    if (!result.success) {
-      throw new UnprocessableException('Query validation failed', result.error.issues)
-    }
-    ctx.query = result.data
-    await next()
-  }
-  setInMapMeta(context.metadata!, QUERY_SCHEMAS, String(context.name), schema)
-  addToMapMeta(context.metadata!, METHOD_MW, String(context.name), [mw])
-})
-
-// ─── @ValidateParams ─────────────────────────────────────────────
-
-export const ValidateParams = createMethodDecorator<[schema: ZodLike]>((_target, context, schema) => {
-  const mw: Middleware = async (ctx, next) => {
-    const result = schema.safeParse(ctx.params)
-    if (!result.success) {
-      throw new UnprocessableException('Params validation failed', result.error.issues)
-    }
-    ctx.params = result.data
-    await next()
-  }
-  setInMapMeta(context.metadata!, PARAMS_SCHEMAS, String(context.name), schema)
-  addToMapMeta(context.metadata!, METHOD_MW, String(context.name), [mw])
 })
 
 // ─── @Status ─────────────────────────────────────────────────────

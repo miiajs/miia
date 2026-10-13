@@ -21,9 +21,8 @@ export class UserController {
     return this.userService.findAll()
   }
 
-  @Post('/')
+  @Post('/', { body: CreateUserSchema })
   @Status(201)
-  @ValidateBody(CreateUserSchema)
   async create(ctx: RequestContext) {
     const input = await ctx.json<CreateUserInput>()
     return this.userService.create(input)

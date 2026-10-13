@@ -27,6 +27,7 @@ export const BODY_LIMITS = Symbol('bodyLimits')
 export const BODY_SCHEMAS = Symbol('bodySchemas')
 export const QUERY_SCHEMAS = Symbol('querySchemas')
 export const PARAMS_SCHEMAS = Symbol('paramsSchemas')
+export const BODY_READERS = Symbol('bodyReaders')
 
 // ─── Typed helpers ───────────────────────────────────────────────
 

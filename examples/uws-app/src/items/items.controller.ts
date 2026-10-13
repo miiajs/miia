@@ -7,7 +7,6 @@ import {
   Post,
   Put,
   Status,
-  ValidateBody,
   type RequestContext,
 } from '@miiajs/core'
 import type { z } from 'zod'
@@ -33,15 +32,13 @@ export class ItemsController {
     return item
   }
 
-  @Post('/')
+  @Post('/', { body: CreateItemSchema })
   @Status(201)
-  @ValidateBody(CreateItemSchema)
   async create(ctx: RequestContext) {
     return this.items.create(await ctx.json<CreateItemInput>())
   }
 
-  @Put('/:id')
-  @ValidateBody(UpdateItemSchema)
+  @Put('/:id', { body: UpdateItemSchema })
   async update(ctx: RequestContext) {
     const updated = this.items.update(ctx.params.id!, await ctx.json<UpdateItemInput>())
     if (!updated) throw new NotFoundException(`Item ${ctx.params.id} not found`)
