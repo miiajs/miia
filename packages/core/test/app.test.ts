@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import type { CanActivate, Middleware, RequestContext, ZodLike } from '../src/index.js'
 import {
+  BadRequestException,
   Controller,
   cors,
   ForbiddenException,
@@ -1364,7 +1365,7 @@ describe('Miia Application', () => {
           } catch (e) {
             secondError = e
           }
-          return { same: firstError === secondError }
+          return { same: firstError === secondError, badRequest: firstError instanceof BadRequestException }
         }
       }
 
@@ -1378,22 +1379,18 @@ describe('Miia Application', () => {
         body: '{ not json',
       })
       const res = await app.fetch(req)
-      expect(await res.json()).toEqual({ same: true })
+      expect(await res.json()).toEqual({ same: true, badRequest: true })
     })
 
-    it('ctx.json() on GET rejects and caches the rejection', async () => {
-      let rejected = false
+    it('ctx.json() on GET without a body resolves to undefined', async () => {
+      let body: unknown = null
 
       @Controller('/')
       class Ctrl {
         @Get('/no-body')
         async handler(ctx: RequestContext) {
-          try {
-            await ctx.json()
-          } catch {
-            rejected = true
-          }
-          return { rejected }
+          body = await ctx.json()
+          return { ok: true }
         }
       }
 
@@ -1402,7 +1399,93 @@ describe('Miia Application', () => {
 
       const app = new Miia({ logger: false }).register(M)
       const res = await request(app, 'GET', '/no-body')
-      expect(await res.json()).toEqual({ rejected: true })
+      expect(res.status).toBe(200)
+      expect(body).toBeUndefined()
+    })
+
+    it('ctx.json() answers 400 on malformed JSON on a route without a schema', async () => {
+      @Controller('/')
+      class Ctrl {
+        @Post('/parse')
+        async handler(ctx: RequestContext) {
+          return await ctx.json()
+        }
+      }
+
+      @Module({ controllers: [Ctrl] })
+      class M {}
+
+      const app = new Miia({ logger: false }).register(M)
+      const res = await app.fetch(
+        new Request('http://localhost/parse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{"a":',
+        }),
+      )
+      expect(res.status).toBe(400)
+      expect((await res.json()).message).toBe('Malformed JSON body')
+    })
+
+    it('ctx.json() resolves to undefined on an empty body', async () => {
+      let body: unknown = null
+
+      @Controller('/')
+      class Ctrl {
+        @Post('/empty')
+        async handler(ctx: RequestContext) {
+          body = await ctx.json()
+          return { ok: true }
+        }
+      }
+
+      @Module({ controllers: [Ctrl] })
+      class M {}
+
+      const app = new Miia({ logger: false }).register(M)
+      const res = await app.fetch(
+        new Request('http://localhost/empty', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '',
+        }),
+      )
+      expect(res.status).toBe(200)
+      expect(body).toBeUndefined()
+    })
+
+    it('ctx.json() and ctx.text() can be combined in either order', async () => {
+      @Controller('/')
+      class Ctrl {
+        @Post('/json-then-text')
+        async jsonFirst(ctx: RequestContext) {
+          const json = await ctx.json()
+          return { json, text: await ctx.text() }
+        }
+
+        @Post('/text-then-json')
+        async textFirst(ctx: RequestContext) {
+          const text = await ctx.text()
+          return { json: await ctx.json(), text }
+        }
+      }
+
+      @Module({ controllers: [Ctrl] })
+      class M {}
+
+      const app = new Miia({ logger: false }).register(M)
+      const raw = '{"a":1}'
+      for (const path of ['/json-then-text', '/text-then-json']) {
+        const res = await app.fetch(
+          new Request(`http://localhost${path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: raw,
+          }),
+        )
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ json: { a: 1 }, text: raw })
+      }
     })
   })
 

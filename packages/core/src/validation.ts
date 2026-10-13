@@ -4,9 +4,9 @@ import type { BodyReader, Middleware, RequestContext, RouteOptions } from './typ
 /** The reader a body schema uses when no package registered one for the handler. */
 export const jsonBodyReader: BodyReader = {
   contentType: 'application/json',
-  // Swallow malformed-body rejections into null (-> 422 via safeParse), but
-  // rethrow HttpExceptions and the adapters' body-limit errors (name
-  // 'PayloadTooLargeError') so an oversized body stays a 413, not a 422.
+  // Malformed JSON is already a 400 HttpException and passes through, as do the
+  // adapters' body-limit errors (name 'PayloadTooLargeError') so an oversized
+  // body stays a 413. Only an unexpected read failure becomes null (-> 422).
   read: (ctx) =>
     ctx.json().catch((e: unknown) => {
       if (e instanceof HttpException || (e instanceof Error && e.name === 'PayloadTooLargeError')) throw e

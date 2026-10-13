@@ -45,17 +45,18 @@ export interface RequestContext {
    * Returns the parsed JSON body, cached per request.
    * After the route's `body` schema runs, returns the validated (and possibly transformed) data.
    *
-   * Only one body-consumption method (`json()` or `text()`) can be used per request.
-   * Cross-format calls may work on node-server/uws-server for small bodies
-   * (≤ `bufferThreshold`) due to the buffered fast path, but this is an adapter
-   * optimization detail - do not rely on it. On Bun/Deno or streaming bodies,
-   * the second call will throw "body already used".
+   * Reads the body through `text()`. An empty body (or none, e.g. a GET) resolves to
+   * `undefined`; a body that is not valid JSON rejects with `BadRequestException` (400).
+   * `json()` and `text()` share one read and can be combined in any order. The raw
+   * stream (`req.body`, `req.formData()`, `req.arrayBuffer()`) is available only
+   * before the first call to either.
    */
   json<T = any>(): Promise<T>
   /**
    * Returns the raw request body as text, cached per request.
    *
-   * Same single-consumption caveats as `json()` apply.
+   * Shares its read with `json()`. After the route's `body` schema runs it still
+   * returns the raw text, not the validated data.
    */
   text(): Promise<string>
   /** @internal Used by the built-in JSON body reader to store validated data. */

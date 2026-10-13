@@ -644,11 +644,11 @@ describe('route body schema', () => {
     expect(parsed).toBe(1)
   })
 
-  it('reads JSON without @Multipart, so a form answers 422 instead of 500', async () => {
-    let seen: unknown
+  it('reads JSON without @Multipart, so a form answers 400 before the schema runs', async () => {
+    let calls = 0
     const objectSchema: ZodLike = {
       safeParse(data: unknown) {
-        seen = data
+        calls++
         if (typeof data !== 'object' || data === null) {
           return { success: false as const, error: { issues: [{ message: 'expected an object', path: [] }] } }
         }
@@ -665,9 +665,9 @@ describe('route body schema', () => {
     }
 
     const res = await postForm(bootstrap(Bare), '/upload/bare', attachment())
-    expect(res.status).toBe(422)
-    expect((await res.json()).message).toBe('Body validation failed')
-    expect(seen).toBeNull()
+    expect(res.status).toBe(400)
+    expect((await res.json()).message).toBe('Malformed JSON body')
+    expect(calls).toBe(0)
   })
 })
 

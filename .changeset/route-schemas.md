@@ -74,5 +74,5 @@ the `@ApiBody` option, else the route's body reader (`multipart/form-data` under
 **Body readers.** `BODY_READERS` (`Map<handlerName, BodyReader>`) and the `BodyReader` type
 (`{ contentType, read(ctx), commit(ctx, data) }`) are new exports of `@miiajs/core`. A reader decides what a route's
 `body` schema validates and where the validated data goes; `contentType` is what the spec shows. Without one the
-built-in JSON reader is used: malformed JSON answers 422 and an oversized body stays a 413. `@Multipart` registers a
-form reader.
+built-in JSON reader is used: malformed JSON answers 400 before the schema runs, an empty body reaches the schema as
+`undefined`, and an oversized body stays a 413. `@Multipart` registers a form reader.

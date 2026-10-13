@@ -143,10 +143,12 @@ describe('route schemas', () => {
       expect(body.calls).toBe(0)
     })
 
-    it('answers 422 on malformed JSON', async () => {
+    it('answers 400 on malformed JSON without running the schema', async () => {
+      const body = nameBody()
+
       @Controller('/items')
       class Ctrl {
-        @Post('/', { body: nameBody() })
+        @Post('/', { body })
         create() {
           return { ok: true }
         }
@@ -154,8 +156,37 @@ describe('route schemas', () => {
 
       const app = createApp(Ctrl)
       const res = await request(app, 'POST', '/items', { raw: '{"name":' })
-      expect(res.status).toBe(422)
-      expect((await res.json()).message).toBe('Body validation failed')
+      expect(res.status).toBe(400)
+      expect((await res.json()).message).toBe('Malformed JSON body')
+      expect(body.calls).toBe(0)
+    })
+
+    it('hands an empty or missing body to the schema as undefined and answers 422', async () => {
+      const seen: unknown[] = []
+      const body = schema((b) => {
+        seen.push(b)
+        return undefined
+      }, 'name required')
+
+      @Controller('/items')
+      class Ctrl {
+        @Post('/', { body })
+        create() {
+          return { ok: true }
+        }
+      }
+
+      const app = createApp(Ctrl)
+
+      const empty = await request(app, 'POST', '/items', { raw: '' })
+      expect(empty.status).toBe(422)
+      expect((await empty.json()).message).toBe('Body validation failed')
+
+      const missing = await request(app, 'POST', '/items')
+      expect(missing.status).toBe(422)
+      expect((await missing.json()).message).toBe('Body validation failed')
+
+      expect(seen).toEqual([undefined, undefined])
     })
 
     it('answers 413 on a Content-Length over @BodyLimit before the schema runs', async () => {

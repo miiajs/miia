@@ -5,7 +5,13 @@ import { type AddRouteOptions, type GlobalGuardBinding, type MatchResult, Router
 import { compose, guardToMiddleware } from '../middleware.js'
 import { ResponseBuilder } from '../response.js'
 import { Resolver } from '../resolver.js'
-import { HttpException, InternalServerException, NotFoundException, PayloadTooLargeException } from '../exceptions.js'
+import {
+  BadRequestException,
+  HttpException,
+  InternalServerException,
+  NotFoundException,
+  PayloadTooLargeException,
+} from '../exceptions.js'
 import type { LoggerConfig, LoggerService } from '../logger.js'
 import { ConsoleLogger, Logger } from '../logger.js'
 import { CookieJar } from '../cookies.js'
@@ -724,7 +730,7 @@ class Context implements RequestContext {
   }
 
   json<T = any>(): Promise<T> {
-    return (this._jsonPromise ??= this.req.json()) as Promise<T>
+    return (this._jsonPromise ??= this.text().then(parseJsonBody)) as Promise<T>
   }
 
   text(): Promise<string> {
@@ -733,6 +739,16 @@ class Context implements RequestContext {
 
   _setBody(value: unknown): void {
     this._jsonPromise = Promise.resolve(value)
+  }
+}
+
+/** An empty body is no body; anything else that does not parse is the client's mistake. */
+function parseJsonBody(text: string): unknown {
+  if (text === '') return undefined
+  try {
+    return JSON.parse(text)
+  } catch {
+    throw new BadRequestException('Malformed JSON body')
   }
 }
 
