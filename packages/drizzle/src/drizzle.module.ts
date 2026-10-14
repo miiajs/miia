@@ -1,34 +1,8 @@
 import type { ConfiguredModule, Constructor, FactoryProvider, OptionsOrFactory } from '@miiajs/core'
-import { resolveOptions } from '@miiajs/core'
+import { createLazyProxy, resolveOptions } from '@miiajs/core'
 import type { DrizzleModuleOptions } from './types.js'
 import { DrizzleService } from './drizzle.service.js'
 import { drizzleDb, getInternalServiceToken } from './tokens.js'
-
-// ─── Lazy proxies ────────────────────────────────────────────────────────────
-// DrizzleService.onInit happens AFTER provider factories run, so we can't return
-// a real db handle from the factory. The proxy defers underlying lookup until
-// first property access.
-
-function createLazyProxy<T extends object>(get: () => T): T {
-  let cached: T | undefined
-  const resolve = () => (cached ??= get())
-  return new Proxy({} as T, {
-    get(_, prop) {
-      const target = resolve() as any
-      const value = target[prop]
-      return typeof value === 'function' ? value.bind(target) : value
-    },
-    has(_, prop) {
-      return prop in (resolve() as any)
-    },
-    ownKeys() {
-      return Reflect.ownKeys(resolve() as any)
-    },
-    getOwnPropertyDescriptor(_, prop) {
-      return Object.getOwnPropertyDescriptor(resolve() as any, prop)
-    },
-  })
-}
 
 // ─── Friendly error helper ───────────────────────────────────────────────────
 
@@ -61,6 +35,7 @@ export class DrizzleModule {
         {
           token: dbToken,
           factory: (resolve) => {
+            // DrizzleService.onInit runs after provider factories, so the db handle is looked up on first use
             return createLazyProxy<object>(() => {
               let service: DrizzleService
               try {

@@ -4,8 +4,8 @@
 import './polyfill.js'
 
 // Application
-export { Miia } from './app/index.js'
-export type { MiiaOptions } from './app/index.js'
+export { Miia, OVERRIDE_KIND, overrideProvider, overrideModule, isOverride } from './app/index.js'
+export type { MiiaOptions, OverrideDescriptor } from './app/index.js'
 
 // Logger
 export { LogLevel, Logger, ConsoleLogger } from './logger.js'
@@ -93,7 +93,7 @@ export type { CookieOptions } from './cookies.js'
 export { cors } from './cors.js'
 
 // Utilities
-export { resolveOptions } from './utils/index.js'
+export { createLazyProxy, resolveOptions } from './utils/index.js'
 export type { OptionsOrFactory } from './utils/index.js'
 
 // Types

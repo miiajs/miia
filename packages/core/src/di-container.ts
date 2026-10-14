@@ -1,3 +1,4 @@
+import { formatToken } from './di-token-format.js'
 import type { Constructor, Resolve, Scope } from './types.js'
 
 interface ContainerEntry {
@@ -11,8 +12,8 @@ export class Container {
   static activeContainer: Container | null = null
 
   private registry = new Map<string | Constructor, ContainerEntry>()
-  private requestInstances = new Map<string | Constructor, unknown>()
-  private resolving = new Set<string | Constructor>()
+  private requestScope: Map<string | Constructor, unknown> | null = null
+  private stack: Array<{ token: string | Constructor; entry: ContainerEntry }> = []
 
   register<T>(
     token: Constructor<T> | string,
@@ -32,7 +33,9 @@ export class Container {
   resolve<T>(token: Constructor<T> | string): T {
     const entry = this.registry.get(token)
     if (!entry) {
-      throw new Error(`[Miia] No provider found for token: ${String(token)}`)
+      const requester = this.stack.at(-1)
+      const requiredBy = requester ? `, required by ${formatToken(requester.token)}` : ''
+      throw new Error(`[Miia] No provider found for token: ${formatToken(token)}${requiredBy}`)
     }
     return this.instantiate(token, entry) as T
   }
@@ -43,12 +46,19 @@ export class Container {
     return this.instantiate(token, entry) as T
   }
 
-  has(token: Constructor | string): boolean {
-    return this.registry.has(token)
+  /** @internal */
+  resolveInRequest<T>(token: Constructor<T> | string, scope: Map<string | Constructor, unknown>): T {
+    const prev = this.requestScope
+    this.requestScope = scope
+    try {
+      return this.resolve<T>(token)
+    } finally {
+      this.requestScope = prev
+    }
   }
 
-  clearRequestScope(): void {
-    if (this.requestInstances.size > 0) this.requestInstances.clear()
+  has(token: Constructor | string): boolean {
+    return this.registry.has(token)
   }
 
   async initAll(): Promise<void> {
@@ -127,47 +137,65 @@ export class Container {
       }
     }
     this.registry.clear()
-    this.requestInstances.clear()
   }
 
   private instantiate(token: string | Constructor, entry: ContainerEntry): unknown {
     if (entry.scope === 'singleton' && entry.instance !== undefined) return entry.instance
 
-    if (this.resolving.has(token)) {
-      throw new Error(`[Miia] Circular dependency detected: ${String(token)}`)
+    const cycleStart = this.stack.findIndex((frame) => frame.token === token)
+    if (cycleStart !== -1) {
+      const chain = [...this.stack.slice(cycleStart).map((frame) => formatToken(frame.token)), formatToken(token)]
+      throw new Error(
+        `[Miia] Circular dependency detected: ${chain.join(' -> ')}\n` +
+          '  - move the shared logic into a separate provider both can inject\n' +
+          '  - or decouple with events (@miiajs/messaging)\n' +
+          '  - or, if the cycle is intended, resolve one side lazily through Resolver in a getter',
+      )
     }
-    this.resolving.add(token)
-    try {
-      if (entry.scope === 'singleton') {
-        const instance = this.callFactory(entry)
-        entry.instance = instance
-        return instance
-      }
 
-      if (entry.scope === 'request') {
-        const cached = this.requestInstances.get(token)
-        if (cached !== undefined) return cached
-        const instance = this.callFactory(entry)
-        this.requestInstances.set(token, instance)
-        return instance
-      }
-
-      // transient - always new
-      return this.callFactory(entry)
-    } finally {
-      this.resolving.delete(token)
+    if (entry.scope === 'singleton') {
+      const instance = this.callFactory(token, entry)
+      entry.instance = instance
+      return instance
     }
+
+    if (entry.scope === 'request') {
+      const requester = this.stack.at(-1)
+      if (requester && requester.entry.scope !== 'request') {
+        const name = formatToken(requester.token)
+        throw new Error(
+          `[Miia] ${name} (${requester.entry.scope}) injects request-scoped ${formatToken(token)} - ` +
+            `resolve it with ctx.resolve() in the handler, or make ${name} request-scoped`,
+        )
+      }
+      const scope = this.requestScope
+      if (scope === null) {
+        throw new Error(
+          `[Miia] Request-scoped ${formatToken(token)} can only be resolved inside a request (ctx.resolve)`,
+        )
+      }
+      const cached = scope.get(token)
+      if (cached !== undefined) return cached
+      const instance = this.callFactory(token, entry)
+      scope.set(token, instance)
+      return instance
+    }
+
+    // transient - always new
+    return this.callFactory(token, entry)
   }
 
-  private callFactory(entry: ContainerEntry): unknown {
+  private callFactory(token: string | Constructor, entry: ContainerEntry): unknown {
     const prev = Container.activeContainer
     Container.activeContainer = this
+    this.stack.push({ token, entry })
     try {
       const fn = entry.factory
       if (fn.length === 0) return (fn as () => unknown)()
       const resolve: Resolve = <X>(t: Constructor<X> | string) => this.resolve<X>(t)
       return (fn as (r: Resolve) => unknown)(resolve)
     } finally {
+      this.stack.pop()
       Container.activeContainer = prev
     }
   }

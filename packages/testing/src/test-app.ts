@@ -1,14 +1,37 @@
-import { Miia, Router } from '@miiajs/core'
-import type { ConfiguredModule, Constructor, Guard, Middleware, ProviderDefinition } from '@miiajs/core'
+import { Miia, overrideModule, overrideProvider } from '@miiajs/core'
+import type {
+  ConfiguredModule,
+  Constructor,
+  Guard,
+  Middleware,
+  OverrideDescriptor,
+  ProviderDefinition,
+} from '@miiajs/core'
+
+function isConfiguredModule(value: unknown): value is ConfiguredModule {
+  const candidate = value as Partial<ConfiguredModule> | null
+  return (
+    typeof candidate === 'object' &&
+    candidate !== null &&
+    typeof candidate.module === 'function' &&
+    Array.isArray(candidate.providers)
+  )
+}
+
+function nameOf(token: Constructor | string): string {
+  return typeof token === 'string' ? token : token.name || '<anonymous>'
+}
 
 export class TestApp {
-  private app: Miia
-  private overrides = new Map<Constructor | string, any>()
+  private app?: Miia
+  private overrides: OverrideDescriptor[] = []
   private providers: ProviderDefinition[] = []
+  private middlewares: Middleware[] = []
+  private guards: Guard[] = []
+  private globalPrefix?: string
   private modules: (Constructor | ConfiguredModule)[]
 
   private constructor(modules: (Constructor | ConfiguredModule)[]) {
-    this.app = new Miia({ logger: false })
     this.modules = modules
   }
 
@@ -17,46 +40,58 @@ export class TestApp {
   }
 
   provide(...providers: ProviderDefinition[]): this {
+    this.assertNotCompiled('provide')
     this.providers.push(...providers)
     return this
   }
 
   override(token: Constructor | string, value: unknown): this {
-    this.overrides.set(token, value)
+    this.assertNotCompiled('override')
+    if (isConfiguredModule(value)) {
+      if (value.module !== token) {
+        throw new Error(
+          `[Miia] TestApp.override(${nameOf(token)}, ...): the configured module's class is ${nameOf(value.module)}, ` +
+            `not ${nameOf(token)} - named package modules cannot be overridden until they carry name (stage 5)`,
+        )
+      }
+      this.overrides.push(overrideModule(value))
+      return this
+    }
+    const factory = typeof value === 'function' && !value.prototype ? (value as () => unknown) : () => value
+    this.overrides.push(overrideProvider(token, factory))
     return this
   }
 
   use(...middlewares: Middleware[]): this {
-    this.app.use(...middlewares)
+    this.assertNotCompiled('use')
+    this.middlewares.push(...middlewares)
     return this
   }
 
   useGuard(...guards: Guard[]): this {
-    this.app.useGuard(...guards)
+    this.assertNotCompiled('useGuard')
+    this.guards.push(...guards)
     return this
   }
 
   setGlobalPrefix(prefix: string): this {
-    this.app.get(Router).globalPrefix = prefix
+    this.assertNotCompiled('setGlobalPrefix')
+    this.globalPrefix = prefix
     return this
   }
 
   async compile(): Promise<TestApp> {
-    // Register overrides first - module loader skips existing tokens
-    for (const [token, value] of this.overrides) {
-      const factory = typeof value === 'function' && !value.prototype ? (value as () => any) : () => value
-      this.app.provide({ token, factory, scope: 'singleton' })
-    }
+    this.assertNotCompiled('compile')
+    const app = new Miia({ logger: false, globalPrefix: this.globalPrefix })
+    this.app = app
 
     // Register explicit providers (for unit tests without modules)
-    this.app.provide(...this.providers)
+    app.provide(...this.providers)
+    app.use(...this.middlewares)
+    app.useGuard(...this.guards)
+    app.register(...this.modules, ...this.overrides)
 
-    // Load modules (if any)
-    if (this.modules.length > 0) {
-      this.app.register(...this.modules)
-    }
-
-    await this.app.init()
+    await app.init()
     return this
   }
 
@@ -70,6 +105,7 @@ export class TestApp {
       ip?: string
     },
   ): Promise<Response> {
+    const app = this.compiled()
     let url = `http://localhost${path}`
     if (options?.query) {
       const params = new URLSearchParams(options.query)
@@ -86,14 +122,23 @@ export class TestApp {
     }
     const req = new Request(url, init)
     if (options?.ip !== undefined) (req as any)._conn = { remoteAddress: options.ip }
-    return this.app.fetch(req)
+    return app.fetch(req)
   }
 
   resolve<T>(token: Constructor<T> | string): T {
-    return this.app.get<T>(token)
+    return this.compiled().get<T>(token)
   }
 
   async close(): Promise<void> {
-    await this.app.destroy()
+    await this.compiled().destroy()
+  }
+
+  private compiled(): Miia {
+    if (!this.app) throw new Error('[Miia] TestApp: call compile() first')
+    return this.app
+  }
+
+  private assertNotCompiled(method: string): void {
+    if (this.app) throw new Error(`[Miia] TestApp: ${method}() after compile()`)
   }
 }

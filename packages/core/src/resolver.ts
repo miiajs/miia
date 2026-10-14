@@ -13,6 +13,9 @@ import type { Constructor } from './types.js'
  * `Resolver` only for runtime inspection: plugin systems, conditional
  * resolution, or when the token is not known until runtime.
  *
+ * `resolve()` of a request-scoped token throws - there is no request to keep the
+ * instance on. Use `ctx.resolve()` in a handler, middleware or guard instead.
+ *
  * @example
  * ```ts
  * @Injectable()

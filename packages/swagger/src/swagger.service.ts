@@ -27,10 +27,10 @@ export class SwaggerService {
     // in compilePipelines() before bootstrapAll(), so `compiledPipeline` stays
     // undefined and no per-route guards are grafted on. Global middleware from
     // `app.use()` still wraps the dispatch (cors, logger, request-id on /docs
-    // is desirable). `skipGlobalGuards: true` is kept as a semantic marker +
-    // safety net: if the user later calls app.addRoute() (flipping compiled=false),
-    // a subsequent compilePipelines() re-runs compileAll across all entries, and
-    // this flag ensures global auth guards still don't graft onto swagger endpoints.
+    // is desirable). `skipGlobalGuards: true` is kept as a semantic marker: the
+    // pipelines are compiled once per app and app.addRoute() after init() throws,
+    // so nothing recompiles them today, but these endpoints must never carry
+    // global guards should compileAll() ever run over them.
     //
     // `skipGlobalPrefix: true` keeps the docs endpoints outside the app's global
     // prefix: `path` and `uiPath` are already the absolute URLs the user configured,

@@ -71,12 +71,19 @@ describe('Container', () => {
     it('request: should cache per request scope', () => {
       let count = 0
       c.register('counter', () => ++count, 'request')
-      expect(c.resolve<number>('counter')).toBe(1)
-      expect(c.resolve<number>('counter')).toBe(1)
+      const first = new Map()
+      expect(c.resolveInRequest<number>('counter', first)).toBe(1)
+      expect(c.resolveInRequest<number>('counter', first)).toBe(1)
 
-      c.clearRequestScope()
-      expect(c.resolve<number>('counter')).toBe(2)
-      expect(c.resolve<number>('counter')).toBe(2)
+      const second = new Map()
+      expect(c.resolveInRequest<number>('counter', second)).toBe(2)
+      expect(c.resolveInRequest<number>('counter', second)).toBe(2)
+      expect(c.resolveInRequest<number>('counter', first)).toBe(1)
+    })
+
+    it('request: should throw when resolved outside a request', () => {
+      c.register('counter', () => 1, 'request')
+      expect(() => c.resolve('counter')).toThrow(/can only be resolved inside a request/)
     })
   })
 

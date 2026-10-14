@@ -61,7 +61,7 @@ Benchmarks live in a separate repo: [github.com/miiajs/benchmarks](https://githu
 
 Each `Miia` instance owns its own `Container`. Use `inject(Token)` in a field initializer to resolve dependencies from the active container during class instantiation.
 
-Three scopes: `singleton` (default), `transient` (new instance per resolve), `request` (per HTTP request, cleared after response).
+Three scopes: `singleton` (default), `transient` (new instance per resolve), `request` (one instance per HTTP request, kept on the request context and reached with `ctx.resolve(Token)`). Only another request-scoped provider may `inject()` a request-scoped one: a singleton that does fails at startup, a transient when constructed. `app.get()` and `Resolver` throw for a request-scoped token. Controllers and guards are built once and must be singletons.
 
 Lifecycle hooks via duck-typing (no interface required): `onInit(): Promise<void>` called during `container.initAll()`, `onDestroy(): Promise<void>` called during `container.destroyAll()`.
 
@@ -81,7 +81,9 @@ External packages use decorator creators for custom decorators:
 
 ### Module system: @Module and dynamic modules
 
-`@Module({ imports, controllers, providers, prefix })` groups related functionality. Modules can import other modules (recursive, circular-safe). `prefix` composes with controller prefixes via `joinPaths()`.
+`@Module({ imports, controllers, providers, prefix })` groups related functionality. Modules can import other modules recursively; a cycle in the module graph is fine for the loader, but circular imports between files still hit the TDZ (an `undefined` in `imports`) - `forwardRef` comes with module boundaries. `prefix` composes with controller prefixes via `joinPaths()`.
+
+`app.register()` only collects modules: the graph is processed once, on the first `init()` / `app.get()` / `fetch()`, so the order of `register()` calls does not matter. After that point `register()` / `provide()` throw; `use()` / `useGuard()` / `addRoute()` throw once `init()` has started. A graph that failed to process rethrows its first error on every later `init()` / `app.get()`.
 
 Dynamic module pattern for runtime configuration:
 ```ts
@@ -92,21 +94,23 @@ DrizzleModule.configure((resolve) => {
 ```
 `configure()` returns a `ConfiguredModule` - a module class with extra providers. `register()` adds schemas/models to an existing module's registry.
 
+A configured module's identity is the pair (class, `name`): the loader collects every configuration in a pre-pass before registering providers, so a bare `imports: [XModule]` anywhere resolves to the unnamed configured one regardless of order, and two configurations of one pair throw `[Miia] X is configured twice (A, B)`. One `configure()` result imported by several modules is one module. Packages do not set `name` yet - their named variants are a new anonymous class per call.
+
 ### Routing: trie-based router
 
-`Router` uses a trie structure. Static paths: O(1) lookup. Dynamic paths with `:param` or `*wildcard`: trie traversal. HEAD falls back to GET.
+`Router` uses a trie structure. Static paths: O(1) lookup. Dynamic paths with `:param` or `*wildcard`: trie traversal. HEAD falls back to GET. A route registered twice - same method and trie position, param names ignored (`/u/:id` vs `/u/:userId`) - throws instead of replacing the first.
 
 HTTP method decorators: `@Get`, `@Post`, `@Put`, `@Patch`, `@Delete`, `@Head`, `@Options` - all take `(path?, options?)` or `(options)`, where `options` holds the route's request schemas `{ body, query, params }` (see Validation below). GET/HEAD/OPTIONS options have no `body` key (`RouteOptionsWithoutBody`); POST/PUT/PATCH/DELETE take `RouteOptions`.
 
 `@Status(code)` sets default HTTP status for successful responses.
 
-**Global prefix.** `new Miia({ globalPrefix: '/api' })` - the only form - prepends a segment to every route registered through the router: controllers, `app.addRoute()`, `serveStatic()`. `'api'` / `'/api'` / `'/api/'` are equivalent; `*`, `:`, `?`, `#`, whitespace throw `TypeError`. It must be set **before** any route is registered (routes resolve eagerly at `register()`/`addRoute()`, not at `listen()`) - a later assignment throws. There is deliberately no `Miia.setGlobalPrefix()` method: the constructor has no ordering to get wrong, and the name would collide with Nest's, which is read at listen instead. (`TestApp` does have `setGlobalPrefix()` - it is built through a builder, not a constructor.) The ordering check lives in the `Router.globalPrefix` setter, so every path into it is guarded. Applied in `Router.add()` only, so it never reaches `RESOLVED_PREFIX` and stays out of the OpenAPI spec (unlike `@Module({ prefix })`). Opt out per route with `app.addRoute(..., { skipGlobalPrefix: true })` - the fourth argument is an `AddRouteOptions` object (`middlewares`, `bodyLimit`, `skipGlobalGuards`, `skipGlobalPrefix`), the same options `router.add()` takes for routes registered from a provider's `onReady` the way `@miiajs/swagger` does. `serveStatic()` forwards `skipGlobalPrefix` from its own options. Start-up route logs show the prefixed path.
+**Global prefix.** `new Miia({ globalPrefix: '/api' })` - the only form - prepends a segment to every route registered through the router: controllers, `app.addRoute()`, `serveStatic()`. `'api'` / `'/api'` / `'/api/'` are equivalent; `*`, `:`, `?`, `#`, whitespace throw `TypeError`. It must be set **before** any route is registered (controller routes resolve when the module graph is processed - first `init()`/`app.get()`/`fetch()` - and `addRoute()` routes on the call, never at `listen()`) - a later assignment throws. There is deliberately no `Miia.setGlobalPrefix()` method: the constructor has no ordering to get wrong, and the name would collide with Nest's, which is read at listen instead. (`TestApp` does have `setGlobalPrefix()` - the builder records it and `compile()` passes it to the `Miia` constructor.) The ordering check lives in the `Router.globalPrefix` setter, so every path into it is guarded. Applied in `Router.add()` only, so it never reaches `RESOLVED_PREFIX` and stays out of the OpenAPI spec (unlike `@Module({ prefix })`). Opt out per route with `app.addRoute(..., { skipGlobalPrefix: true })` - the fourth argument is an `AddRouteOptions` object (`middlewares`, `bodyLimit`, `skipGlobalGuards`, `skipGlobalPrefix`), the same options `router.add()` takes for routes registered from a provider's `onReady` the way `@miiajs/swagger` does. `serveStatic()` forwards `skipGlobalPrefix` from its own options. Start-up route logs show the prefixed path.
 
 ### Middleware: Koa onion model
 
 Single `compose()` function wraps middleware array into a pipeline. Two registration points with different scopes:
 
-- **`app.use(...middlewares)` - pre-route global.** Composed once at `compilePipelines()` into `compiledGlobalPipeline` and wraps the entire dispatch, including `router.match`. Runs on **every** request, including 404s - errors (like `NotFoundException`) bubble up through the onion, so middleware can observe them via `try { await next() } catch`. This is how CORS, request loggers, and request-id middleware see unmatched routes.
+- **`app.use(...middlewares)` - pre-route global.** Composed once by `compilePipelines()`, which runs only in `init()` (`use()` after `init()` throws), into `compiledGlobalPipeline` and wraps the entire dispatch, including `router.match`. Runs on **every** request, including 404s - errors (like `NotFoundException`) bubble up through the onion, so middleware can observe them via `try { await next() } catch`. This is how CORS, request loggers, and request-id middleware see unmatched routes.
 - **`@Use(...middlewares)` - route-bound.** Applies at class (all routes) or method level. Composed into per-route pipelines that run inside the inner `next()` of the global pipeline.
 
 ```ts
@@ -148,7 +152,6 @@ Semantics to remember:
 - **Skip beats specificity (unlike the `@BodyLimit` analogy):** `@SkipRateLimit()` disables rate limiting entirely on its scope - including a `@RateLimit` on the same method, and a class-level skip disables method-level `@RateLimit`s too. Use `@SkipRateLimit()`, not `@SkipGuard(RateLimitGuard)` - the latter only catches the bare global guard and explicit factory guards, not decorator-applied policies (their `GUARD_FACTORY` markers are internal scope sentinels).
 - **Stacking is middleware-only:** an explicit `@UseGuard(RateLimitGuard(policy))` still stacks with the global guard, but any `@RateLimit`/`@SkipRateLimit` on that route disables it; for guaranteed stacked limits use the `rateLimit()` middleware via `@Use`.
 - **Eager construction:** `app.useGuard(RateLimitGuard)` constructs the bare guard at compile time even if every route replaces it - without `RateLimitModule.configure()` the app fails at startup by design.
-- **Ordering:** `RateLimitModule.configure()` must be in the same module tree (`imports`) as the controllers using `@RateLimit` - a separate later `app.register()` constructs the guards before the options provider exists.
 - **`blockDuration`:** once exceeded, the key is blocked for that duration (the triggering request already gets `Retry-After` = blockDuration); after the block expires the client gets a fresh window. Optional geometric backoff (`blockBackoff` > 1 with a required `maxBlockDuration` ceiling, and `strikeReset` grace measured from the end of the block) grows the ban per repeat offence and resets strikes after a quiet period.
 
 ### Validation: route schemas `{ body, query, params }`
@@ -263,6 +266,7 @@ All DB packages (`drizzle`, `papr`, `mongoose`) follow the same pattern:
 - Models / databases become DI tokens via `defineModel(...)` (papr/mongoose) or `drizzleDb<TDb>(name?)` (drizzle). Use standard `inject(User)` / `inject(paprDb())` / `inject(mongooseConnection())` / `inject(db)`.
 - Optional `name` parameter for multi-connection support
 - Lifecycle: `onInit()` connects with retry, `onDestroy()` closes connection
+- The injected db / connection / model is a lazy proxy built on core's `createLazyProxy()`: it resolves on first use, and the container probing lifecycle hooks does not resolve it
 
 ### Swagger: OpenAPI 3.1 + Swagger UI
 
@@ -279,7 +283,7 @@ Response rules:
 
 Schema conversion prefers the schema's own `toJSONSchema()` (zod 4) / `toJsonSchema()` export, duck-typed - no zod dependency; zod 3 and raw JSON Schema fall back to the manual walker. Bodies/params use `io: 'input'`, responses `io: 'output'`; `format` is merged from the output side so `z.string().trim().pipe(z.email())` keeps `format: email`. `$defs`, `.meta({ id })` schemas, and recursive schemas are lifted into `components.schemas` with refs rewritten (name clashes get `_Input`/`_Output`, then `_2`).
 
-Not in the spec: guards registered via `app.useGuard()` after `app.init()` (the spec is serialized once in `onReady`), the perimeter `rateLimit()` middleware (middleware has no readable metadata), and the app-level `globalPrefix` (applied in `Router.add()`, never in `RESOLVED_PREFIX`) - paths stay clean, so the base URL including the prefix must be written into `servers` by hand or Swagger UI "Try it out" 404s.
+Every global guard is in the spec - it is serialized once in `onReady`, and `app.useGuard()` after `app.init()` throws. Not in the spec: the perimeter `rateLimit()` middleware (middleware has no readable metadata), and the app-level `globalPrefix` (applied in `Router.add()`, never in `RESOLVED_PREFIX`) - paths stay clean, so the base URL including the prefix must be written into `servers` by hand or Swagger UI "Try it out" 404s.
 
 Spec served at `{path}` (default `/docs/json`), UI at `{uiPath}/` (default `/docs/`). Only `swagger-initializer.js` is overridden.
 
@@ -317,7 +321,9 @@ const res = await app.request('GET', '/users')
 await app.close()
 ```
 
-Methods: `provide()`, `override()`, `use()`, `useGuard()`, `setGlobalPrefix()` (the builder form `Miia` deliberately lacks), `compile()`, `request()`, `resolve()`, `close()`.
+Methods: `provide()`, `override()`, `use()`, `useGuard()`, `setGlobalPrefix()` (the builder form `Miia` deliberately lacks), `compile()`, `request()`, `resolve()`, `close()`. The builder methods only collect; `compile()` builds the `Miia` from all of it (prefix, providers, middleware, guards, modules with the override descriptors, `init()`). A builder call after `compile()` (a second `compile()` included) throws, and so do `request()`/`resolve()`/`close()` before it.
+
+`override()` builds a descriptor (`overrideProvider()` / `overrideModule()` from core) that goes through `register()` next to the modules and replaces one entry while the graph loads - not a `provide()`-first race. Targets: a provider a loaded module declares (`providers` or a `configure()`'s providers; a class and its `@Injectable({ token })` alias are replaced together), a `provide()` token, the built-ins `DiscoveryService` and `Resolver` (an overridden `Router` would reach only DI consumers - the app dispatches through its own); a configured module with `override(XModule, XModule.configure(test))`, matched by the pair (class, name) - a `ConfiguredModule` of another class (a named package module) throws. A token nothing provides throws `[Miia] override(X): no loaded module provides X`; overriding a module the graph does not configure throws too - a feature that imports it bare is tested as `TestApp.create(FeatureModule, X.configure(test))`. Guards and controllers are overridable only when declared in `providers` / `controllers`. Descriptors are allowed only at the top level of `register()`.
 
 Tests use `bun test` with explicit imports: `import { describe, it, expect } from 'bun:test'`.
 

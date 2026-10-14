@@ -1,10 +1,13 @@
 import type { Container } from '../di-container.js'
+import { formatToken } from '../di-token-format.js'
 import { Logger } from '../logger.js'
 import { getMeta, setMeta, MODULE, INJECTABLE, PREFIX, RESOLVED_PREFIX } from '../decorators/index.js'
 import type { InjectableMeta } from '../decorators/index.js'
 import type { Router } from '../router.js'
 import type { ConfiguredModule, Constructor, FactoryProvider, ModuleOptions, ProviderDefinition } from '../types.js'
 import { RoutesResolver } from './routes-resolver.js'
+import { isOverride, OVERRIDE_KIND } from './overrides.js'
+import type { OverrideDescriptor } from './overrides.js'
 import { joinPaths } from '../utils/index.js'
 
 interface PendingRoute {
@@ -12,10 +15,26 @@ interface PendingRoute {
   prefix: string
 }
 
+interface ConfiguredEntry {
+  module: ConfiguredModule
+  /** The module whose `imports` hold it, or `register()`. */
+  host: string
+}
+
+const NESTED_OVERRIDE = '[Miia] override descriptors are only allowed at the top level of register()'
+
+function formatPair(cls: Constructor, name: string): string {
+  return name ? `${formatToken(cls)} (name '${name}')` : formatToken(cls)
+}
+
 export class ModuleLoader {
   private logger = new Logger(ModuleLoader.name)
-  private processedModules = new Set<Constructor>()
+  /** By the pair (class, name); a bare class is the pair (class, ''). */
+  private processedModules = new Map<Constructor, Set<string>>()
   private registeredTokens = new Set<Constructor | string>()
+  private configured = new Map<Constructor, Map<string, ConfiguredEntry>>()
+  private providerOverrides = new Map<Constructor | string, () => unknown>()
+  private usedOverrides = new Set<Constructor | string>()
   private routesResolver: RoutesResolver
   private pendingRoutes: PendingRoute[] = []
 
@@ -26,7 +45,41 @@ export class ModuleLoader {
     this.routesResolver = new RoutesResolver(router, container)
   }
 
-  load(...modules: (Constructor | ConfiguredModule)[]): void {
+  load(...items: (Constructor | ConfiguredModule | OverrideDescriptor)[]): void {
+    const modules: (Constructor | ConfiguredModule)[] = []
+    const moduleOverrides: ConfiguredModule[] = []
+    for (const item of items) {
+      if (!isOverride(item)) modules.push(item)
+      else if (item[OVERRIDE_KIND] === 'provider') this.providerOverrides.set(item.token, item.factory)
+      else moduleOverrides.push(item.module)
+    }
+
+    const visited = new Set<Constructor>()
+    for (const mod of modules) {
+      this.collect(mod, 'register()', visited)
+    }
+
+    for (const replacement of moduleOverrides) {
+      const name = replacement.name ?? ''
+      const entry = this.configured.get(replacement.module)?.get(name)
+      if (!entry) {
+        const pair = formatPair(replacement.module, name)
+        const cls = formatToken(replacement.module)
+        throw new Error(
+          `[Miia] override(${pair}): ${pair} is not configured in the loaded graph - ` +
+            `if a module imports ${cls} bare and expects the root to configure it, register it alongside: ` +
+            `TestApp.create(FeatureModule, ${cls}.configure(...))`,
+        )
+      }
+      entry.module = replacement
+    }
+
+    // Tokens already in the container (built-ins, provide()) never pass through registerProvider(),
+    // and phase 2 constructs controllers and guards - replace them before anything is built.
+    for (const token of this.providerOverrides.keys()) {
+      if (this.container.has(token)) this.applyOverride(token)
+    }
+
     // Phase 1: Load modules, register providers
     for (const mod of modules) {
       this.processModule(mod)
@@ -44,21 +97,73 @@ export class ModuleLoader {
       if (classMeta) setMeta(classMeta, RESOLVED_PREFIX, resolvedPrefix)
     }
     this.pendingRoutes = []
+
+    for (const token of this.providerOverrides.keys()) {
+      if (!this.usedOverrides.has(token)) {
+        const name = formatToken(token)
+        throw new Error(
+          `[Miia] override(${name}): no loaded module provides ${name} - use provide() for a module-less test`,
+        )
+      }
+    }
+  }
+
+  /**
+   * Records every configured module by its pair (class, name) before phase 1, so a bare import
+   * resolves to it whatever the order, and a second configuration of a pair throws.
+   */
+  private collect(item: Constructor | ConfiguredModule, host: string, visited: Set<Constructor>): void {
+    if (isOverride(item)) throw new Error(NESTED_OVERRIDE)
+
+    let moduleCtor: Constructor
+    if (typeof item === 'function') {
+      if (visited.has(item)) return
+      visited.add(item)
+      moduleCtor = item
+    } else {
+      moduleCtor = item.module
+      const name = item.name ?? ''
+      let byName = this.configured.get(moduleCtor)
+      const seen = byName?.get(name)
+      if (seen) {
+        if (seen.module === item) return
+        const cls = formatToken(moduleCtor)
+        throw new Error(
+          `[Miia] ${formatPair(moduleCtor, name)} is configured twice (${seen.host}, ${host}) - configure it once; ` +
+            'for another connection use a different name; ' +
+            `in tests, replace it with TestApp.override(${cls}, ${cls}.configure(...))`,
+        )
+      }
+      if (!byName) this.configured.set(moduleCtor, (byName = new Map()))
+      byName.set(name, { module: item, host })
+    }
+
+    const imports = getMeta<ModuleOptions>(moduleCtor, MODULE)?.imports
+    if (imports) {
+      for (const imp of imports) {
+        this.collect(imp, formatToken(moduleCtor), visited)
+      }
+    }
   }
 
   private processModule(modOrConfigured: Constructor | ConfiguredModule, parentPrefix = ''): void {
-    let moduleCtor: Constructor
-    let extraProviders: ProviderDefinition[] = []
+    if (isOverride(modOrConfigured)) throw new Error(NESTED_OVERRIDE)
 
+    let moduleCtor: Constructor
+    let name = ''
     if (typeof modOrConfigured === 'function') {
       moduleCtor = modOrConfigured
     } else {
       moduleCtor = modOrConfigured.module
-      extraProviders = modOrConfigured.providers ?? []
+      name = modOrConfigured.name ?? ''
     }
+    // The collected (possibly overridden) configuration; a bare class gets the unnamed one, if any.
+    const extraProviders = this.configured.get(moduleCtor)?.get(name)?.module.providers ?? []
 
-    if (this.processedModules.has(moduleCtor)) return
-    this.processedModules.add(moduleCtor)
+    let processed = this.processedModules.get(moduleCtor)
+    if (processed?.has(name)) return
+    if (!processed) this.processedModules.set(moduleCtor, (processed = new Set()))
+    processed.add(name)
 
     const meta = getMeta<ModuleOptions>(moduleCtor, MODULE)
     const prefix = joinPaths(parentPrefix, meta?.prefix ?? '')
@@ -81,6 +186,8 @@ export class ModuleLoader {
 
     if (meta?.controllers) {
       for (const controller of meta.controllers) {
+        // Controllers are registered in phase 2, only if absent - an override has to be there first.
+        this.applyOverride(controller)
         this.pendingRoutes.push({ controller, prefix })
       }
     }
@@ -97,7 +204,7 @@ export class ModuleLoader {
       if (this.container.has(provider)) {
         if (this.registeredTokens.has(provider)) {
           throw new Error(
-            `[Miia] Duplicate provider: ${provider.name} is already registered. Remove it from one of the modules.`,
+            `[Miia] Duplicate provider: ${formatToken(provider)} is already registered. Remove it from one of the modules.`,
           )
         }
         return
@@ -105,6 +212,8 @@ export class ModuleLoader {
       const meta = getMeta<InjectableMeta>(provider, INJECTABLE)
       const scope = meta?.scope ?? 'singleton'
       const token = meta?.token
+
+      if (this.registerOverride(token ? [token, provider] : [provider])) return
 
       if (token) {
         this.container.register(token, () => new provider(), scope)
@@ -119,13 +228,37 @@ export class ModuleLoader {
       if (this.container.has(fp.token)) {
         if (this.registeredTokens.has(fp.token)) {
           throw new Error(
-            `[Miia] Duplicate provider: ${String(fp.token)} is already registered. Remove it from one of the modules.`,
+            `[Miia] Duplicate provider: ${formatToken(fp.token)} is already registered. Remove it from one of the modules.`,
           )
         }
         return
       }
+      if (this.registerOverride([fp.token])) return
       this.container.register(fp.token, fp.factory, fp.scope)
       this.registeredTokens.add(fp.token)
     }
+  }
+
+  /**
+   * A class and its `@Injectable({ token })` alias are one provider: overridden keys get their
+   * override, the rest resolve to the first overridden one. Runs even for a token replaced before
+   * phase 1, since the alias registration would overwrite it.
+   */
+  private registerOverride(keys: (Constructor | string)[]): boolean {
+    const primary = keys.find((key) => this.providerOverrides.has(key))
+    if (primary === undefined) return false
+    for (const key of keys) {
+      if (!this.applyOverride(key)) this.container.register(key, (resolve) => resolve(primary), 'singleton')
+      this.registeredTokens.add(key)
+    }
+    return true
+  }
+
+  private applyOverride(token: Constructor | string): boolean {
+    const factory = this.providerOverrides.get(token)
+    if (!factory) return false
+    this.container.register(token, factory, 'singleton')
+    this.usedOverrides.add(token)
+    return true
   }
 }

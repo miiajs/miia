@@ -96,8 +96,9 @@ export class Router {
   set globalPrefix(value: string) {
     if (this.allEntries.length > 0) {
       throw new Error(
-        '[Miia] The global prefix must be set before any route is registered - routes are ' +
-          'resolved eagerly by register()/addRoute(). Use new Miia({ globalPrefix }) instead.',
+        '[Miia] The global prefix must be set before any route is registered - controller routes are ' +
+          'resolved with the module graph (first init(), app.get() or fetch()), addRoute() routes on the call. ' +
+          'Use new Miia({ globalPrefix }) instead.',
       )
     }
 
@@ -132,13 +133,22 @@ export class Router {
     options: AddRouteOptions = {},
   ): void {
     const { middlewares = [], skipGlobalGuards = false, skippedGuardClasses = null } = options
+    const normalized =
+      this.prefix === '' || options.skipGlobalPrefix ? normalizePath(pattern) : joinPaths(this.prefix, pattern)
+    const segments = normalized === '' ? [] : normalized.split('/')
+    const isStatic = !segments.some((s) => s.startsWith(':') || s === '*')
+
+    // Checked before anything is written, so a rejected route leaves no entry,
+    // no raised body ceiling and no empty trie nodes behind.
+    const existing = this.findExisting(method, normalized, segments, isStatic)
+    if (existing) {
+      throw new Error(`[Miia] Route ${method} /${normalized} conflicts with ${existing.method} /${existing.pattern}`)
+    }
+
     const bodyLimit = options.bodyLimit ?? this.defaultBodyLimit
     if (typeof bodyLimit === 'number' && bodyLimit > this.maxRouteBodyLimit) {
       this.maxRouteBodyLimit = bodyLimit
     }
-    const normalized =
-      this.prefix === '' || options.skipGlobalPrefix ? normalizePath(pattern) : joinPaths(this.prefix, pattern)
-    const segments = normalized === '' ? [] : normalized.split('/')
     const entry: RouteEntry = {
       method,
       pattern: normalized,
@@ -151,7 +161,6 @@ export class Router {
 
     this.allEntries.push(entry)
 
-    const isStatic = !segments.some((s) => s.startsWith(':') || s === '*')
     if (isStatic) {
       this.staticRoutes.set(method + ':' + normalized, entry)
     }
@@ -303,6 +312,27 @@ export class Router {
     }
 
     return null
+  }
+
+  /**
+   * The route already sitting where this one would go: same method, same trie
+   * position. Param names do not count - `:id` and `:userId` share one param node.
+   */
+  private findExisting(
+    method: HttpMethod,
+    normalized: string,
+    segments: string[],
+    isStatic: boolean,
+  ): RouteEntry | null {
+    if (isStatic) return this.staticRoutes.get(method + ':' + normalized) ?? null
+
+    let node = this.tries.get(method)
+    for (const seg of segments) {
+      if (!node) return null
+      if (seg === '*') return node.wildcard?.entry ?? null
+      node = seg.startsWith(':') ? node.param?.node : node.children.get(seg)
+    }
+    return node?.entry ?? null
   }
 }
 

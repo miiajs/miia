@@ -59,6 +59,12 @@ export interface RequestContext {
    * returns the raw text, not the validated data.
    */
   text(): Promise<string>
+  /**
+   * Resolves a provider for this request. Request-scoped providers are created once per
+   * request and cached on the context; singletons and transients resolve as usual.
+   * This is the only way to reach a request-scoped provider from a handler, middleware or guard.
+   */
+  resolve<T>(token: Constructor<T> | string): T
   /** @internal Used by the built-in JSON body reader to store validated data. */
   _setBody(value: unknown): void
 }
@@ -98,6 +104,12 @@ export interface ModuleOptions {
 export interface ConfiguredModule {
   module: Constructor
   providers?: ProviderDefinition[]
+  /**
+   * The identity of a configured module is the pair (`module`, `name`); two `configure()`
+   * calls with the same pair are an error. A bare import of `module` resolves to the
+   * configured one without a name.
+   */
+  name?: string
 }
 
 // ─── Validation (Zod-compatible) ─────────────────────────────────

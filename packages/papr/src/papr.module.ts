@@ -1,37 +1,11 @@
 import type { ConfiguredModule, Constructor, FactoryProvider, OptionsOrFactory } from '@miiajs/core'
-import { resolveOptions } from '@miiajs/core'
+import { createLazyProxy, resolveOptions } from '@miiajs/core'
 import type { Db } from 'mongodb'
 import type { Model } from 'papr'
 import type { PaprModuleOptions } from './types.js'
 import type { ModelToken } from './define-model.js'
 import { PaprService } from './papr.service.js'
 import { getInternalServiceToken, getRegistryToken, paprDb } from './tokens.js'
-
-// ─── Lazy proxies ────────────────────────────────────────────────────────────
-// PaprService.onInit happens AFTER provider factories run, so we can't return a
-// real Db / Model from the factory. Instead, we return a Proxy that defers the
-// underlying lookup until first property access.
-
-function createLazyProxy<T extends object>(get: () => T): T {
-  let cached: T | undefined
-  const resolve = () => (cached ??= get())
-  return new Proxy({} as T, {
-    get(_, prop) {
-      const target = resolve() as any
-      const value = target[prop]
-      return typeof value === 'function' ? value.bind(target) : value
-    },
-    has(_, prop) {
-      return prop in (resolve() as any)
-    },
-    ownKeys() {
-      return Reflect.ownKeys(resolve() as any)
-    },
-    getOwnPropertyDescriptor(_, prop) {
-      return Object.getOwnPropertyDescriptor(resolve() as any, prop)
-    },
-  })
-}
 
 // ─── Cross-connection collision warning ──────────────────────────────────────
 // Module-level WeakMap. If the same ModelToken is registered under two different
@@ -91,6 +65,7 @@ export class PaprModule {
         {
           token: dbToken,
           factory: (resolve) => {
+            // PaprService.onInit runs after provider factories, so the Db / Model is looked up on first use
             return createLazyProxy<Db>(() => resolve<PaprService>(serviceToken).db)
           },
         } satisfies FactoryProvider,

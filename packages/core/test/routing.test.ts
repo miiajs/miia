@@ -339,6 +339,7 @@ describe('Global prefix', () => {
     class AppModule {}
 
     const app = new Miia({ logger: false, globalPrefix: '/api' }).register(AppModule)
+    await app.init()
 
     expect(getMeta<string>(UsersController, RESOLVED_PREFIX)).toBe('v1/users')
     expect((await request(app, 'GET', '/api/v1/users')).status).toBe(200)
@@ -378,5 +379,80 @@ describe('Global prefix', () => {
     expect(router.match('GET', '/docs/json')).not.toBeNull()
     expect(router.match('GET', '/api/docs/json')).toBeNull()
     expect(router.match('GET', '/api/users')).not.toBeNull()
+  })
+})
+
+describe('Duplicate routes', () => {
+  function thrownBy(fn: () => unknown): Error {
+    try {
+      fn()
+    } catch (err) {
+      return err as Error
+    }
+    throw new Error('expected a throw')
+  }
+
+  it('should reject the same method and path registered twice', () => {
+    const app = new Miia({ logger: false })
+    app.addRoute('GET', '/x', noop)
+
+    const err = thrownBy(() => app.addRoute('GET', '/x/', noop))
+    expect(err.message).toBe('[Miia] Route GET /x conflicts with GET /x')
+    expect(err.constructor).toBe(Error)
+  })
+
+  it('should reject a param route that differs only in the param name, naming both patterns', () => {
+    const router = new Router()
+    router.add('GET', '/u/:id', noop)
+
+    expect(() => router.add('GET', '/u/:userId', noop)).toThrow('[Miia] Route GET /u/:userId conflicts with GET /u/:id')
+  })
+
+  it('should reject a second wildcard on the same prefix', () => {
+    const router = new Router()
+    router.add('GET', '/files/*', noop)
+
+    expect(() => router.add('GET', '/files/*', noop)).toThrow('[Miia] Route GET /files/* conflicts with GET /files/*')
+  })
+
+  it('should reject a controller route that lands on an addRoute() path', async () => {
+    @Controller('/users')
+    class UsersController {
+      @Get('/')
+      list(_ctx: RequestContext) {
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [UsersController] })
+    class AppModule {}
+
+    // Collisions exist only after normalization: the controller lands under the global prefix,
+    // the addRoute() path carries it literally.
+    const app = new Miia({ logger: false, globalPrefix: '/api' }).register(AppModule)
+    app.addRoute('GET', '/api/users', noop, { skipGlobalPrefix: true })
+
+    await expect(app.init()).rejects.toThrow('[Miia] Route GET /api/users conflicts with GET /api/users')
+  })
+
+  it('should allow GET and HEAD on the same path', () => {
+    const router = new Router()
+    router.add('GET', '/x', () => 'get')
+    router.add('HEAD', '/x', () => 'head')
+    router.add('GET', '/u/:id', () => 'get')
+    router.add('HEAD', '/u/:id', () => 'head')
+
+    expect(router.match('GET', '/x')!.handler({} as RequestContext)).toBe('get')
+    expect(router.match('HEAD', '/x')!.handler({} as RequestContext)).toBe('head')
+    expect(router.match('HEAD', '/u/1')!.handler({} as RequestContext)).toBe('head')
+  })
+
+  it('should leave the router untouched when a route is rejected', () => {
+    const router = new Router()
+    router.add('POST', '/upload', noop)
+    const ceiling = router.adapterBodyCeiling
+
+    expect(() => router.add('POST', '/upload', noop, { bodyLimit: 50 * 1024 * 1024 })).toThrow(/conflicts with/)
+    expect(router.adapterBodyCeiling).toBe(ceiling)
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { Controller, Get, Post, Module, Injectable, UseGuard, inject } from '@miiajs/core'
-import type { CanActivate, RequestContext, Guard, Middleware } from '@miiajs/core'
+import type { CanActivate, ConfiguredModule, RequestContext, Guard, Middleware } from '@miiajs/core'
 import { ForbiddenException } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 
@@ -189,6 +189,85 @@ describe('TestApp', () => {
     })
   })
 
+  describe('override configured module', () => {
+    function makeConfigLike() {
+      class ConfigLikeModule {
+        static configure(value: string): ConfiguredModule {
+          return { module: ConfigLikeModule, providers: [{ token: 'CONFIG', factory: () => value }] }
+        }
+      }
+
+      @Controller('/config')
+      class ConfigController {
+        private config = inject<string>('CONFIG')
+
+        @Get('/')
+        read(_ctx: RequestContext) {
+          return { config: this.config }
+        }
+      }
+
+      @Module({ imports: [ConfigLikeModule], controllers: [ConfigController] })
+      class FeatureModule {}
+
+      @Module({ imports: [ConfigLikeModule.configure('production'), FeatureModule] })
+      class RootModule {}
+
+      return { ConfigLikeModule, FeatureModule, RootModule }
+    }
+
+    it('should replace the configuration the graph imports', async () => {
+      const { ConfigLikeModule, RootModule } = makeConfigLike()
+      const app = await TestApp.create(RootModule)
+        .override(ConfigLikeModule, ConfigLikeModule.configure('test'))
+        .compile()
+
+      const res = await app.request('GET', '/config/')
+      expect(await res.json()).toEqual({ config: 'test' })
+
+      await app.close()
+    })
+
+    it('should configure a module a feature imports bare when registered alongside', async () => {
+      const { ConfigLikeModule, FeatureModule } = makeConfigLike()
+      const app = await TestApp.create(FeatureModule, ConfigLikeModule.configure('test')).compile()
+
+      const res = await app.request('GET', '/config/')
+      expect(await res.json()).toEqual({ config: 'test' })
+
+      await app.close()
+    })
+
+    it('should reject a configured module of another class', () => {
+      const { ConfigLikeModule } = makeConfigLike()
+      class DrizzleNamedModule {}
+
+      expect(() =>
+        TestApp.create(AppModule).override(ConfigLikeModule, { module: DrizzleNamedModule, providers: [] }),
+      ).toThrow(
+        "[Miia] TestApp.override(ConfigLikeModule, ...): the configured module's class is DrizzleNamedModule, " +
+          'not ConfigLikeModule - named package modules cannot be overridden until they carry name (stage 5)',
+      )
+    })
+
+    it('should treat a mock with a module function and no providers as a provider override', async () => {
+      const mock = { module: () => 'mocked', findAll: () => [] }
+      const app = await TestApp.create(AppModule).override(UserService, mock).compile()
+
+      expect(app.resolve(UserService)).toBe(mock as unknown as UserService)
+
+      await app.close()
+    })
+  })
+
+  describe('override unknown token', () => {
+    it('should reject a token no loaded module provides', async () => {
+      await expect(TestApp.create(AppModule).override('MISSING', {}).compile()).rejects.toThrow(
+        '[Miia] override(MISSING): no loaded module provides MISSING - use provide() for a module-less test',
+      )
+    })
+  })
+
   describe('use() and useGuard()', () => {
     it('should apply global middleware', async () => {
       const mw: Middleware = async (ctx, next) => {
@@ -238,6 +317,34 @@ describe('TestApp', () => {
     it('should cleanup without errors', async () => {
       const app = await TestApp.create(AppModule).compile()
       await app.close()
+    })
+  })
+
+  describe('builder lifecycle', () => {
+    it('should reject builder calls after compile()', async () => {
+      const app = await TestApp.create(AppModule).compile()
+
+      expect(() => app.use(async (_ctx, next) => next())).toThrow('[Miia] TestApp: use() after compile()')
+      expect(() => app.override(UserService, {})).toThrow('[Miia] TestApp: override() after compile()')
+      expect(() => app.setGlobalPrefix('/api')).toThrow('[Miia] TestApp: setGlobalPrefix() after compile()')
+
+      await app.close()
+    })
+
+    it('should reject a second compile()', async () => {
+      const app = await TestApp.create(AppModule).compile()
+
+      await expect(app.compile()).rejects.toThrow('[Miia] TestApp: compile() after compile()')
+
+      await app.close()
+    })
+
+    it('should reject request(), resolve() and close() before compile()', async () => {
+      const app = TestApp.create(AppModule)
+
+      await expect(app.request('GET', '/users/')).rejects.toThrow('[Miia] TestApp: call compile() first')
+      expect(() => app.resolve(UserService)).toThrow('[Miia] TestApp: call compile() first')
+      await expect(app.close()).rejects.toThrow('[Miia] TestApp: call compile() first')
     })
   })
 })

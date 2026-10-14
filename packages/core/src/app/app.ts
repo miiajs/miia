@@ -16,6 +16,7 @@ import type { LoggerConfig, LoggerService } from '../logger.js'
 import { ConsoleLogger, Logger } from '../logger.js'
 import { CookieJar } from '../cookies.js'
 import { ModuleLoader } from './module-loader.js'
+import type { OverrideDescriptor } from './overrides.js'
 import type {
   CanActivate,
   ConfiguredModule,
@@ -111,8 +112,9 @@ export interface MiiaOptions {
    * (`/users`), and swagger's own endpoints stay at their configured `path`/
    * `uiPath`. Put the prefix into `servers` manually if the spec must carry it.
    *
-   * `register()` and `addRoute()` resolve routes eagerly, so the prefix is baked
-   * into the route table at registration time. Passing it here applies it to
+   * Controller routes are resolved when the module graph is processed (first
+   * `init()`, `app.get()` or `fetch()`), `addRoute()` routes on the call, and
+   * both bake the prefix into the route table. Passing it here applies it to
    * every route the app will ever register.
    */
   globalPrefix?: string
@@ -151,9 +153,10 @@ export class Miia {
   private globalMiddlewares: Middleware[] = []
   private globalGuards: Guard[] = []
   private moduleLoader: ModuleLoader
+  private pendingModules: (Constructor | ConfiguredModule | OverrideDescriptor)[] = []
+  private graphState: 'pending' | 'processed' | { error: unknown } = 'pending'
   private initialized = false
   private initPromise?: Promise<void>
-  private compiled = false
   private compiledGlobalPipeline?: Middleware
   private closeServer?: () => void | Promise<void>
   private logger: Logger
@@ -207,24 +210,25 @@ export class Miia {
   }
 
   use(...middlewares: Middleware[]): this {
+    this.assertNotInitialized('use')
     this.globalMiddlewares.push(...middlewares)
-    this.compiled = false
     return this
   }
 
   useGuard(...guards: Guard[]): this {
+    this.assertNotInitialized('useGuard')
     this.globalGuards.push(...guards)
-    this.compiled = false
     return this
   }
 
-  register(...modules: (Constructor | ConfiguredModule)[]): this {
-    this.moduleLoader.load(...modules)
-    this.compiled = false
+  register(...modules: (Constructor | ConfiguredModule | OverrideDescriptor)[]): this {
+    this.assertGraphPending('register')
+    this.pendingModules.push(...modules)
     return this
   }
 
   provide(...providers: ProviderDefinition[]): this {
+    this.assertGraphPending('provide')
     for (const provider of providers) {
       if (typeof provider === 'function') {
         this.container.register(provider, () => new provider(), 'singleton')
@@ -232,7 +236,6 @@ export class Miia {
         this.container.register(provider.token, provider.factory, provider.scope)
       }
     }
-    this.compiled = false
     return this
   }
 
@@ -242,18 +245,18 @@ export class Miia {
     handler: (ctx: RequestContext) => unknown,
     options: AddRouteOptions = {},
   ): this {
+    this.assertNotInitialized('addRoute')
     this.router.add(method, path, handler, options)
-    this.compiled = false
     return this
   }
 
   get<T>(token: Constructor<T> | string): T {
+    this.processGraph()
     return this.container.resolve<T>(token)
   }
 
   fetch = (req: Request, env?: unknown): Response | Promise<Response> => {
     if (!this.initialized) return this.initAndFetch(req, env)
-    if (!this.compiled) this.compilePipelines()
 
     const r = req as Request & { _pathname?: string; _search?: string }
     let pathname: string, search: string
@@ -265,7 +268,7 @@ export class Miia {
       pathname = parsed.pathname
       search = parsed.search
     }
-    const ctx = new Context(req, search, env, this.trustProxy)
+    const ctx = new Context(req, search, env, this.trustProxy, this.container)
 
     // Slow path: global middleware wraps router.match + per-route pipeline + handler.
     // Errors (including NotFoundException from router) bubble through the onion so
@@ -305,30 +308,33 @@ export class Miia {
             return this.finalizeResponse(value, ctx, req)
           })
           .catch((error) => this.handleError(error, req, ctx))
-          .finally(() => this.container.clearRequestScope())
       }
 
       // Inline JSON fast path
       if (result != null && !(result instanceof Response) && !ctx.res._modified && req.method !== 'HEAD') {
-        this.container.clearRequestScope()
         return new Response(JSON.stringify(result), JSON_RESPONSE_INIT)
       }
 
-      const response = this.finalizeResponse(result, ctx, req)
-      this.container.clearRequestScope()
-      return response
+      return this.finalizeResponse(result, ctx, req)
     } catch (error) {
-      this.container.clearRequestScope()
       return this.handleError(error, req, ctx)
     }
   }
 
   async init(): Promise<void> {
     if (this.initialized) return
-    return (this.initPromise ??= this.doInit())
+    if (this.initPromise === undefined) {
+      // Assigned before doInit() starts: constructors and the first onInit() run
+      // synchronously inside it, and must already see init() as begun.
+      const { promise, resolve } = Promise.withResolvers<void>()
+      this.initPromise = promise
+      resolve(this.doInit())
+    }
+    return this.initPromise
   }
 
   private async doInit(): Promise<void> {
+    this.processGraph()
     await this.container.initAll()
     this.compilePipelines()
     await this.container.bootstrapAll()
@@ -465,6 +471,44 @@ export class Miia {
 
   // ─── Private ─────────────────────────────────────────────────
 
+  /**
+   * Loads every registered module once, on the first `init()` / `get()` / `fetch()`.
+   * The state flips before `load()` runs, so a failed graph is never reloaded on top
+   * of the loader's partial state - every later call rethrows the first error.
+   */
+  private processGraph(): void {
+    const state = this.graphState
+    if (state === 'processed') return
+    if (state !== 'pending') throw state.error
+    this.graphState = 'processed'
+    try {
+      this.moduleLoader.load(...this.pendingModules)
+    } catch (error) {
+      this.graphState = { error }
+      throw error
+    }
+    this.pendingModules = []
+  }
+
+  private assertGraphPending(method: string): void {
+    if (this.graphState === 'pending') return
+    if (this.graphState === 'processed') {
+      throw new Error(
+        `[Miia] ${method}() after the module graph was processed (first init(), app.get() or fetch()) - ` +
+          'register all modules and providers before that',
+      )
+    }
+    throw new Error(`[Miia] ${method}() after the module graph failed to process (see the first error)`)
+  }
+
+  // initPromise, not initialized: a call made while init() is still awaiting hooks
+  // would otherwise pass and be lost, since nothing recompiles the pipelines later.
+  private assertNotInitialized(method: string): void {
+    if (this.initPromise !== undefined) {
+      throw new Error(`[Miia] ${method}() after init() - configure the app before init()/listen()`)
+    }
+  }
+
   private finalizeResponse(result: unknown, ctx: RequestContext, req: Request): Response {
     if (result instanceof Response) {
       if (req.method === 'HEAD') {
@@ -504,8 +548,6 @@ export class Miia {
       return this.finalizePipelineResult(rawResult, ctx, req)
     } catch (error) {
       return this.handleError(error, req, ctx)
-    } finally {
-      this.container.clearRequestScope()
     }
   }
 
@@ -543,13 +585,11 @@ export class Miia {
       return this.finalizePipelineResult(rawResult, ctx, req)
     } catch (error) {
       return this.handleError(error, req, ctx)
-    } finally {
-      this.container.clearRequestScope()
     }
   }
 
   // Shared tail for both handleWithPipeline and handleWithGlobalPipeline.
-  // Pure - does NOT touch the container (lifecycle owned by the caller's finally).
+  // Does not touch the container - request-scoped instances live on ctx and need no cleanup.
   private finalizePipelineResult(rawResult: unknown, ctx: RequestContext, req: Request): Response {
     // Response returned directly by handler
     if (rawResult instanceof Response) {
@@ -591,7 +631,6 @@ export class Miia {
     })
 
     this.router.compileAll(globalGuards)
-    this.compiled = true
   }
 
   private isLoggerService(value: LoggerService | LoggerConfig): value is LoggerService {
@@ -673,12 +712,15 @@ class Context implements RequestContext {
   private _trustProxy: string[] | false
   private _connInfo: ConnInfo | null = null
   private _cookieJar: CookieJar | null = null
+  private _container: Container
+  private _scope: Map<string | Constructor, unknown> | null = null
 
-  constructor(req: Request, search: string, env: unknown, trustProxy: string[] | false) {
+  constructor(req: Request, search: string, env: unknown, trustProxy: string[] | false, container: Container) {
     this.req = req
     this._search = search
     this._env = env
     this._trustProxy = trustProxy
+    this._container = container
   }
 
   get conn(): ConnInfo {
@@ -743,6 +785,10 @@ class Context implements RequestContext {
 
   _setBody(value: unknown): void {
     this._jsonPromise = Promise.resolve(value)
+  }
+
+  resolve<T>(token: Constructor<T> | string): T {
+    return this._container.resolveInRequest(token, (this._scope ??= new Map()))
   }
 }
 

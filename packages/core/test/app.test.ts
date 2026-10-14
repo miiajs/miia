@@ -1155,9 +1155,8 @@ describe('Miia Application', () => {
       @Module({ providers: [SharedService] })
       class ModuleB {}
 
-      expect(() => new Miia({ logger: false }).register(ModuleA, ModuleB)).toThrow(
-        '[Miia] Duplicate provider: SharedService is already registered',
-      )
+      const app = new Miia({ logger: false }).register(ModuleA, ModuleB)
+      expect(() => app.get(SharedService)).toThrow('[Miia] Duplicate provider: SharedService is already registered')
     })
   })
 

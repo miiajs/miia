@@ -1,2 +1,4 @@
 export { Miia } from './app.js'
 export type { MiiaOptions } from './app.js'
+export { OVERRIDE_KIND, overrideProvider, overrideModule, isOverride } from './overrides.js'
+export type { OverrideDescriptor } from './overrides.js'

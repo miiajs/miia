@@ -14,6 +14,9 @@ function createMockContext(overrides: Partial<RequestContext> = {}): RequestCont
     json: async <T = any>() => null as T,
     text: async () => '',
     _setBody: () => {},
+    resolve: () => {
+      throw new Error('not in test')
+    },
     ...overrides,
   }
 }
