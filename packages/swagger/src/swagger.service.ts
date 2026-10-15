@@ -1,6 +1,6 @@
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DiscoveryService, Injectable, RESOLVED_PREFIX, Router, getMeta, inject, type Constructor } from '@miiajs/core'
+import { DiscoveryService, Injectable, RESOLVED_PREFIX, Router, inject } from '@miiajs/core'
 import { createStaticHandler } from '@miiajs/serve-static'
 import { SpecBuilder, type DiscoveredController } from './builder/index.js'
 import { SWAGGER_OPTIONS } from './swagger.module.js'
@@ -57,11 +57,8 @@ export class SwaggerService {
   }
 
   private collectControllers(): DiscoveredController[] {
-    const result: DiscoveredController[] = []
-    for (const { ctor } of this.discovery.getSingletons()) {
-      const prefix = getMeta<string>(ctor, RESOLVED_PREFIX)
-      if (prefix !== undefined) result.push({ controller: ctor as Constructor, prefix })
-    }
-    return result
+    return this.discovery
+      .getClassesWithMeta<string>(RESOLVED_PREFIX)
+      .map(({ ctor, metadata }) => ({ controller: ctor, prefix: metadata }))
   }
 }

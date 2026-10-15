@@ -201,5 +201,12 @@ export interface MessageTransport {
   ): Promise<Subscription>
 
   onInit?(): Promise<void>
+  /**
+   * Stop consuming and wait for in-flight deliveries, within the transport's own drain budget. The app calls it on
+   * every singleton before any `onDestroy()`, so whatever `@On` handlers use has to keep working until `onShutdown()`
+   * returns and be released only in `onDestroy()`.
+   */
+  onShutdown?(): Promise<void>
+  /** Close connections. Runs after `onShutdown()`. */
   onDestroy?(): Promise<void>
 }

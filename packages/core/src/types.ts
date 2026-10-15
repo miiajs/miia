@@ -101,6 +101,11 @@ export interface FactoryProvider<T = unknown> {
   token: Token<T> | AbstractConstructor<T>
   factory: ((resolve: Resolve) => T) | (() => T)
   scope?: Scope
+  /**
+   * Singletons whose lifecycle hooks must run before this provider's. Needed only for a dependency the factory
+   * reaches lazily, after construction - a `resolve()` call inside the factory itself is already seen by the container.
+   */
+  deps?: readonly AnyToken[]
 }
 
 export type ProviderDefinition = Constructor | FactoryProvider

@@ -60,8 +60,10 @@ export class MongooseModule {
         } satisfies FactoryProvider,
         {
           token: connToken,
+          deps: [serviceToken],
           factory: (resolve) => {
-            // MongooseService.onInit runs after provider factories, so the Connection is looked up on first use
+            // MongooseService.onInit runs after provider factories, so the Connection is looked up on first use;
+            // deps orders its hooks before those of anything that injects the Connection
             return createLazyProxy<mongoose.Connection>(() => resolve(serviceToken).connection)
           },
         } satisfies FactoryProvider,

@@ -1,6 +1,6 @@
 import { describe, expect, it, spyOn } from 'bun:test'
 import { Schema } from 'mongoose'
-import { Miia, Module, overrideModule } from '@miiajs/core'
+import { Injectable, Miia, Module, inject, overrideModule } from '@miiajs/core'
 import type { FactoryProvider } from '@miiajs/core'
 import { MongooseModule } from '../src/mongoose.module.js'
 import { MongooseService } from '../src/mongoose.service.js'
@@ -299,6 +299,47 @@ describe('MongooseModule.register', () => {
       expect(args[0]).toContain('registered in connections')
     } finally {
       warnSpy.mockRestore()
+    }
+  })
+})
+
+describe('hook order', () => {
+  it('runs the hooks of a provider injecting mongooseConnection() inside the connection window', async () => {
+    const events: string[] = []
+    const onInit = spyOn(MongooseService.prototype, 'onInit').mockImplementation(async () => {
+      events.push('service.onInit')
+    })
+    const onDestroy = spyOn(MongooseService.prototype, 'onDestroy').mockImplementation(async () => {
+      events.push('service.onDestroy')
+    })
+    try {
+      @Injectable()
+      class UsersService {
+        connection = inject(mongooseConnection())
+
+        async onInit() {
+          events.push('user.onInit')
+        }
+
+        async onDestroy() {
+          events.push('user.onDestroy')
+        }
+      }
+
+      @Module({ providers: [UsersService] })
+      class UsersModule {}
+
+      // Imported before configure(), so without deps the consumer's hooks would come first
+      @Module({ imports: [UsersModule, MongooseModule.configure({ uri: 'mongodb://localhost/test' })] })
+      class Root {}
+
+      const app = createApp(Root)
+      await app.init()
+      await app.destroy()
+      expect(events).toEqual(['service.onInit', 'user.onInit', 'user.onDestroy', 'service.onDestroy'])
+    } finally {
+      onInit.mockRestore()
+      onDestroy.mockRestore()
     }
   })
 })

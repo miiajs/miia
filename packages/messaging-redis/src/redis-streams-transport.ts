@@ -75,7 +75,7 @@ export interface RedisStreamsTransportOptions {
    */
   socketTimeoutMs?: number
   /**
-   * Budget `onDestroy()` gives the running housekeeping pass and the in-flight handlers together, before forcing
+   * Budget `onShutdown()` gives the running housekeeping pass and the in-flight handlers together, before forcing
    * cleanup. Default 5000ms, 0 skips the drain. A timed-out handler's entry stays in the PEL and is redelivered once
    * it crosses the horizon, so this sizes duplicate work, not loss.
    */
@@ -110,7 +110,7 @@ interface ActiveSub {
   group: string
   mode: DispatchMode
   concurrency: number
-  /** Group name carries a per-process suffix: `XGROUP DESTROY` on shutdown. */
+  /** Group name carries a per-process suffix: recreated at `$`, destroyed on shutdown through `broadcastGroups`. */
   isBroadcast: boolean
   /** The owner a broadcast group's name ends in: its liveness key and orphan cleanup. Unset when the name has none. */
   aliveOwner?: string
@@ -200,6 +200,15 @@ export class RedisStreamsTransport implements MessageTransport {
   /** The heartbeat currently in flight, if any. Never rejects. */
   private heartbeatTick?: Promise<void>
   private stopping = false
+  /** The shutdown drain, started once - `onDestroy()` awaits the same one. */
+  private shutdown?: Promise<void>
+  /** End of the one drain budget, which the heartbeat wait in `onDestroy()` shares. */
+  private drainDeadline = 0
+  /**
+   * `${topic}\0${group}` of every broadcast group this transport subscribed to. `onDestroy()` destroys them all,
+   * unsubscribed ones included: the bus unsubscribes in its `onShutdown()`, before this transport gets to them.
+   */
+  private broadcastGroups = new Map<string, { topic: string; group: string }>()
   private logger = new Logger('RedisStreamsTransport')
   private readonly consumerName: string
   private readonly retryIntervalMs: number
@@ -380,53 +389,66 @@ export class RedisStreamsTransport implements MessageTransport {
     }
   }
 
-  async onDestroy(): Promise<void> {
+  /** Stop consuming and drain. Not `async`: every call, `onDestroy()`'s included, gets the one drain. */
+  onShutdown(): Promise<void> {
+    return (this.shutdown ??= this.stopAndDrain())
+  }
+
+  private async stopAndDrain(): Promise<void> {
     this.stopping = true
     if (this.retryTimer) clearInterval(this.retryTimer)
     if (this.aliveRecheck) clearTimeout(this.aliveRecheck)
     this.aliveRecheck = undefined
 
     // Snapshot before clearing - the lane clients are still needed below. Order matters: abort so the loop's catch
-    // sees it, disconnect to break the in-flight BLOCK, drain the running pass and its handlers on ONE budget (their
-    // XACK / Lua still go through the live pubClient), stop the heartbeat and the liveness refresh only after that
-    // drain so entries of handlers still finishing stay invisible to other replicas and broadcast groups stay out of
-    // their orphan cleanup, then XGROUP DESTROY broadcast groups before the quit they need.
+    // sees it, disconnect to break the in-flight BLOCK, then drain the running pass and its handlers on ONE budget
+    // (their XACK / Lua still go through the live pubClient). The heartbeat and the liveness refresh run on: they
+    // follow `inFlight` and `aliveOwners`, not `subs`.
     const subsSnapshot = this.subs
     this.subs = []
     for (const sub of subsSnapshot) sub.abort.abort()
     for (const sub of subsSnapshot) for (const lane of sub.lanes) this.closeLane(lane)
 
-    const deadline = Date.now() + this.drainTimeoutMs
+    this.drainDeadline = Date.now() + this.drainTimeoutMs
     if (this.drainTimeoutMs > 0) {
-      if (this.retryPass && !(await this.awaitUntil(this.retryPass, deadline))) {
+      if (this.retryPass && !(await this.awaitUntil(this.retryPass, this.drainDeadline))) {
         this.logger.warn('Drain timeout: housekeeping pass still running')
       }
-      await this.waitForDrain(deadline)
+      await this.waitForDrain(this.drainDeadline)
     }
+  }
 
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
-    if (this.aliveTimer) clearInterval(this.aliveTimer)
-    this.aliveTimer = undefined
-    // Only XCLAIM round trips, but `maxRetriesPerRequest: null` lets one queue forever on a wedged
-    // connection, so it shares the drain ceiling rather than making shutdown unbounded.
-    if (this.heartbeatTick) await this.awaitUntil(this.heartbeatTick, deadline)
+  async onDestroy(): Promise<void> {
+    try {
+      await this.onShutdown()
+    } finally {
+      // Only after the drain: the heartbeat keeps entries of handlers still finishing invisible to other replicas, the
+      // liveness refresh keeps broadcast groups out of their orphan cleanup. Then XGROUP DESTROY broadcast groups
+      // before the quit they need.
+      if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
+      if (this.aliveTimer) clearInterval(this.aliveTimer)
+      this.aliveTimer = undefined
+      // Only XCLAIM round trips, but `maxRetriesPerRequest: null` lets one queue forever on a wedged
+      // connection, so it shares the drain ceiling rather than making shutdown unbounded.
+      if (this.heartbeatTick) await this.awaitUntil(this.heartbeatTick, this.drainDeadline)
 
-    for (const sub of subsSnapshot) {
-      if (!sub.isBroadcast) continue
-      await this.client
-        .xgroup('DESTROY', sub.topic, sub.group)
-        .catch((err) => this.logger.warn(`xgroup destroy failed for ${sub.group} on ${sub.topic}: ${String(err)}`))
+      for (const { topic, group } of this.broadcastGroups.values()) {
+        await this.client
+          .xgroup('DESTROY', topic, group)
+          .catch((err) => this.logger.warn(`xgroup destroy failed for ${group} on ${topic}: ${String(err)}`))
+      }
+      this.broadcastGroups.clear()
+
+      if (this.ownsClient) this.retireConnection(this.client)
+      if (this.ownsClient && this.client.status !== 'end') {
+        await this.client.quit().catch(() => {
+          /* swallow quit errors - connection already closing */
+        })
+      }
+      // Last, so a channel that recovered during the drain still gets to say so.
+      this.failures.clear()
+      this.failingClients.clear()
     }
-
-    if (this.ownsClient) this.retireConnection(this.client)
-    if (this.ownsClient && this.client.status !== 'end') {
-      await this.client.quit().catch(() => {
-        /* swallow quit errors - connection already closing */
-      })
-    }
-    // Last, so a channel that recovered during the drain still gets to say so.
-    this.failures.clear()
-    this.failingClients.clear()
   }
 
   /**
@@ -792,6 +814,8 @@ export class RedisStreamsTransport implements MessageTransport {
     handler: (envelope: MessageEnvelope) => Promise<HandlerResult>,
     options: SubscribeOptions,
   ): Promise<Subscription> {
+    // Its group and lanes would outlive the quit in `onDestroy()`.
+    if (this.stopping) throw new Error('[messaging-redis] subscribe() after shutdown started')
     const group = options.group ?? 'default'
     const concurrency = options.concurrency ?? 1
     // Defensive default - the bus resolves and validates `mode` upstream, but direct callers may omit it.
@@ -809,6 +833,7 @@ export class RedisStreamsTransport implements MessageTransport {
 
     const initialPosition = options.initialPosition ?? 'latest'
     await this.ensureGroup(topic, group, initialPosition, isBroadcast)
+    if (isBroadcast) this.broadcastGroups.set(`${topic}\0${group}`, { topic, group })
     await this.seedLastRead(topic, group)
 
     // Lane fan-out: batch reads `COUNT=concurrency` on one lane (head-of-line within the batch), sliding spawns
@@ -947,7 +972,7 @@ export class RedisStreamsTransport implements MessageTransport {
   }
 
   /**
-   * Register a delivery so `onDestroy()` drains it - housekeeping redeliveries included, they are the ones this
+   * Register a delivery so `onShutdown()` drains it - housekeeping redeliveries included, they are the ones this
    * design adds. The returned promise never rejects, so callers can `race` it safely.
    */
   private trackDelivery(work: Promise<void>): Promise<void> {

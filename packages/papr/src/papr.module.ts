@@ -64,8 +64,10 @@ export class PaprModule {
         } satisfies FactoryProvider,
         {
           token: dbToken,
+          deps: [serviceToken],
           factory: (resolve) => {
-            // PaprService.onInit runs after provider factories, so the Db / Model is looked up on first use
+            // PaprService.onInit runs after provider factories, so the Db / Model is looked up on first use;
+            // deps orders its hooks before those of anything that injects the Db
             return createLazyProxy<Db>(() => resolve(serviceToken).db)
           },
         } satisfies FactoryProvider,

@@ -18,7 +18,7 @@ export { Resolver } from './resolver.js'
 
 // Discovery
 export { DiscoveryService } from './discovery/index.js'
-export type { DiscoveredMethod, DiscoverableMethodMeta } from './discovery/index.js'
+export type { DiscoveredClass, DiscoveredMethod, DiscoverableMethodMeta } from './discovery/index.js'
 
 // Decorators
 export { Injectable, Controller, Module } from './decorators/index.js'

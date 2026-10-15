@@ -1,5 +1,5 @@
 import { describe, expect, it, spyOn } from 'bun:test'
-import { Miia, Module, overrideModule } from '@miiajs/core'
+import { Injectable, Miia, Module, inject, overrideModule } from '@miiajs/core'
 import type { FactoryProvider } from '@miiajs/core'
 import { PaprModule } from '../src/papr.module.js'
 import { PaprService } from '../src/papr.service.js'
@@ -255,6 +255,47 @@ describe('PaprModule.register', () => {
       expect(args[0]).toContain('registered in connections')
     } finally {
       warnSpy.mockRestore()
+    }
+  })
+})
+
+describe('hook order', () => {
+  it('runs the hooks of a provider injecting paprDb() inside the connection window', async () => {
+    const events: string[] = []
+    const onInit = spyOn(PaprService.prototype, 'onInit').mockImplementation(async () => {
+      events.push('service.onInit')
+    })
+    const onDestroy = spyOn(PaprService.prototype, 'onDestroy').mockImplementation(async () => {
+      events.push('service.onDestroy')
+    })
+    try {
+      @Injectable()
+      class UsersService {
+        db = inject(paprDb())
+
+        async onInit() {
+          events.push('user.onInit')
+        }
+
+        async onDestroy() {
+          events.push('user.onDestroy')
+        }
+      }
+
+      @Module({ providers: [UsersService] })
+      class UsersModule {}
+
+      // Imported before configure(), so without deps the consumer's hooks would come first
+      @Module({ imports: [UsersModule, PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } })] })
+      class Root {}
+
+      const app = createApp(Root)
+      await app.init()
+      await app.destroy()
+      expect(events).toEqual(['service.onInit', 'user.onInit', 'user.onDestroy', 'service.onDestroy'])
+    } finally {
+      onInit.mockRestore()
+      onDestroy.mockRestore()
     }
   })
 })

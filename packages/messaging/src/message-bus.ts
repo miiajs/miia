@@ -129,6 +129,8 @@ export class MessageBus {
 
     // `[topic, group] -> resolved position`: the first handler to create a shared group decides where it starts.
     const groupPositions = new Map<string, { position: string; handler: string }>()
+    // Class -> the instance its handlers were found on: a class provided twice would subscribe twice.
+    const handlerInstances = new Map<Constructor, object>()
 
     for (const h of handlers) {
       const meta = h.metadata
@@ -236,6 +238,15 @@ export class MessageBus {
         broadcast: meta.broadcast,
       })
 
+      const holder = handlerInstances.get(h.ctor)
+      if (holder !== undefined && holder !== h.instance) {
+        throw new Error(
+          `[messaging] @On on ${h.ctor.name}.${h.methodName} is found on two instances - provide ${h.ctor.name} ` +
+            `once: both would subscribe as consumer group '${group}'`,
+        )
+      }
+      handlerInstances.set(h.ctor, h.instance)
+
       // Only reachable with an explicit group - auto-derived groups are unique per handler.
       const pairKey = JSON.stringify([meta.topic, group])
       const position = describeInitialPosition(initialPosition)
@@ -304,7 +315,7 @@ export class MessageBus {
     await this.transport.publish(envelope)
   }
 
-  async onDestroy(): Promise<void> {
+  async onShutdown(): Promise<void> {
     for (const sub of this.subscriptions) {
       await sub.unsubscribe()
     }

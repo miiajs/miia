@@ -15,7 +15,7 @@ export const DEFAULT_BLOCK_MS = 5000
 export const DEFAULT_SOCKET_TIMEOUT_MS = 10000
 /** Longest delay `setTimeout` honours. Past it - like NaN or a negative - the timer fires at once. */
 export const MAX_TIMER_MS = 2_147_483_647
-/** Default budget `onDestroy()` gives the running pass plus its in-flight handlers. */
+/** Default budget `onShutdown()` gives the running pass plus its in-flight handlers. */
 export const DEFAULT_DRAIN_TIMEOUT_MS = 5000
 /** Floor for the heartbeat interval derived from `horizon / 2`. */
 export const MIN_HEARTBEAT_INTERVAL_MS = 50

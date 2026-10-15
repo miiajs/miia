@@ -1,4 +1,4 @@
-import type { AbstractConstructor, FactoryProvider, Resolve, Scope, Token } from './types.js'
+import type { AbstractConstructor, AnyToken, FactoryProvider, Resolve, Scope, Token } from './types.js'
 
 /**
  * Creates a typed DI token. Every call returns a new token, even for the same name.
@@ -13,7 +13,7 @@ export function createToken<T>(name: string, options?: { hint?: string }): Token
 export function provider<T>(
   token: Token<T> | AbstractConstructor<T>,
   factory: (resolve: Resolve) => T,
-  options?: { scope?: Scope },
+  options?: { scope?: Scope; deps?: readonly AnyToken[] },
 ): FactoryProvider<T> {
-  return { token, factory, scope: options?.scope }
+  return { token, factory, scope: options?.scope, deps: options?.deps }
 }

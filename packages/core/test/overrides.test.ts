@@ -78,7 +78,7 @@ describe('override descriptors', () => {
   })
 
   it('replace the built-in DiscoveryService before controllers are built', () => {
-    const fake = { getSingletons: () => [] }
+    const fake = { getClassesWithMeta: () => [], getMethodsWithMeta: () => [] }
 
     @Controller('/c')
     class UsesDiscovery {

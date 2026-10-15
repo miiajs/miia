@@ -1,5 +1,12 @@
 const LIFECYCLE_HOOKS = new Set<string | symbol>(['onInit', 'onReady', 'onShutdown', 'onDestroy'])
 
+const lazyProxies = new WeakSet<object>()
+
+/** Whether `value` came from `createLazyProxy()`. Checked without touching the proxy's traps. */
+export function isLazyProxy(value: object): boolean {
+  return lazyProxies.has(value)
+}
+
 /**
  * Returns a proxy that calls `get` on first use and forwards to the result from then on - for a provider factory whose
  * real value only exists after another provider's `onInit()`, like a database handle or a model.
@@ -48,5 +55,7 @@ export function createLazyProxy<T extends object>(get: () => T, options?: { cons
   }
 
   // Only a function target can be constructed
-  return new Proxy((constructable ? function () {} : {}) as T, handler)
+  const proxy = new Proxy((constructable ? function () {} : {}) as T, handler)
+  lazyProxies.add(proxy)
+  return proxy
 }

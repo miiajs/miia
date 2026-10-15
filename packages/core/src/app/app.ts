@@ -1,5 +1,5 @@
 import { applyBodyCeiling, DEFAULT_BODY_LIMIT } from '../body-limit.js'
-import { Container } from '../di-container.js'
+import { Container, type ShutdownFailure } from '../di-container.js'
 import { DiscoveryService } from '../discovery/index.js'
 import { type AddRouteOptions, type GlobalGuardBinding, type MatchResult, Router } from '../router.js'
 import { compose, guardToMiddleware } from '../middleware.js'
@@ -51,6 +51,9 @@ export interface MiiaOptions {
    *
    * On signal: logs `Received <signal>, shutting down gracefully...`,
    * awaits `destroy()`, exits with code 0 (or 1 if destroy throws).
+   * `destroy()` closes the server, then runs `onShutdown()` on every singleton,
+   * then `onDestroy()`, both in reverse dependency order; a failing step does
+   * not stop the rest - each failure is logged and `destroy()` throws at the end.
    * Concurrent signals are guarded - only the first one initiates shutdown.
    *
    * Notes:
@@ -139,9 +142,10 @@ const BODY_HEADERS_TO_STRIP = ['content-type', 'content-length', 'content-encodi
  *
  * **Graceful shutdown.** When `listen()` is called, Miia registers SIGTERM,
  * SIGINT, and SIGHUP handlers that gracefully call `destroy()` and
- * `process.exit(0)`. This ensures `onDestroy` lifecycle hooks (database
- * disconnects, broker cleanup, drain) run on Ctrl+C and on container
- * orchestrator stops (K8s, Docker, systemd).
+ * `process.exit(0)`. This ensures the shutdown hooks run on Ctrl+C and on
+ * container orchestrator stops (K8s, Docker, systemd): `onShutdown()` (stop
+ * taking work, drain) on every singleton, then `onDestroy()` (database
+ * disconnects, broker cleanup), both in reverse dependency order.
  *
  * For embedded use cases (serverless via `app.fetch`, multi-Miia processes,
  * custom bootstrap), opt out via `new Miia({ shutdownHooks: false })` and
@@ -236,7 +240,7 @@ export class Miia {
       if (typeof provider === 'function') {
         this.container.register(provider, () => new provider(), 'singleton')
       } else {
-        this.container.register(provider.token, provider.factory, provider.scope)
+        this.container.register(provider.token, provider.factory, provider.scope, provider.deps)
       }
     }
     return this
@@ -338,6 +342,7 @@ export class Miia {
 
   private async doInit(): Promise<void> {
     this.processGraph()
+    this.registerGlobalGuards()
     await this.container.initAll()
     this.compilePipelines()
     await this.container.bootstrapAll()
@@ -419,9 +424,31 @@ export class Miia {
     // Allow re-registration on subsequent listen() (rare reload patterns).
     this.shutdownHandlersRegistered = false
 
-    await this.closeServer?.()
-    await this.container.destroyAll()
-    this.logger.log('Shutdown complete')
+    const failures: ShutdownFailure[] = []
+    // Taken before the call: a second destroy() must not close the server again.
+    const closeServer = this.closeServer
+    this.closeServer = undefined
+    try {
+      await closeServer?.()
+    } catch (error) {
+      failures.push({ source: 'closeServer()', error })
+    }
+    failures.push(...(await this.container.destroyAll()))
+    if (failures.length === 0) {
+      this.logger.log('Shutdown complete')
+      return
+    }
+    for (const { source, error } of failures) {
+      this.logger.error(
+        `${source} failed during shutdown`,
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
+      )
+    }
+    if (failures.length === 1) throw failures[0]!.error
+    throw new AggregateError(
+      failures.map((f) => f.error),
+      `[Miia] Shutdown finished with ${failures.length} errors`,
+    )
   }
 
   private registerShutdownHandlers(): void {
@@ -453,7 +480,8 @@ export class Miia {
         await this.destroy()
         process.exit(0)
       } catch (err) {
-        this.logger.error(`Shutdown failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`)
+        // Message only: destroy() has already logged each failure with its stack.
+        this.logger.error(`Shutdown failed: ${err instanceof Error ? err.message : String(err)}`)
         process.exit(1)
       }
     }
@@ -621,13 +649,17 @@ export class Miia {
     return ctx.res.build()
   }
 
+  /** Global guards not declared in a module are built with every other singleton, before any onInit(). */
+  private registerGlobalGuards(): void {
+    for (const guardCtor of this.globalGuards) {
+      if (!this.container.has(guardCtor)) this.container.register(guardCtor, () => new guardCtor(), 'singleton')
+    }
+  }
+
   private compilePipelines(): void {
     this.compiledGlobalPipeline = this.globalMiddlewares.length > 0 ? compose(this.globalMiddlewares) : undefined
 
     const globalGuards: GlobalGuardBinding[] = this.globalGuards.map((guardCtor) => {
-      if (!this.container.has(guardCtor)) {
-        this.container.register(guardCtor, () => new guardCtor(), 'singleton')
-      }
       const instance = this.container.resolve<CanActivate>(guardCtor)
       const middleware = guardToMiddleware((ctx) => instance.canActivate(ctx))
       return { guardClass: guardCtor, middleware }

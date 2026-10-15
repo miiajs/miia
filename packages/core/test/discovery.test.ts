@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
+import type { CanActivate } from '@miiajs/core'
 import {
   Controller,
+  createClassDecorator,
+  createLazyProxy,
   createMethodDecorator,
   DiscoveryService,
   Get,
@@ -8,50 +11,78 @@ import {
   Injectable,
   Miia,
   Module,
+  provider,
   RESOLVED_PREFIX,
   Router,
   inject,
   pushMeta,
+  setMeta,
 } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { Container } from '../src/di-container.js'
 import { createToken } from '../src/di-token.js'
+// The Container from src only recognises proxies made by the src module
+import { createLazyProxy as createSrcLazyProxy } from '../src/utils/lazy-proxy.js'
 
 // ─── Container-level tests ──────────────────────────────────────
 
-describe('Container.getSingletonInstances', () => {
+describe('Container.singletonInstances', () => {
   let c: Container
 
   beforeEach(() => {
     c = new Container()
   })
 
-  it('returns instantiated singletons keyed by class constructor', async () => {
+  it('returns constructed singletons in registration order', async () => {
     class A {}
     class B {}
     c.registerClass(A)
     c.registerClass(B)
     await c.initAll()
 
-    const list = c.getSingletonInstances()
+    const list = c.singletonInstances()
     expect(list).toHaveLength(2)
-    expect(list.map((e) => e.ctor)).toContain(A)
-    expect(list.map((e) => e.ctor)).toContain(B)
-    expect(list[0]?.instance).toBeInstanceOf(list[0]!.ctor)
+    expect(list[0]).toBeInstanceOf(A)
+    expect(list[1]).toBeInstanceOf(B)
   })
 
-  it('filters out token-object registrations', async () => {
-    class A {}
-    c.registerClass(A)
-    c.register(createToken('Options'), () => ({ value: 1 }))
+  it('includes an instance registered under a token object', async () => {
+    class Options {}
+    const options = new Options()
+    c.register(createToken<Options>('Options'), () => options)
     await c.initAll()
 
-    const list = c.getSingletonInstances()
+    const list = c.singletonInstances()
     expect(list).toHaveLength(1)
-    expect(list[0]?.ctor).toBe(A)
+    expect(list[0]).toBe(options)
   })
 
-  it('filters out transient and request providers', async () => {
+  it('lists an instance registered under two tokens once', async () => {
+    class Shared {}
+    c.registerClass(Shared)
+    c.register(createToken<Shared>('SharedAlias'), (r) => r(Shared))
+    await c.initAll()
+
+    const list = c.singletonInstances()
+    expect(list).toHaveLength(1)
+    expect(list[0]).toBe(c.resolve(Shared))
+  })
+
+  it('skips null, primitives and functions', async () => {
+    class A {}
+    c.registerClass(A)
+    c.register(createToken('Nothing'), () => null)
+    c.register(createToken('Name'), () => 'miia')
+    c.register(createToken('Port'), () => 3000)
+    c.register(createToken('Callback'), () => function callback() {})
+    await c.initAll()
+
+    const list = c.singletonInstances()
+    expect(list).toHaveLength(1)
+    expect(list[0]).toBeInstanceOf(A)
+  })
+
+  it('skips transient and request providers', async () => {
     class Singleton {}
     class Transient {}
     class Request {}
@@ -60,16 +91,32 @@ describe('Container.getSingletonInstances', () => {
     c.registerClass(Request, 'request')
     await c.initAll()
 
-    const list = c.getSingletonInstances()
+    const list = c.singletonInstances()
     expect(list).toHaveLength(1)
-    expect(list[0]?.ctor).toBe(Singleton)
+    expect(list[0]).toBeInstanceOf(Singleton)
   })
 
-  it('filters out singletons that have not been instantiated yet', () => {
+  it('skips singletons that have not been constructed yet', () => {
     class A {}
     c.registerClass(A)
     // no initAll() / resolve() - instance is undefined
-    expect(c.getSingletonInstances()).toHaveLength(0)
+    expect(c.singletonInstances()).toHaveLength(0)
+  })
+
+  it('skips a lazy proxy, before and after its first use', async () => {
+    class Target {
+      value = 1
+    }
+    const LAZY = createToken<Target>('LazyTarget')
+    c.registerClass(Target)
+    c.register(LAZY, (r) => createSrcLazyProxy(() => r(Target)))
+    await c.initAll()
+
+    expect(c.singletonInstances()).toHaveLength(1)
+    expect(c.resolve(LAZY).value).toBe(1)
+    const list = c.singletonInstances()
+    expect(list).toHaveLength(1)
+    expect(list[0]).toBe(c.resolve(Target))
   })
 })
 
@@ -163,6 +210,12 @@ const On = createMethodDecorator<[event: string]>((_target, ctx, event) => {
   pushMeta(ctx.metadata!, ON, { event, handlerName: ctx.name as string } satisfies OnMeta)
 })
 
+const TAG = Symbol('miia:test:tag')
+
+const Tag = createClassDecorator<[name: string]>((_target, ctx, name) => {
+  setMeta(ctx.metadata!, TAG, name)
+})
+
 type Handler = (payload: unknown) => void | Promise<void>
 
 @Injectable()
@@ -244,17 +297,36 @@ describe('DiscoveryService', () => {
     await app.close()
   })
 
-  it('getSingletons returns providers AND controllers', async () => {
-    const app = await TestApp.create(TestAppModule).compile()
+  it('getClassesWithMeta finds providers and controllers whose class carries the key', async () => {
+    @Tag('service')
+    @Injectable()
+    class TaggedService {}
 
-    const discovery = app.resolve(DiscoveryService)
-    const singletons = discovery.getSingletons()
-    const ctors = singletons.map((s) => s.ctor)
+    @Tag('controller')
+    @Controller('/tagged')
+    class TaggedController {
+      @Get('/')
+      get() {
+        return 'ok'
+      }
+    }
 
-    expect(ctors).toContain(EventBus)
-    expect(ctors).toContain(UserEventsService)
-    expect(ctors).toContain(AuditService)
-    expect(ctors).toContain(PingController)
+    @Injectable()
+    class Untagged {}
+
+    @Module({ controllers: [TaggedController], providers: [TaggedService, Untagged] })
+    class M {}
+
+    const app = await TestApp.create(M).compile()
+
+    const found = app.resolve(DiscoveryService).getClassesWithMeta<string>(TAG)
+    expect(found).toHaveLength(2)
+    const service = found.find((f) => f.ctor === TaggedService)
+    const controller = found.find((f) => f.ctor === TaggedController)
+    expect(service?.instance).toBe(app.resolve(TaggedService))
+    expect(service?.metadata).toBe('service')
+    expect(controller?.instance).toBe(app.resolve(TaggedController))
+    expect(controller?.metadata).toBe('controller')
 
     await app.close()
   })
@@ -288,7 +360,7 @@ describe('DiscoveryService', () => {
 
   it('can be overridden via TestApp.override', async () => {
     const fakeDiscovery = {
-      getSingletons: () => [],
+      getClassesWithMeta: () => [],
       getMethodsWithMeta: () => [],
     }
 
@@ -296,7 +368,219 @@ describe('DiscoveryService', () => {
 
     const resolved = app.resolve(DiscoveryService)
     expect(resolved).toBe(fakeDiscovery as unknown as DiscoveryService)
-    expect(resolved.getSingletons()).toEqual([])
+    expect(resolved.getClassesWithMeta(TAG)).toEqual([])
+
+    await app.close()
+  })
+
+  it('finds a handler class behind a factory provider under a token object', async () => {
+    class FactoryHandlers {
+      received: unknown[] = []
+
+      @On('factory.fired')
+      onFired(payload: unknown) {
+        this.received.push(payload)
+      }
+    }
+    const HANDLERS = createToken<FactoryHandlers>('FactoryHandlers')
+
+    @Module({ providers: [EventBus, provider(HANDLERS, () => new FactoryHandlers())] })
+    class M {}
+
+    const app = await TestApp.create(M).compile()
+
+    const found = app.resolve(DiscoveryService).getMethodsWithMeta<OnMeta>(ON)
+    expect(found).toHaveLength(1)
+    expect(found[0]?.ctor).toBe(FactoryHandlers)
+    expect(found[0]?.instance).toBe(app.resolve(HANDLERS))
+
+    await app.resolve(EventBus).emit('factory.fired', { id: 1 })
+    expect(app.resolve(HANDLERS).received).toEqual([{ id: 1 }])
+
+    await app.close()
+  })
+
+  it('returns one entry for an instance registered under two tokens', async () => {
+    @Tag('shared')
+    @Injectable()
+    class SharedHandlers {
+      @On('shared.fired')
+      onFired() {}
+    }
+    const ALIAS = createToken<SharedHandlers>('SharedAlias')
+
+    @Module({ providers: [SharedHandlers, provider(ALIAS, (r) => r(SharedHandlers))] })
+    class M {}
+
+    const app = await TestApp.create(M).compile()
+    const discovery = app.resolve(DiscoveryService)
+
+    expect(app.resolve(ALIAS)).toBe(app.resolve(SharedHandlers))
+    expect(discovery.getMethodsWithMeta<OnMeta>(ON)).toHaveLength(1)
+    expect(discovery.getClassesWithMeta(TAG)).toHaveLength(1)
+
+    await app.close()
+  })
+
+  it('does not find a plain-object override, finds a named subclass override', async () => {
+    @Tag('mail')
+    @Injectable()
+    class MailHandler {
+      @On('mail.sent')
+      onSent() {}
+    }
+
+    class FakeMailHandler extends MailHandler {}
+
+    @Module({ providers: [MailHandler] })
+    class M {}
+
+    const mocked = await TestApp.create(M)
+      .override(MailHandler, { onSent() {} })
+      .compile()
+    expect(mocked.resolve(DiscoveryService).getMethodsWithMeta(ON)).toEqual([])
+    expect(mocked.resolve(DiscoveryService).getClassesWithMeta(TAG)).toEqual([])
+    await mocked.close()
+
+    const subclassed = await TestApp.create(M).override(MailHandler, new FakeMailHandler()).compile()
+    const methods = subclassed.resolve(DiscoveryService).getMethodsWithMeta<OnMeta>(ON)
+    expect(methods).toHaveLength(1)
+    expect(methods[0]?.ctor).toBe(FakeMailHandler)
+    expect(methods[0]?.instance).toBe(subclassed.resolve(MailHandler))
+    expect(methods[0]?.methodName).toBe('onSent')
+    const classes = subclassed.resolve(DiscoveryService).getClassesWithMeta<string>(TAG)
+    expect(classes).toHaveLength(1)
+    expect(classes[0]?.ctor).toBe(FakeMailHandler)
+    expect(classes[0]?.metadata).toBe('mail')
+    await subclassed.close()
+  })
+
+  it('skips a lazy proxy and does not resolve it - only its registered target is found', async () => {
+    @Injectable()
+    class LazyTarget {
+      value = 1
+
+      @On('lazy.fired')
+      onFired() {}
+    }
+    const LAZY = createToken<LazyTarget>('LazyTarget')
+    let resolved = 0
+
+    @Module({
+      providers: [
+        LazyTarget,
+        provider(LAZY, (r) =>
+          createLazyProxy(() => {
+            resolved++
+            return r(LazyTarget)
+          }),
+        ),
+      ],
+    })
+    class M {}
+
+    const app = await TestApp.create(M).compile()
+    const discovery = app.resolve(DiscoveryService)
+
+    expect(discovery.getMethodsWithMeta(ON)).toHaveLength(1)
+    expect(resolved).toBe(0)
+
+    expect(app.resolve(LAZY).value).toBe(1)
+    expect(resolved).toBe(1)
+    const found = discovery.getMethodsWithMeta(ON)
+    expect(found).toHaveLength(1)
+    expect(found[0]?.instance).toBe(app.resolve(LazyTarget))
+
+    await app.close()
+  })
+
+  it('skips providers whose value is null, a string or a number', async () => {
+    @Module({
+      providers: [
+        UserEventsService,
+        provider(createToken<null>('Nothing'), () => null),
+        provider(createToken<string>('Name'), () => 'miia'),
+        provider(createToken<number>('Port'), () => 3000),
+      ],
+    })
+    class M {}
+
+    const app = await TestApp.create(M).compile()
+    const discovery = app.resolve(DiscoveryService)
+
+    const methods = discovery.getMethodsWithMeta<OnMeta>(ON).map((f) => f.methodName)
+    expect(methods.sort()).toEqual(['onUserCreated', 'onUserDeleted'])
+    expect(discovery.getClassesWithMeta(TAG)).toEqual([])
+
+    await app.close()
+  })
+
+  it('throws when called before every provider is constructed', async () => {
+    @Injectable()
+    class EagerScanner {
+      found = inject(DiscoveryService).getMethodsWithMeta(ON)
+    }
+
+    @Module({ providers: [EagerScanner] })
+    class M {}
+
+    await expect(TestApp.create(M).compile()).rejects.toThrow(
+      '[Miia] DiscoveryService.getMethodsWithMeta() was called before every provider was constructed - ' +
+        'call it from onReady() (or onInit())',
+    )
+
+    const app = new Miia({ logger: false }).register(TestAppModule)
+    expect(() => app.get(DiscoveryService).getClassesWithMeta(TAG)).toThrow(
+      'DiscoveryService.getClassesWithMeta() was called before every provider was constructed',
+    )
+    await app.destroy()
+  })
+
+  it('works from onInit()', async () => {
+    @Injectable()
+    class InitScanner {
+      private discovery = inject(DiscoveryService)
+      methods: string[] = []
+
+      async onInit() {
+        this.methods = this.discovery.getMethodsWithMeta<OnMeta>(ON).map((f) => f.methodName)
+      }
+    }
+
+    @Module({ providers: [InitScanner, UserEventsService] })
+    class M {}
+
+    const app = await TestApp.create(M).compile()
+
+    expect(app.resolve(InitScanner).methods.sort()).toEqual(['onUserCreated', 'onUserDeleted'])
+
+    await app.close()
+  })
+
+  it('finds a global guard registered only through useGuard() from onInit()', async () => {
+    @Tag('guard')
+    class TaggedGuard implements CanActivate {
+      canActivate() {
+        return true
+      }
+    }
+
+    @Injectable()
+    class GuardScanner {
+      private discovery = inject(DiscoveryService)
+      found: unknown[] = []
+
+      async onInit() {
+        this.found = this.discovery.getClassesWithMeta(TAG).map((f) => f.ctor)
+      }
+    }
+
+    @Module({ providers: [GuardScanner] })
+    class M {}
+
+    const app = await TestApp.create(M).useGuard(TaggedGuard).compile()
+
+    expect(app.resolve(GuardScanner).found).toEqual([TaggedGuard])
 
     await app.close()
   })
@@ -390,14 +674,11 @@ describe('RESOLVED_PREFIX metadata', () => {
     const app = await TestApp.create(RootModule).compile()
     const discovery = app.resolve(DiscoveryService)
 
-    const controllers: Array<{ ctor: unknown; prefix: string }> = []
-    for (const { ctor } of discovery.getSingletons()) {
-      const prefix = getMeta<string>(ctor, RESOLVED_PREFIX)
-      if (prefix !== undefined) controllers.push({ ctor, prefix })
-    }
+    const controllers = discovery.getClassesWithMeta<string>(RESOLVED_PREFIX)
 
-    const prefixes = controllers.map((c) => c.prefix).sort()
+    const prefixes = controllers.map((c) => c.metadata).sort()
     expect(prefixes).toEqual(['api/v1/posts', 'api/v1/users', 'ping'])
+    expect(controllers.find((c) => c.ctor === UsersCtrl)?.instance).toBe(app.resolve(UsersCtrl))
 
     await app.close()
   })

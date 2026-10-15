@@ -22,7 +22,7 @@ export interface InMemoryTransportOptions {
    */
   cloneOnPublish?: boolean
   /**
-   * Max time `onDestroy()` waits for in-flight handlers to settle before
+   * Max time `onShutdown()` waits for in-flight handlers to settle before
    * forcing cleanup. Default 5000ms. Set 0 to skip drain (immediate cleanup).
    *
    * The drain phase blocks new deliveries (including scheduled retries) and
@@ -76,6 +76,7 @@ export class InMemoryTransport implements MessageTransport {
   private pendingTimers = new Set<ReturnType<typeof setTimeout>>()
   private pendingDeliveries = new Set<Promise<void>>()
   private destroying = false
+  private shutdown?: Promise<void>
 
   constructor(options: InMemoryTransportOptions = {}) {
     this.retry = { ...DEFAULT_RETRY, ...options.retry }
@@ -117,12 +118,25 @@ export class InMemoryTransport implements MessageTransport {
     }
   }
 
+  /** Not `async`: every call, `onDestroy()`'s included, gets the one drain. */
+  onShutdown(): Promise<void> {
+    return (this.shutdown ??= this.drain())
+  }
+
   async onDestroy(): Promise<void> {
+    try {
+      await this.onShutdown()
+    } finally {
+      this.subs.clear()
+    }
+  }
+
+  private async drain(): Promise<void> {
+    // Before the first await, so deliveries are refused from the moment shutdown is called.
     this.destroying = true
     await this.waitForDrain()
     for (const timer of this.pendingTimers) clearTimeout(timer)
     this.pendingTimers.clear()
-    this.subs.clear()
   }
 
   /** Tracking wrapper - every (initial and retry) delivery flows through here. */

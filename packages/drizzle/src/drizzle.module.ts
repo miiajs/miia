@@ -34,8 +34,10 @@ export class DrizzleModule {
         } satisfies FactoryProvider,
         {
           token: dbToken,
+          deps: [serviceToken],
           factory: (resolve) => {
-            // DrizzleService.onInit runs after provider factories, so the db handle is looked up on first use
+            // DrizzleService.onInit runs after provider factories, so the db handle is looked up on first use;
+            // deps orders its hooks before those of anything that injects the db
             return createLazyProxy<object>(() => {
               let service: DrizzleService
               try {

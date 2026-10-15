@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import type { LoggerService } from '@miiajs/core'
 import { inMemoryTransport, InMemoryTransport } from '../src/in-memory-transport.js'
 import type { MessageEnvelope, MessageTransport, HandlerResult } from '../src/types.js'
@@ -494,6 +494,91 @@ describe('InMemoryTransport', () => {
 
       await destroyPromise
       expect(secondStarted).toBe(false)
+    })
+
+    it('onShutdown waits for in-flight handler to complete', async () => {
+      const t = new InMemoryTransport({ retry: { backoffMs: 10, maxAttempts: 3 }, drainTimeoutMs: 1000 })
+      let handlerFinished = false
+
+      await t.subscribe(
+        'topic',
+        async () => {
+          await wait(100)
+          handlerFinished = true
+          return { status: 'ack' }
+        },
+        {},
+      )
+
+      await t.publish(envelope('topic'))
+      await wait(10)
+
+      const shutdownStart = Date.now()
+      await t.onShutdown()
+      const elapsed = Date.now() - shutdownStart
+
+      expect(handlerFinished).toBe(true)
+      expect(elapsed).toBeGreaterThanOrEqual(80)
+      await t.onDestroy()
+    })
+
+    it('onShutdown refuses new deliveries from the moment it is called', async () => {
+      const t = new InMemoryTransport({ retry: { backoffMs: 10, maxAttempts: 3 }, drainTimeoutMs: 500 })
+      let firstStarted = false
+      let secondStarted = false
+
+      await t.subscribe(
+        'topic',
+        async () => {
+          firstStarted = true
+          await wait(50)
+          return { status: 'ack' }
+        },
+        {},
+      )
+
+      await t.publish(envelope('topic'))
+      await wait(10)
+      expect(firstStarted).toBe(true)
+
+      const shutdown = t.onShutdown()
+
+      await t.subscribe(
+        'topic',
+        async () => {
+          secondStarted = true
+          return { status: 'ack' }
+        },
+        {},
+      )
+      await t.publish(envelope('topic'))
+      await wait(20)
+
+      await shutdown
+      expect(secondStarted).toBe(false)
+      await t.onDestroy()
+    })
+
+    it('onShutdown called twice returns the same promise and drains once', async () => {
+      const t = new InMemoryTransport({ drainTimeoutMs: 500 })
+      const drain = spyOn(t as unknown as { waitForDrain: () => Promise<void> }, 'waitForDrain')
+
+      await t.subscribe(
+        'topic',
+        async () => {
+          await wait(30)
+          return { status: 'ack' }
+        },
+        {},
+      )
+      await t.publish(envelope('topic'))
+      await wait(5)
+
+      const first = t.onShutdown()
+      expect(t.onShutdown()).toBe(first)
+      await first
+      await t.onDestroy()
+      expect(drain).toHaveBeenCalledTimes(1)
     })
   })
 })

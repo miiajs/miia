@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { Injectable, inject, Module } from '@miiajs/core'
+import { createToken, Injectable, inject, Module, provider } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { Idempotent, On } from '../src/decorators.js'
 import { MessageBus } from '../src/message-bus.js'
@@ -8,6 +8,7 @@ import { inMemoryTransport } from '../src/in-memory-transport.js'
 import { MessagingModule } from '../src/messaging.module.js'
 import { idempotencyStoreToken, messageBus, transportToken } from '../src/tokens.js'
 import type { MessageTransport } from '../src/types.js'
+import { stubTransport } from './fixtures/stub-transport.js'
 
 function transportProvider(transport?: MessageTransport) {
   const t = transport ?? inMemoryTransport({ retry: { backoffMs: 10, maxAttempts: 3 }, drainTimeoutMs: 100 })
@@ -259,6 +260,74 @@ describe('MessageBus', () => {
     await wait(15)
 
     expect(app.resolve(PingController).hits).toBe(1)
+  })
+
+  it('delivers to an @On handler behind a factory provider under a token object', async () => {
+    class OrderHandlers {
+      received: unknown[] = []
+
+      @On('order.created')
+      async onCreated(payload: unknown) {
+        this.received.push(payload)
+      }
+    }
+    const HANDLERS = createToken<OrderHandlers>('OrderHandlers')
+
+    @Module({ providers: [provider(HANDLERS, () => new OrderHandlers())] })
+    class AppModule {}
+
+    const app = await TestApp.create(AppModule)
+      .provide(...transportProvider())
+      .compile()
+    cleanup.push(() => app.close())
+
+    await app.resolve(MessageBus).publish('order.created', { id: 1 })
+    await wait(20)
+
+    expect(app.resolve(HANDLERS).received).toEqual([{ id: 1 }])
+  })
+
+  it('derives the consumer group from the class of the handler instance', async () => {
+    const t = stubTransport({ supportedModes: ['batch', 'sliding'], defaultMode: 'batch' })
+
+    @Injectable()
+    class BaseHandler {
+      @On('topic')
+      async run() {}
+    }
+
+    class DerivedHandler extends BaseHandler {}
+
+    @Module({ providers: [provider(BaseHandler, () => new DerivedHandler())] })
+    class AppModule {}
+
+    const app = await TestApp.create(AppModule)
+      .provide(...transportProvider(t))
+      .compile()
+    cleanup.push(() => app.close())
+
+    expect(t.subscribes).toHaveLength(1)
+    expect(t.subscribes[0]?.options.group).toBe('topic__DerivedHandler_run')
+  })
+
+  it('throws at startup when one @On class is provided twice', async () => {
+    @Injectable()
+    class Handlers {
+      @On('topic')
+      async onCreated() {}
+    }
+    const COPY = createToken<Handlers>('HandlersCopy')
+
+    @Module({ providers: [Handlers, provider(COPY, () => new Handlers())] })
+    class AppModule {}
+
+    const promise = TestApp.create(AppModule)
+      .provide(...transportProvider())
+      .compile()
+    await expect(promise).rejects.toThrow(
+      '[messaging] @On on Handlers.onCreated is found on two instances - provide Handlers once: both would subscribe ' +
+        "as consumer group 'topic__Handlers_onCreated'",
+    )
   })
 
   describe('@Idempotent', () => {

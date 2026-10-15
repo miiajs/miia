@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
-import { deriveGroupName, type MessageEnvelope, type HandlerResult } from '@miiajs/messaging'
+import { Injectable, Miia, Module } from '@miiajs/core'
+import { deriveGroupName, type MessageEnvelope, MessagingModule, On, type HandlerResult } from '@miiajs/messaging'
 import { Redis } from 'ioredis'
 import { ALIVE_KEY_PREFIX } from '../src/constants.js'
-import { RedisStreamsTransport } from '../src/redis-streams-transport.js'
+import { RedisStreamsTransport, redisStreamsTransport } from '../src/redis-streams-transport.js'
 import {
   type CapturedLogs,
   captureLogs,
@@ -223,6 +224,51 @@ d('RedisStreamsTransport', () => {
 
     // cleanup the test stream so afterEach drainKeys is enough
     await drainKeys(testClient(), topic2)
+  })
+
+  it('drains in onShutdown() with its own client open, and quits it in onDestroy()', async () => {
+    const tp = `miia-test:shutdown-client:${randomUUID()}`
+    const t = new RedisStreamsTransport({
+      url: REDIS_URL!,
+      blockMs: 200,
+      retryIntervalMs: NO_HOUSEKEEPING,
+      drainTimeoutMs: 2000,
+    })
+    const own = (t as unknown as { client: Redis }).client
+    try {
+      await t.onInit()
+      let started = false
+      let finished = false
+      await t.subscribe(
+        tp,
+        async () => {
+          started = true
+          await wait(100)
+          finished = true
+          return { status: 'ack' }
+        },
+        { group: 'g' },
+      )
+      await wait(50)
+      await t.publish(envelope(tp))
+      await waitFor(() => started, 'the handler to start')
+
+      await t.onShutdown()
+      expect(finished).toBe(true)
+      expect(own.status).toBe('ready')
+    } finally {
+      await t.onDestroy()
+      await drainKeys(testClient(), tp)
+    }
+    await waitFor(() => own.status === 'end', 'the owned client to end')
+  })
+
+  it('rejects subscribe() once onShutdown() has started', async () => {
+    const shutdown = transport.onShutdown()
+    await expect(transport.subscribe(topic, async () => ({ status: 'ack' }), { group: 'g' })).rejects.toThrow(
+      '[messaging-redis] subscribe() after shutdown started',
+    )
+    await shutdown
   })
 
   describe('connection isolation', () => {
@@ -802,6 +848,72 @@ d('RedisStreamsTransport', () => {
       try {
         const after = await listGroupNames(verify, tp)
         expect(after).not.toContain(currentGroup)
+      } finally {
+        await drainKeys(verify, tp)
+      }
+    })
+
+    it('onDestroy destroys a broadcast group unsubscribed before it', async () => {
+      const c = testClient()
+      const tp = `miia-test:bcast-unsub:${randomUUID()}`
+      const t = new RedisStreamsTransport({ client: c, blockMs: 200, drainTimeoutMs: 200 })
+      await t.onInit()
+
+      const currentGroup = broadcastGroup(tp, 'Cache', 'flush')
+      try {
+        const sub = await t.subscribe(tp, async () => ({ status: 'ack' }), {
+          group: currentGroup,
+          mode: 'batch',
+          concurrency: 1,
+          broadcast: true,
+        })
+        // The bus unsubscribes in its onShutdown(), before the transport's onDestroy().
+        await sub.unsubscribe()
+        expect(await listGroupNames(c, tp)).toContain(currentGroup)
+      } finally {
+        await t.onDestroy()
+      }
+
+      const verify = testClient()
+      try {
+        expect(await listGroupNames(verify, tp)).not.toContain(currentGroup)
+      } finally {
+        await drainKeys(verify, tp)
+      }
+    })
+
+    it('app.destroy() destroys the broadcast group of an @On handler', async () => {
+      const c = testClient()
+      const tp = `miia-test:bcast-app:${randomUUID()}`
+
+      @Injectable()
+      class CacheHandler {
+        @On(tp, { broadcast: true })
+        async flush() {}
+      }
+
+      @Module({
+        imports: [
+          MessagingModule.configure({
+            transport: redisStreamsTransport({ client: c, blockMs: 200, drainTimeoutMs: 200 }),
+          }),
+        ],
+        providers: [CacheHandler],
+      })
+      class Root {}
+
+      const app = new Miia({ logger: false }).register(Root)
+      const group = broadcastGroup(tp, 'CacheHandler', 'flush')
+      try {
+        await app.init()
+        expect(await listGroupNames(c, tp)).toContain(group)
+      } finally {
+        await app.destroy()
+      }
+
+      const verify = testClient()
+      try {
+        expect(await listGroupNames(verify, tp)).not.toContain(group)
       } finally {
         await drainKeys(verify, tp)
       }

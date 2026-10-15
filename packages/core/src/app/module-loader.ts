@@ -231,7 +231,7 @@ export class ModuleLoader {
         return
       }
       if (this.registerOverride(fp.token)) return
-      this.container.register(fp.token, fp.factory, fp.scope)
+      this.container.register(fp.token, fp.factory, fp.scope, fp.deps)
       this.registeredTokens.add(fp.token)
     }
   }
@@ -246,6 +246,7 @@ export class ModuleLoader {
   private applyOverride(token: AnyToken): boolean {
     const factory = this.providerOverrides.get(token)
     if (!factory) return false
+    // The replacement is a value or its own factory; the deps of the provider it replaces do not apply to it.
     this.container.register(token, factory, 'singleton')
     this.usedOverrides.add(token)
     return true

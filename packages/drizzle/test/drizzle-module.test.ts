@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'bun:test'
-import { Miia, Module, overrideModule } from '@miiajs/core'
+import { describe, expect, it, spyOn } from 'bun:test'
+import { Injectable, Miia, Module, inject, overrideModule } from '@miiajs/core'
 import type { FactoryProvider } from '@miiajs/core'
 import { DrizzleModule } from '../src/drizzle.module.js'
 import { DrizzleService } from '../src/drizzle.service.js'
@@ -163,6 +163,60 @@ describe('lazy proxy forwarding', () => {
 
     const proxy = app.get(drizzleDb()) as any
     expect(proxy.select()).toBe('fake-select')
+  })
+})
+
+describe('hook order', () => {
+  async function hookEvents(name?: string): Promise<string[]> {
+    const events: string[] = []
+    const onInit = spyOn(DrizzleService.prototype, 'onInit').mockImplementation(async () => {
+      events.push('service.onInit')
+    })
+    const onDestroy = spyOn(DrizzleService.prototype, 'onDestroy').mockImplementation(async () => {
+      events.push('service.onDestroy')
+    })
+    try {
+      @Injectable()
+      class UsersService {
+        db = inject(drizzleDb(name))
+
+        async onInit() {
+          events.push('user.onInit')
+        }
+
+        async onDestroy() {
+          events.push('user.onDestroy')
+        }
+      }
+
+      @Module({ providers: [UsersService] })
+      class UsersModule {}
+
+      // Imported before configure(), so without deps the consumer's hooks would come first
+      @Module({ imports: [UsersModule, DrizzleModule.configure(pg('postgres://localhost/test'), { name })] })
+      class Root {}
+
+      const app = createApp(Root)
+      await app.init()
+      await app.destroy()
+      return events
+    } finally {
+      onInit.mockRestore()
+      onDestroy.mockRestore()
+    }
+  }
+
+  it('runs the hooks of a provider injecting drizzleDb() inside the connection window', async () => {
+    expect(await hookEvents()).toEqual(['service.onInit', 'user.onInit', 'user.onDestroy', 'service.onDestroy'])
+  })
+
+  it('does the same for a named connection', async () => {
+    expect(await hookEvents('analytics')).toEqual([
+      'service.onInit',
+      'user.onInit',
+      'user.onDestroy',
+      'service.onDestroy',
+    ])
   })
 })
 
