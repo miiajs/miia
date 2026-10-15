@@ -5,7 +5,7 @@ import type { Model } from 'papr'
 import type { PaprModuleOptions } from './types.js'
 import type { ModelToken } from './define-model.js'
 import { PaprService } from './papr.service.js'
-import { getInternalServiceToken, getRegistryToken, paprDb } from './tokens.js'
+import { configureCall, getInternalServiceToken, getRegistryToken, paprDb } from './tokens.js'
 
 // ─── Cross-connection collision warning ──────────────────────────────────────
 // Module-level WeakMap. If the same ModelToken is registered under two different
@@ -31,24 +31,24 @@ function checkCrossConnectionCollision(models: ModelToken<any, any>[], conn: str
 // ─── Friendly error helpers ──────────────────────────────────────────────────
 
 function configureMissingError(name: string | undefined, suffix: string): Error {
-  return new Error(
-    `[Miia/Papr] ${suffix} ` +
-      `PaprModule.configure() is missing in the root module${name ? ` for connection "${name}"` : ''}.`,
-  )
+  return new Error(`[Miia/Papr] ${suffix} ${configureCall(name)} is missing in the root module.`)
 }
 
 // ─── PaprModule ──────────────────────────────────────────────────────────────
 
 export class PaprModule {
-  static configure(optionsOrFactory: OptionsOrFactory<PaprModuleOptions>, name?: string): ConfiguredModule {
+  static configure(
+    optionsOrFactory: OptionsOrFactory<PaprModuleOptions>,
+    options?: { name?: string },
+  ): ConfiguredModule {
+    const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
     const registryToken = getRegistryToken(name)
     const dbToken = paprDb(name)
 
-    const ModuleClass = name ? (class PaprNamedModule {} as Constructor) : PaprModule
-
     return {
-      module: ModuleClass,
+      module: PaprModule,
+      name,
       providers: [
         {
           token: registryToken,
@@ -58,7 +58,7 @@ export class PaprModule {
           token: serviceToken,
           factory: (resolve) => {
             const options = resolveOptions(optionsOrFactory, { resolve })
-            const registry = resolve<Map<ModelToken<any, any>, ModelToken<any, any>>>(registryToken)
+            const registry = resolve(registryToken)
             return new PaprService(options, registry)
           },
         } satisfies FactoryProvider,
@@ -66,14 +66,15 @@ export class PaprModule {
           token: dbToken,
           factory: (resolve) => {
             // PaprService.onInit runs after provider factories, so the Db / Model is looked up on first use
-            return createLazyProxy<Db>(() => resolve<PaprService>(serviceToken).db)
+            return createLazyProxy<Db>(() => resolve(serviceToken).db)
           },
         } satisfies FactoryProvider,
       ],
     }
   }
 
-  static register(models: ModelToken<any, any>[], name?: string): ConfiguredModule {
+  static register(models: ModelToken<any, any>[], options?: { name?: string }): ConfiguredModule {
+    const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
     const registryToken = getRegistryToken(name)
     const conn = name ?? ''
@@ -88,8 +89,8 @@ export class PaprModule {
         let service: PaprService
         let registry: Map<ModelToken<any, any>, ModelToken<any, any>>
         try {
-          service = resolve<PaprService>(serviceToken)
-          registry = resolve<Map<ModelToken<any, any>, ModelToken<any, any>>>(registryToken)
+          service = resolve(serviceToken)
+          registry = resolve(registryToken)
         } catch {
           throw configureMissingError(name, `inject(${token.name}) failed:`)
         }

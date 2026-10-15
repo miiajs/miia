@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import type { CanActivate, ConfiguredModule, RequestContext } from '../src/index.js'
 import {
   Controller,
+  createToken,
   DiscoveryService,
   Get,
   inject,
@@ -27,10 +28,12 @@ function thrownBy(fn: () => unknown): Error {
   throw new Error('expected a throw')
 }
 
+const CONFIG = createToken<string>('CONFIG')
+
 function makeConfigLike() {
   class ConfigLikeModule {
     static configure(value: string): ConfiguredModule {
-      return { module: ConfigLikeModule, providers: [{ token: 'CONFIG', factory: () => value }] }
+      return { module: ConfigLikeModule, providers: [{ token: CONFIG, factory: () => value }] }
     }
   }
   return ConfigLikeModule
@@ -38,7 +41,7 @@ function makeConfigLike() {
 
 describe('override descriptors', () => {
   it('are recognised by isOverride()', () => {
-    expect(isOverride(overrideProvider('X', () => 1))).toBe(true)
+    expect(isOverride(overrideProvider(createToken('X'), () => 1))).toBe(true)
     expect(isOverride(overrideModule(makeConfigLike().configure('x')))).toBe(true)
     expect(isOverride(makeConfigLike().configure('x'))).toBe(false)
     expect(isOverride(null)).toBe(false)
@@ -98,73 +101,30 @@ describe('override descriptors', () => {
     @Module({})
     class EmptyModule {}
 
-    const app = new Miia({ logger: false }).provide({ token: 'CLOCK', factory: () => 'real' }).register(
+    const CLOCK = createToken<string>('CLOCK')
+    const app = new Miia({ logger: false }).provide({ token: CLOCK, factory: () => 'real' }).register(
       EmptyModule,
-      overrideProvider('CLOCK', () => 'fake'),
+      overrideProvider(CLOCK, () => 'fake'),
     )
 
-    expect(app.get<string>('CLOCK')).toBe('fake')
-  })
-
-  it('replace both keys of an @Injectable({ token }) provider', () => {
-    for (const key of ['Svc', 'class'] as const) {
-      @Injectable({ token: 'Svc' })
-      class Svc {
-        kind = 'real'
-      }
-
-      @Module({ providers: [Svc] })
-      class SvcModule {}
-
-      const fake = { kind: 'fake' }
-      const app = new Miia({ logger: false }).register(
-        SvcModule,
-        overrideProvider(key === 'Svc' ? 'Svc' : Svc, () => fake),
-      )
-
-      expect(app.get<{ kind: string }>('Svc')).toBe(fake)
-      expect(app.get(Svc)).toBe(fake as Svc)
-    }
-  })
-
-  it('replace an alias token that provide() also registered, past phase 1', () => {
-    @Injectable({ token: 'Svc' })
-    class Svc {
-      kind = 'real'
-    }
-
-    class SvcModule {
-      static configure(): ConfiguredModule {
-        return { module: SvcModule, providers: [Svc] }
-      }
-    }
-
-    @Module({ imports: [SvcModule.configure()] })
-    class RootModule {}
-
-    const fake = { kind: 'fake' }
-    const app = new Miia({ logger: false }).provide({ token: 'Svc', factory: () => ({ kind: 'provided' }) }).register(
-      RootModule,
-      overrideProvider('Svc', () => fake),
-    )
-
-    expect(app.get<{ kind: string }>('Svc')).toBe(fake)
-    expect(app.get(Svc)).toBe(fake as Svc)
+    expect(app.get(CLOCK)).toBe('fake')
   })
 
   it('replace a factory provider of a configured module', () => {
+    const DB = createToken<{ query: () => string }>('DB')
+
     class DbModule {
       static configure(): ConfiguredModule {
-        return { module: DbModule, providers: [{ token: 'DB', factory: () => ({ query: () => 'real' }) }] }
+        return { module: DbModule, providers: [{ token: DB, factory: () => ({ query: () => 'real' }) }] }
       }
     }
 
     const app = new Miia({ logger: false }).register(
       DbModule.configure(),
-      overrideProvider('DB', () => ({ query: () => 'fake' })),
+      overrideProvider(DB, () => ({ query: () => 'fake' })),
     )
 
-    expect(app.get<{ query: () => string }>('DB').query()).toBe('fake')
+    expect(app.get(DB).query()).toBe('fake')
   })
 
   it('replace a guard and a controller declared by the loaded module', async () => {
@@ -222,7 +182,7 @@ describe('override descriptors', () => {
 
     const app = new Miia({ logger: false }).register(
       EmptyModule,
-      overrideProvider('MISSING', () => 1),
+      overrideProvider(createToken('MISSING'), () => 1),
     )
 
     const err = thrownBy(() => app.get(EmptyModule))
@@ -233,7 +193,7 @@ describe('override descriptors', () => {
   })
 
   it('reject a descriptor inside imports', () => {
-    @Module({ imports: [overrideProvider('X', () => 1) as unknown as ConfiguredModule] })
+    @Module({ imports: [overrideProvider(createToken('X'), () => 1) as unknown as ConfiguredModule] })
     class BadModule {}
 
     const app = new Miia({ logger: false }).register(BadModule)
@@ -250,7 +210,7 @@ describe('module override descriptors', () => {
 
     @Injectable()
     class FeatureService {
-      config = inject<string>('CONFIG')
+      config = inject(CONFIG)
     }
 
     @Controller('/feature')
@@ -300,6 +260,6 @@ describe('module override descriptors', () => {
 
     const app = new Miia({ logger: false }).register(FeatureModule, ConfigLikeModule.configure('test'))
 
-    expect(app.get<string>('CONFIG')).toBe('test')
+    expect(app.get(CONFIG)).toBe('test')
   })
 })

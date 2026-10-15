@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { Controller, Get, Post, Module, Injectable, UseGuard, inject } from '@miiajs/core'
+import { Controller, createToken, Get, Post, Module, Injectable, UseGuard, inject } from '@miiajs/core'
 import type { CanActivate, ConfiguredModule, RequestContext, Guard, Middleware } from '@miiajs/core'
 import { ForbiddenException } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
@@ -50,11 +50,11 @@ class AppModule {}
 
 // ─── Factory provider fixtures ───────────────────────────────────
 
-const DB_TOKEN = 'DATABASE'
+const DB_TOKEN = createToken<{ query: () => string }>('DATABASE')
 
 @Controller('/data')
 class DataController {
-  private db = inject<{ query: () => string }>(DB_TOKEN)
+  private db = inject(DB_TOKEN)
 
   @Get('/')
   getData(_ctx: RequestContext) {
@@ -190,16 +190,18 @@ describe('TestApp', () => {
   })
 
   describe('override configured module', () => {
+    const CONFIG = createToken<string>('CONFIG')
+
     function makeConfigLike() {
       class ConfigLikeModule {
         static configure(value: string): ConfiguredModule {
-          return { module: ConfigLikeModule, providers: [{ token: 'CONFIG', factory: () => value }] }
+          return { module: ConfigLikeModule, providers: [{ token: CONFIG, factory: () => value }] }
         }
       }
 
       @Controller('/config')
       class ConfigController {
-        private config = inject<string>('CONFIG')
+        private config = inject(CONFIG)
 
         @Get('/')
         read(_ctx: RequestContext) {
@@ -240,13 +242,13 @@ describe('TestApp', () => {
 
     it('should reject a configured module of another class', () => {
       const { ConfigLikeModule } = makeConfigLike()
-      class DrizzleNamedModule {}
+      class AnotherModule {}
 
       expect(() =>
-        TestApp.create(AppModule).override(ConfigLikeModule, { module: DrizzleNamedModule, providers: [] }),
+        TestApp.create(AppModule).override(ConfigLikeModule, { module: AnotherModule, providers: [] }),
       ).toThrow(
-        "[Miia] TestApp.override(ConfigLikeModule, ...): the configured module's class is DrizzleNamedModule, " +
-          'not ConfigLikeModule - named package modules cannot be overridden until they carry name (stage 5)',
+        "[Miia] TestApp.override(ConfigLikeModule, ...): the configured module's class is AnotherModule, " +
+          'not ConfigLikeModule',
       )
     })
 
@@ -262,7 +264,7 @@ describe('TestApp', () => {
 
   describe('override unknown token', () => {
     it('should reject a token no loaded module provides', async () => {
-      await expect(TestApp.create(AppModule).override('MISSING', {}).compile()).rejects.toThrow(
+      await expect(TestApp.create(AppModule).override(createToken('MISSING'), {}).compile()).rejects.toThrow(
         '[Miia] override(MISSING): no loaded module provides MISSING - use provide() for a module-less test',
       )
     })

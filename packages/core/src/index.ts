@@ -12,7 +12,8 @@ export { LogLevel, Logger, ConsoleLogger } from './logger.js'
 export type { LoggerService, LoggerConfig } from './logger.js'
 
 // DI Container
-export { Container, inject, injectOptional, runInContainerContext } from './di-container.js'
+export { inject, injectOptional } from './di-container.js'
+export { createToken, provider } from './di-token.js'
 export { Resolver } from './resolver.js'
 
 // Discovery
@@ -99,6 +100,9 @@ export type { OptionsOrFactory } from './utils/index.js'
 // Types
 export type {
   Constructor,
+  AbstractConstructor,
+  Token,
+  AnyToken,
   Resolve,
   Scope,
   Middleware,

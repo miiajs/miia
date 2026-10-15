@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { Injectable, Module } from '@miiajs/core'
+import { Injectable, inject, Module } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { On } from '../src/decorators.js'
 import { MessageBus } from '../src/message-bus.js'
 import { InMemoryTransport, inMemoryTransport } from '../src/in-memory-transport.js'
 import { MessagingModule } from '../src/messaging.module.js'
-import { MESSAGE_TRANSPORT, type MessageTransport } from '../src/types.js'
+import { messageBus, transportToken } from '../src/tokens.js'
 
 function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -39,7 +39,7 @@ describe('MessagingModule.configure', () => {
     cleanup.push(() => app.close())
 
     const bus = app.resolve(MessageBus)
-    const transport = app.resolve<MessageTransport>(MESSAGE_TRANSPORT)
+    const transport = app.resolve(transportToken())
     expect(transport).toBeInstanceOf(InMemoryTransport)
 
     await bus.publish('topic', { ok: true })
@@ -122,5 +122,71 @@ describe('MessagingModule.configure', () => {
     await wait(15)
 
     expect(app.resolve(OrderHandlers).received).toEqual([{ orderId: 'xyz' }])
+  })
+
+  it('throws when the same bus name is configured twice', async () => {
+    @Module({
+      imports: [
+        MessagingModule.configure({ transport: inMemoryTransport() }, { name: 'kafka' }),
+        MessagingModule.configure({ transport: inMemoryTransport() }, { name: 'kafka' }),
+      ],
+    })
+    class AppModule {}
+
+    await expect(TestApp.create(AppModule).compile()).rejects.toThrow(/configured twice/)
+  })
+
+  it('TestApp.override replaces the transport of a named bus and leaves the default bus alone', async () => {
+    const defaultTransport = inMemoryTransport()
+    const replacement = inMemoryTransport({ retry: { backoffMs: 5 } })
+
+    @Injectable()
+    class KafkaHandler {
+      received: unknown[] = []
+      @On('topic', { bus: 'kafka' })
+      async on(p: unknown) {
+        this.received.push(p)
+      }
+    }
+
+    @Module({
+      imports: [
+        MessagingModule.configure({ transport: defaultTransport }),
+        MessagingModule.configure({ transport: inMemoryTransport() }, { name: 'kafka' }),
+      ],
+      providers: [KafkaHandler],
+    })
+    class AppModule {}
+
+    const app = await TestApp.create(AppModule)
+      .override(MessagingModule, MessagingModule.configure({ transport: replacement }, { name: 'kafka' }))
+      .compile()
+    cleanup.push(() => app.close())
+
+    expect(app.resolve(transportToken('kafka'))).toBe(replacement)
+    expect(app.resolve(transportToken())).toBe(defaultTransport)
+
+    await app.resolve(messageBus('kafka')).publish('topic', { n: 1 })
+    await wait(15)
+    expect(app.resolve(KafkaHandler).received).toEqual([{ n: 1 }])
+  })
+
+  it('inject(messageBus(name)) without that bus names the configure() call that provides it', async () => {
+    @Injectable()
+    class Publisher {
+      bus = inject(messageBus('kafka'))
+    }
+
+    @Module({ imports: [MessagingModule.configure({ transport: inMemoryTransport() })], providers: [Publisher] })
+    class AppModule {}
+
+    await expect(TestApp.create(AppModule).compile()).rejects.toThrow(
+      /No provider found for token: MessageBus\(kafka\)[\s\S]*is provided by MessagingModule\.configure\(opts, \{ name: 'kafka' \}\)/,
+    )
+  })
+
+  it('messageBus() returns one token per name and rejects an empty name', () => {
+    expect(messageBus('kafka')).toBe(messageBus('kafka'))
+    expect(() => messageBus('')).toThrow(TypeError)
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { ConfiguredModule } from '../src/index.js'
-import { createLazyProxy, inject, Injectable, Miia, Module } from '../src/index.js'
+import { createLazyProxy, createToken, inject, Injectable, Miia, Module } from '../src/index.js'
 
 class Database {
   tables = { users: { findMany: () => ['ann'] } }
@@ -32,10 +32,13 @@ class ModelService {
   }
 }
 
+const MODEL_SERVICE = createToken<ModelService>('ModelService')
+const USER = createToken<UserModel>('User')
+
 function dbModule(): ConfiguredModule {
   return {
     module: class DbModule {},
-    providers: [{ token: 'ModelService', factory: () => new ModelService() }],
+    providers: [{ token: MODEL_SERVICE, factory: () => new ModelService() }],
   }
 }
 
@@ -44,9 +47,9 @@ function featureModule(counter: { resolves: number }): ConfiguredModule {
     module: class FeatureModule {},
     providers: [
       {
-        token: 'User',
+        token: USER,
         factory: (resolve) => {
-          const service = resolve<ModelService>('ModelService')
+          const service = resolve(MODEL_SERVICE)
           return createLazyProxy(() => {
             counter.resolves++
             return service.getModel('User')
@@ -119,7 +122,7 @@ describe('createLazyProxy', () => {
 
     @Injectable()
     class UserRepository {
-      users = inject<UserModel>('User')
+      users = inject(USER)
     }
 
     @Module({ imports: [featureModule(counter)], providers: [UserRepository] })

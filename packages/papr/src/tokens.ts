@@ -1,8 +1,31 @@
+import type { Token } from '@miiajs/core'
+import { createToken } from '@miiajs/core'
 import type { Db } from 'mongodb'
+import type { ModelToken } from './define-model.js'
+import type { PaprService } from './papr.service.js'
 
-export type PaprDbToken = new () => Db
+export type PaprDbToken = Token<Db>
 
-const cache = new Map<string, PaprDbToken>()
+// An empty name is the default connection, as in PaprModule.configure()
+function memoByName<T>(create: (name: string | undefined) => Token<T>): (name?: string) => Token<T> {
+  const cache = new Map<string, Token<T>>()
+  return (name) => {
+    const key = name || ''
+    let token = cache.get(key)
+    if (!token) {
+      token = create(name || undefined)
+      cache.set(key, token)
+    }
+    return token
+  }
+}
+
+/** The `configure()` call that provides the connection `name`, for hints and errors. */
+export function configureCall(name?: string): string {
+  return name ? `PaprModule.configure(opts, { name: '${name}' })` : 'PaprModule.configure()'
+}
+
+const dbToken = memoByName((name) => createToken<Db>(`paprDb(${name ?? 'default'})`, { hint: configureCall(name) }))
 
 /**
  * Returns a typed DI token for the raw mongodb `Db` of a PaprModule connection.
@@ -14,23 +37,15 @@ const cache = new Map<string, PaprDbToken>()
  * so DI identity is stable across modules.
  */
 export function paprDb(name?: string): PaprDbToken {
-  const key = name ?? ''
-  let cls = cache.get(key)
-  if (!cls) {
-    cls = class {
-      static readonly __name = `paprDb(${name ?? 'default'})`
-    } as unknown as PaprDbToken
-    cache.set(key, cls)
-  }
-  return cls
+  return dbToken(name)
 }
 
 // ─── Internal token helpers (not exported from package index) ─────────────
 
-export function getInternalServiceToken(name?: string): string {
-  return name ? `__PAPR_SERVICE_${name}` : '__PAPR_SERVICE'
-}
+export const getInternalServiceToken: (name?: string) => Token<PaprService> = memoByName((name) =>
+  createToken<PaprService>(`PaprService(${name ?? 'default'})`),
+)
 
-export function getRegistryToken(name?: string): string {
-  return name ? `__PAPR_REGISTRY_${name}` : '__PAPR_REGISTRY'
-}
+export const getRegistryToken: (name?: string) => Token<Map<ModelToken<any, any>, ModelToken<any, any>>> = memoByName(
+  (name) => createToken<Map<ModelToken<any, any>, ModelToken<any, any>>>(`PaprRegistry(${name ?? 'default'})`),
+)

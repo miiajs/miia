@@ -16,21 +16,24 @@ import { AppService } from './app.service.js'
       }),
       idempotency: memoryIdempotencyStore({ maxSize: 1000 }),
     }),
-    MessagingModule.configure((resolve) => {
-      const config = resolve(ConfigService<Env>)
-      const url = config.getOrThrow('REDIS_URL')
-      return {
-        transport: redisStreamsTransport({
-          url,
-          retry: { maxAttempts: 2, backoffMs: 500, backoffMultiplier: 2, dlq: true },
-        }),
-        idempotency: redisIdempotencyStore({ url, keyPrefix: 'messaging-app:idem:' }),
-        // appName prefixes auto-derived consumer groups so multiple services
-        // sharing this Redis don't collide on handler class names. Explicit
-        // groups (analytics, payments) remain unprefixed.
-        appName: 'messaging-app',
-      }
-    }, 'redis'),
+    MessagingModule.configure(
+      (resolve) => {
+        const config = resolve(ConfigService<Env>)
+        const url = config.getOrThrow('REDIS_URL')
+        return {
+          transport: redisStreamsTransport({
+            url,
+            retry: { maxAttempts: 2, backoffMs: 500, backoffMultiplier: 2, dlq: true },
+          }),
+          idempotency: redisIdempotencyStore({ url, keyPrefix: 'messaging-app:idem:' }),
+          // appName prefixes auto-derived consumer groups so multiple services
+          // sharing this Redis don't collide on handler class names. Explicit
+          // groups (analytics, payments) remain unprefixed.
+          appName: 'messaging-app',
+        }
+      },
+      { name: 'redis' },
+    ),
     OrdersModule,
   ],
   controllers: [AppController],

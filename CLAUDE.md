@@ -59,13 +59,13 @@ Benchmarks live in a separate repo: [github.com/miiajs/benchmarks](https://githu
 
 ### DI: per-app container with inject()
 
-Each `Miia` instance owns its own `Container`. Use `inject(Token)` in a field initializer to resolve dependencies from the active container during class instantiation.
+Each `Miia` instance owns its own `Container` - internal to core, not exported (core tests import it from `../src/di-container.js`). Use `inject(Token)` in a field initializer to resolve dependencies from the active container during class instantiation.
+
+Tokens are classes (abstract ones included) or typed objects from `createToken<T>(name, { hint? })` - the value type flows from the token into `inject()` / `app.get()` / `ctx.resolve()` / `TestApp.override()`, `provider(token, factory, { scope? })` checks a factory provider against it, and `hint` (also `@Injectable({ hint })`) tells a "No provider" error which module provides the token and, when another token with the same name and hint is registered, says it is either defined twice on purpose (register this one too) or a duplicated package.
 
 Three scopes: `singleton` (default), `transient` (new instance per resolve), `request` (one instance per HTTP request, kept on the request context and reached with `ctx.resolve(Token)`). Only another request-scoped provider may `inject()` a request-scoped one: a singleton that does fails at startup, a transient when constructed. `app.get()` and `Resolver` throw for a request-scoped token. Controllers and guards are built once and must be singletons.
 
 Lifecycle hooks via duck-typing (no interface required): `onInit(): Promise<void>` called during `container.initAll()`, `onDestroy(): Promise<void>` called during `container.destroyAll()`.
-
-`runInContainerContext(container, fn)` executes a function with a specific container as the active context - used internally by module loader and available for advanced use cases.
 
 ### Decorators: Symbol.metadata
 
@@ -94,7 +94,7 @@ DrizzleModule.configure((resolve) => {
 ```
 `configure()` returns a `ConfiguredModule` - a module class with extra providers. `register()` adds schemas/models to an existing module's registry.
 
-A configured module's identity is the pair (class, `name`): the loader collects every configuration in a pre-pass before registering providers, so a bare `imports: [XModule]` anywhere resolves to the unnamed configured one regardless of order, and two configurations of one pair throw `[Miia] X is configured twice (A, B)`. One `configure()` result imported by several modules is one module. Packages do not set `name` yet - their named variants are a new anonymous class per call.
+A configured module's identity is the pair (class, `name`): the loader collects every configuration in a pre-pass before registering providers, so a bare `imports: [XModule]` anywhere resolves to the unnamed configured one regardless of order, and two configurations of one pair throw `[Miia] X is configured twice (A, B)`. One `configure()` result imported by several modules is one module. The DB packages set `name` on their named variants (`DrizzleModule.configure(opts, { name: 'analytics' })` is `{ module: DrizzleModule, name: 'analytics' }`), so a second configuration of that name throws too and `overrideModule()` can replace it; papr/mongoose `register()` still returns a new anonymous module per call.
 
 ### Routing: trie-based router
 
@@ -261,10 +261,10 @@ Also exported: token extractors `fromHeader(header = 'authorization', scheme = '
 ### Database: configure/register pattern
 
 All DB packages (`drizzle`, `papr`, `mongoose`) follow the same pattern:
-- `Module.configure(optionsOrFactory, name?)` - connection setup with retry logic
-- `Module.register(models, name?)` - register models in feature modules (papr/mongoose only; drizzle is schema-first, all tables go into `configure({ schema })`)
-- Models / databases become DI tokens via `defineModel(...)` (papr/mongoose) or `drizzleDb<TDb>(name?)` (drizzle). Use standard `inject(User)` / `inject(paprDb())` / `inject(mongooseConnection())` / `inject(db)`.
-- Optional `name` parameter for multi-connection support
+- `Module.configure(optionsOrFactory, { name? })` - connection setup with retry logic; returns `{ module: XModule, name }`
+- `Module.register(models, { name? })` - register models in feature modules (papr/mongoose only; drizzle is schema-first, all tables go into `configure({ schema })`)
+- Models / databases become DI tokens via `defineModel(...)` (papr/mongoose) or `drizzleDb<TDb>(name?)` (drizzle). Use standard `inject(User)` / `inject(paprDb())` / `inject(mongooseConnection())` / `inject(db)`. All of them are `Token` objects (`createToken`), not classes: `drizzleDb()` / `paprDb()` / `mongooseConnection()` are memoized by connection name (`''` is the default), `defineModel` returns a fresh frozen token per call carrying `collectionName` / `modelName` and `schema`. The internal service and registry tokens are private (`src/tokens.ts`, not exported from the index)
+- Optional `{ name }` for multi-connection support
 - Lifecycle: `onInit()` connects with retry, `onDestroy()` closes connection
 - The injected db / connection / model is a lazy proxy built on core's `createLazyProxy()`: it resolves on first use, and the container probing lifecycle hooks does not resolve it
 
@@ -316,14 +316,14 @@ The mount sits under the app's `globalPrefix` like any other route; `skipGlobalP
 
 `TestApp` from `@miiajs/testing`:
 ```ts
-const app = await TestApp.create(AppModule).override('DB', mockDb).compile()
+const app = await TestApp.create(AppModule).override(drizzleDb(), mockDb).compile()
 const res = await app.request('GET', '/users')
 await app.close()
 ```
 
 Methods: `provide()`, `override()`, `use()`, `useGuard()`, `setGlobalPrefix()` (the builder form `Miia` deliberately lacks), `compile()`, `request()`, `resolve()`, `close()`. The builder methods only collect; `compile()` builds the `Miia` from all of it (prefix, providers, middleware, guards, modules with the override descriptors, `init()`). A builder call after `compile()` (a second `compile()` included) throws, and so do `request()`/`resolve()`/`close()` before it.
 
-`override()` builds a descriptor (`overrideProvider()` / `overrideModule()` from core) that goes through `register()` next to the modules and replaces one entry while the graph loads - not a `provide()`-first race. Targets: a provider a loaded module declares (`providers` or a `configure()`'s providers; a class and its `@Injectable({ token })` alias are replaced together), a `provide()` token, the built-ins `DiscoveryService` and `Resolver` (an overridden `Router` would reach only DI consumers - the app dispatches through its own); a configured module with `override(XModule, XModule.configure(test))`, matched by the pair (class, name) - a `ConfiguredModule` of another class (a named package module) throws. A token nothing provides throws `[Miia] override(X): no loaded module provides X`; overriding a module the graph does not configure throws too - a feature that imports it bare is tested as `TestApp.create(FeatureModule, X.configure(test))`. Guards and controllers are overridable only when declared in `providers` / `controllers`. Descriptors are allowed only at the top level of `register()`.
+`override()` builds a descriptor (`overrideProvider()` / `overrideModule()` from core) that goes through `register()` next to the modules and replaces one entry while the graph loads - not a `provide()`-first race. Targets: a provider a loaded module declares (`providers` or a `configure()`'s providers), a `provide()` token, the built-ins `DiscoveryService` and `Resolver` (an overridden `Router` would reach only DI consumers - the app dispatches through its own); a configured module with `override(XModule, XModule.configure(test))`, matched by the pair (class, name) - a `ConfiguredModule` of another class (the anonymous module of a papr/mongoose `register()`, or a user module) throws. A token nothing provides throws `[Miia] override(X): no loaded module provides X`; overriding a module the graph does not configure throws too - a feature that imports it bare is tested as `TestApp.create(FeatureModule, X.configure(test))`. Guards and controllers are overridable only when declared in `providers` / `controllers`. Descriptors are allowed only at the top level of `register()`.
 
 Tests use `bun test` with explicit imports: `import { describe, it, expect } from 'bun:test'`.
 

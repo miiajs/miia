@@ -1,7 +1,7 @@
 // @miiajs/swagger - public API
 
 // Module
-export { SwaggerModule, SWAGGER_OPTIONS } from './swagger.module.js'
+export { SwaggerModule } from './swagger.module.js'
 export { SwaggerService } from './swagger.service.js'
 
 // Decorators

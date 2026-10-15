@@ -1,5 +1,5 @@
 import type { Container } from './di-container.js'
-import type { Constructor } from './types.js'
+import type { AbstractConstructor, AnyToken, Token } from './types.js'
 
 /**
  * Public DI lookup API. Wraps `Container` with a narrowed surface: only the
@@ -18,13 +18,18 @@ import type { Constructor } from './types.js'
  *
  * @example
  * ```ts
+ * const PLUGINS: Record<string, Token<Plugin>> = {
+ *   csv: createToken<Plugin>('CsvPlugin'),
+ *   pdf: createToken<Plugin>('PdfPlugin'),
+ * }
+ *
  * @Injectable()
  * class PluginRegistry {
  *   private resolver = inject(Resolver)
  *
- *   load(name: string) {
- *     const token = `plugin:${name}`
- *     if (!this.resolver.has(token)) throw new Error(`unknown plugin: ${name}`)
+ *   load(name: string): Plugin {
+ *     const token = PLUGINS[name]
+ *     if (!token || !this.resolver.has(token)) throw new Error(`unknown plugin: ${name}`)
  *     return this.resolver.resolve(token)
  *   }
  * }
@@ -33,15 +38,15 @@ import type { Constructor } from './types.js'
 export class Resolver {
   constructor(private container: Container) {}
 
-  has(token: Constructor | string): boolean {
+  has(token: AnyToken): boolean {
     return this.container.has(token)
   }
 
-  resolve<T>(token: Constructor<T> | string): T {
+  resolve<T>(token: Token<T> | AbstractConstructor<T>): T {
     return this.container.resolve<T>(token)
   }
 
-  resolveOptional<T>(token: Constructor<T> | string): T | null {
+  resolveOptional<T>(token: Token<T> | AbstractConstructor<T>): T | null {
     return this.container.resolveOptional<T>(token)
   }
 }

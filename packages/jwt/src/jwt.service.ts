@@ -5,12 +5,12 @@ import type { JwtOptions, JwtPayload, JwtSignOptions, JwtVerifyOptions } from '.
 
 type SignKey = CryptoKey | Uint8Array
 
-@Injectable()
+@Injectable({ hint: 'JwtModule.configure()' })
 export class JwtService {
   private options!: JwtOptions
 
   constructor(options?: JwtOptions) {
-    this.options = options ?? inject<JwtOptions>(JWT_OPTIONS)
+    this.options = options ?? inject(JWT_OPTIONS)
   }
 
   async sign(payload: JwtPayload, options?: JwtSignOptions): Promise<string> {

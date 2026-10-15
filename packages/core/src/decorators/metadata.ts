@@ -1,11 +1,11 @@
 import '../polyfill.js'
-import type { Constructor, Scope } from '../types.js'
+import type { AbstractConstructor, Scope } from '../types.js'
 
 // ─── Injectable metadata ────────────────────────────────────────
 
 export interface InjectableMeta {
   scope: Scope
-  token?: string
+  hint?: string
 }
 
 // ─── Symbol keys ─────────────────────────────────────────────────
@@ -33,7 +33,7 @@ export const BODY_READERS = Symbol('bodyReaders')
 
 type Meta = Record<string | symbol, any>
 
-export function getMeta<T>(ctor: Constructor, key: symbol): T | undefined {
+export function getMeta<T>(ctor: AbstractConstructor, key: symbol): T | undefined {
   return (ctor as any)[Symbol.metadata]?.[key] as T | undefined
 }
 

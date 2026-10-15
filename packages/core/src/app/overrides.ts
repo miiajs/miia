@@ -1,4 +1,4 @@
-import type { ConfiguredModule, Constructor } from '../types.js'
+import type { AnyToken, ConfiguredModule } from '../types.js'
 
 export const OVERRIDE_KIND = Symbol('overrideKind')
 
@@ -9,11 +9,11 @@ export const OVERRIDE_KIND = Symbol('overrideKind')
  * of `register()`, not inside `imports`.
  */
 export type OverrideDescriptor =
-  | { readonly [OVERRIDE_KIND]: 'provider'; token: Constructor | string; factory: () => unknown }
+  | { readonly [OVERRIDE_KIND]: 'provider'; token: AnyToken; factory: () => unknown }
   | { readonly [OVERRIDE_KIND]: 'module'; module: ConfiguredModule }
 
-/** The provider registered under `token` (and its `@Injectable({ token })` alias) is built by `factory`. */
-export function overrideProvider(token: Constructor | string, factory: () => unknown): OverrideDescriptor {
+/** The provider registered under `token` is built by `factory`. */
+export function overrideProvider(token: AnyToken, factory: () => unknown): OverrideDescriptor {
   return { [OVERRIDE_KIND]: 'provider', token, factory }
 }
 

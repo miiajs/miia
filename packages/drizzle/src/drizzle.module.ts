@@ -1,29 +1,29 @@
-import type { ConfiguredModule, Constructor, FactoryProvider, OptionsOrFactory } from '@miiajs/core'
+import type { ConfiguredModule, FactoryProvider, OptionsOrFactory } from '@miiajs/core'
 import { createLazyProxy, resolveOptions } from '@miiajs/core'
 import type { DrizzleModuleOptions } from './types.js'
 import { DrizzleService } from './drizzle.service.js'
-import { drizzleDb, getInternalServiceToken } from './tokens.js'
+import { configureCall, drizzleDb, getInternalServiceToken } from './tokens.js'
 
 // ─── Friendly error helper ───────────────────────────────────────────────────
 
 function configureMissingError(name: string | undefined, suffix: string): Error {
-  return new Error(
-    `[Miia/Drizzle] ${suffix} ` +
-      `DrizzleModule.configure() is missing in the root module${name ? ` for connection "${name}"` : ''}.`,
-  )
+  return new Error(`[Miia/Drizzle] ${suffix} ${configureCall(name)} is missing in the root module.`)
 }
 
 // ─── DrizzleModule ───────────────────────────────────────────────────────────
 
 export class DrizzleModule {
-  static configure(optionsOrFactory: OptionsOrFactory<DrizzleModuleOptions>, name?: string): ConfiguredModule {
+  static configure(
+    optionsOrFactory: OptionsOrFactory<DrizzleModuleOptions>,
+    options?: { name?: string },
+  ): ConfiguredModule {
+    const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
     const dbToken = drizzleDb(name)
 
-    const ModuleClass = name ? (class DrizzleNamedModule {} as Constructor) : DrizzleModule
-
     return {
-      module: ModuleClass,
+      module: DrizzleModule,
+      name,
       providers: [
         {
           token: serviceToken,
@@ -39,7 +39,7 @@ export class DrizzleModule {
             return createLazyProxy<object>(() => {
               let service: DrizzleService
               try {
-                service = resolve<DrizzleService>(serviceToken)
+                service = resolve(serviceToken)
               } catch {
                 throw configureMissingError(name, `inject(drizzleDb(${name ? `'${name}'` : ''})) failed:`)
               }

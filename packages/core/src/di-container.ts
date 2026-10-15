@@ -1,5 +1,7 @@
+import { getMeta, INJECTABLE } from './decorators/metadata.js'
+import type { InjectableMeta } from './decorators/metadata.js'
 import { formatToken } from './di-token-format.js'
-import type { Constructor, Resolve, Scope } from './types.js'
+import type { AbstractConstructor, AnyToken, Constructor, Resolve, Scope, Token } from './types.js'
 
 interface ContainerEntry {
   factory: ((resolve: Resolve) => unknown) | (() => unknown)
@@ -7,16 +9,20 @@ interface ContainerEntry {
   instance?: unknown
 }
 
+function hintOf(token: AnyToken): string | undefined {
+  return typeof token === 'function' ? getMeta<InjectableMeta>(token, INJECTABLE)?.hint : token.hint
+}
+
 export class Container {
   /** @internal */
   static activeContainer: Container | null = null
 
-  private registry = new Map<string | Constructor, ContainerEntry>()
-  private requestScope: Map<string | Constructor, unknown> | null = null
-  private stack: Array<{ token: string | Constructor; entry: ContainerEntry }> = []
+  private registry = new Map<AnyToken, ContainerEntry>()
+  private requestScope: Map<AnyToken, unknown> | null = null
+  private stack: Array<{ token: AnyToken; entry: ContainerEntry }> = []
 
   register<T>(
-    token: Constructor<T> | string,
+    token: Token<T> | AbstractConstructor<T>,
     factory: ((resolve: Resolve) => T) | (() => T),
     scope: Scope = 'singleton',
   ): void {
@@ -30,24 +36,20 @@ export class Container {
     })
   }
 
-  resolve<T>(token: Constructor<T> | string): T {
+  resolve<T>(token: Token<T> | AbstractConstructor<T>): T {
     const entry = this.registry.get(token)
-    if (!entry) {
-      const requester = this.stack.at(-1)
-      const requiredBy = requester ? `, required by ${formatToken(requester.token)}` : ''
-      throw new Error(`[Miia] No provider found for token: ${formatToken(token)}${requiredBy}`)
-    }
+    if (!entry) throw new Error(this.noProviderMessage(token))
     return this.instantiate(token, entry) as T
   }
 
-  resolveOptional<T>(token: Constructor<T> | string): T | null {
+  resolveOptional<T>(token: Token<T> | AbstractConstructor<T>): T | null {
     const entry = this.registry.get(token)
     if (!entry) return null
     return this.instantiate(token, entry) as T
   }
 
   /** @internal */
-  resolveInRequest<T>(token: Constructor<T> | string, scope: Map<string | Constructor, unknown>): T {
+  resolveInRequest<T>(token: Token<T> | AbstractConstructor<T>, scope: Map<AnyToken, unknown>): T {
     const prev = this.requestScope
     this.requestScope = scope
     try {
@@ -57,7 +59,7 @@ export class Container {
     }
   }
 
-  has(token: Constructor | string): boolean {
+  has(token: AnyToken): boolean {
     return this.registry.has(token)
   }
 
@@ -107,7 +109,7 @@ export class Container {
 
   /**
    * Returns all singleton instances currently registered in the container.
-   * Filters out string-token registrations (only class-keyed entries) and
+   * Filters out token-object registrations (only class-keyed entries) and
    * entries that have not yet been instantiated.
    *
    * Used by DiscoveryService for ambient method-decorator discovery.
@@ -139,7 +141,30 @@ export class Container {
     this.registry.clear()
   }
 
-  private instantiate(token: string | Constructor, entry: ContainerEntry): unknown {
+  private noProviderMessage(token: AnyToken): string {
+    const name = formatToken(token)
+    const requester = this.stack.at(-1)
+    const requiredBy = requester ? `, required by ${formatToken(requester.token)}` : ''
+    const lines = [`[Miia] No provider found for token: ${name}${requiredBy}`]
+    const hint = hintOf(token)
+    if (hint) {
+      lines.push(`  - ${name} is provided by ${hint}; import that module where ${name} is used`)
+      // Equal tokens that are different objects: defined twice on purpose, or two copies of a package.
+      const copy = [...this.registry.keys()].some(
+        (key) => key !== token && formatToken(key) === name && hintOf(key) === hint,
+      )
+      if (copy) {
+        lines.push(
+          `  - another token named ${name} with the same hint is registered: if ${name} is defined twice on purpose ` +
+            '(e.g. one model per connection), register this one too; otherwise two copies of the package ' +
+            'that defines it are probably installed - deduplicate the dependency',
+        )
+      }
+    }
+    return lines.join('\n')
+  }
+
+  private instantiate(token: AnyToken, entry: ContainerEntry): unknown {
     if (entry.scope === 'singleton' && entry.instance !== undefined) return entry.instance
 
     const cycleStart = this.stack.findIndex((frame) => frame.token === token)
@@ -185,14 +210,14 @@ export class Container {
     return this.callFactory(token, entry)
   }
 
-  private callFactory(token: string | Constructor, entry: ContainerEntry): unknown {
+  private callFactory(token: AnyToken, entry: ContainerEntry): unknown {
     const prev = Container.activeContainer
     Container.activeContainer = this
     this.stack.push({ token, entry })
     try {
       const fn = entry.factory
       if (fn.length === 0) return (fn as () => unknown)()
-      const resolve: Resolve = <X>(t: Constructor<X> | string) => this.resolve<X>(t)
+      const resolve: Resolve = <X>(t: Token<X> | AbstractConstructor<X>) => this.resolve<X>(t)
       return (fn as (r: Resolve) => unknown)(resolve)
     } finally {
       this.stack.pop()
@@ -213,25 +238,10 @@ function getActiveContainer(): Container {
   return Container.activeContainer
 }
 
-export function inject<T>(token: Constructor<T>): T
-export function inject<T>(token: string): T
-export function inject<T>(token: Constructor<T> | string): T {
+export function inject<T>(token: Token<T> | AbstractConstructor<T>): T {
   return getActiveContainer().resolve<T>(token)
 }
 
-export function injectOptional<T>(token: Constructor<T>): T | null
-export function injectOptional<T>(token: string): T | null
-export function injectOptional<T>(token: Constructor<T> | string): T | null {
+export function injectOptional<T>(token: Token<T> | AbstractConstructor<T>): T | null {
   return getActiveContainer().resolveOptional<T>(token)
-}
-// ─── runInContainerContext ───────────────────────────────────────
-
-export function runInContainerContext<T>(container: Container, fn: () => T): T {
-  const prev = Container.activeContainer
-  Container.activeContainer = container
-  try {
-    return fn()
-  } finally {
-    Container.activeContainer = prev
-  }
 }

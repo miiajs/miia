@@ -171,8 +171,8 @@ src/
 
 ## Notes
 
-- `MessagingModule.configure(opts, 'redis')` registers a **named** bus. Inject it via
-  `inject<MessageBus>(getMessageBusToken('redis') as string)` (see `orders.service.ts`).
+- `MessagingModule.configure(opts, { name: 'redis' })` registers a **named** bus. Inject it via
+  `inject(messageBus('redis'))` (see `orders.service.ts`).
 - The default bus is injected as `inject(MessageBus)` - same pattern as a single-bus app.
 - DLQ topic is automatic: any topic `t` produces `<t>.dlq` after `maxAttempts` failures (when `dlq: true`).
 - Retry config is **per transport**, not per topic - two buses with different `maxAttempts` here illustrate that.

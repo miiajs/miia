@@ -39,15 +39,6 @@ export interface IdempotencyStore {
   onDestroy?(): Promise<void>
 }
 
-/**
- * DI token for the optional idempotency store.
- *
- * Always registered by `MessagingModule.configure()` (value is `null` when
- * the user did not configure one). MessageBus reads it via `injectOptional`
- * and only uses the store when a handler has `@Idempotent`.
- */
-export const IDEMPOTENCY_STORE = 'miia:messaging:idempotency-store'
-
 // ─── In-memory implementation ──────────────────────────────────────
 
 export interface MemoryIdempotencyStoreOptions {

@@ -5,10 +5,10 @@ export { MessageBus } from './message-bus.js'
 export { Idempotent, IDEMPOTENT, On, ON } from './decorators.js'
 export type { IdempotentMeta, OnMeta } from './decorators.js'
 
-export { IDEMPOTENCY_STORE, MemoryIdempotencyStore, memoryIdempotencyStore } from './idempotency.js'
+export { MemoryIdempotencyStore, memoryIdempotencyStore } from './idempotency.js'
 export type { IdempotencyStore, MemoryIdempotencyStoreOptions } from './idempotency.js'
 
-export { DEFAULT_RETRY, MESSAGE_TRANSPORT } from './types.js'
+export { DEFAULT_RETRY } from './types.js'
 export type {
   DispatchMode,
   MessageEnvelope,
@@ -33,4 +33,4 @@ export type { InMemoryTransportOptions } from './in-memory-transport.js'
 export { MessagingModule } from './messaging.module.js'
 export type { DispatchDefaults, MessagingModuleOptions } from './messaging.module.js'
 
-export { getMessageBusToken, getMessageTransportToken, getIdempotencyStoreToken } from './tokens.js'
+export { messageBus } from './tokens.js'

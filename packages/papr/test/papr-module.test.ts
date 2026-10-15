@@ -1,16 +1,16 @@
-import { describe, expect, it, mock, spyOn } from 'bun:test'
-import { Container } from '@miiajs/core'
+import { describe, expect, it, spyOn } from 'bun:test'
+import { Miia, Module, overrideModule } from '@miiajs/core'
 import type { FactoryProvider } from '@miiajs/core'
 import { PaprModule } from '../src/papr.module.js'
 import { PaprService } from '../src/papr.service.js'
 import { defineModel } from '../src/define-model.js'
 import { getInternalServiceToken, getRegistryToken, paprDb } from '../src/tokens.js'
 
-function registerProviders(container: Container, providers: FactoryProvider[]) {
-  for (const p of providers) {
-    container.register(p.token, p.factory as any, p.scope)
-  }
+function createApp(...modules: Parameters<Miia['register']>): Miia {
+  return new Miia({ logger: false }).register(...modules)
 }
+
+const urlOf = (service: PaprService) => (service as any).options.connection.url
 
 const fakeSchema = [{} as any, {} as any] as [any, any]
 
@@ -28,44 +28,70 @@ describe('paprDb', () => {
     expect(paprDb('a')).not.toBe(paprDb('b'))
   })
 
-  it('returns a class-like (Constructor) so DI accepts it as a token', () => {
-    expect(typeof paprDb()).toBe('function')
-    expect(typeof paprDb('analytics')).toBe('function')
+  it('treats an empty name as the default connection', () => {
+    expect(paprDb('')).toBe(paprDb())
+  })
+
+  it('returns a frozen token object named after the connection', () => {
+    expect(typeof paprDb()).toBe('object')
+    expect(Object.isFrozen(paprDb('analytics'))).toBe(true)
+    expect(paprDb().name).toBe('paprDb(default)')
+    expect(paprDb('analytics').name).toBe('paprDb(analytics)')
+  })
+
+  it('hints at the configure() call that provides it', () => {
+    expect(paprDb().hint).toBe('PaprModule.configure()')
+    expect(paprDb('analytics').hint).toBe("PaprModule.configure(opts, { name: 'analytics' })")
   })
 })
 
 describe('getInternalServiceToken', () => {
-  it('returns __PAPR_SERVICE for default', () => {
-    expect(getInternalServiceToken()).toBe('__PAPR_SERVICE')
+  it('returns the same token for the same name', () => {
+    expect(getInternalServiceToken()).toBe(getInternalServiceToken())
+    expect(getInternalServiceToken('analytics')).toBe(getInternalServiceToken('analytics'))
+    expect(getInternalServiceToken('')).toBe(getInternalServiceToken())
   })
 
-  it('returns __PAPR_SERVICE_name for named', () => {
-    expect(getInternalServiceToken('analytics')).toBe('__PAPR_SERVICE_analytics')
+  it('returns different tokens for different names', () => {
+    expect(getInternalServiceToken()).not.toBe(getInternalServiceToken('analytics'))
+    expect(getInternalServiceToken('a')).not.toBe(getInternalServiceToken('b'))
   })
 })
 
 describe('getRegistryToken', () => {
-  it('returns __PAPR_REGISTRY for default', () => {
-    expect(getRegistryToken()).toBe('__PAPR_REGISTRY')
+  it('returns the same token for the same name', () => {
+    expect(getRegistryToken()).toBe(getRegistryToken())
+    expect(getRegistryToken('analytics')).toBe(getRegistryToken('analytics'))
+    expect(getRegistryToken('')).toBe(getRegistryToken())
   })
 
-  it('returns __PAPR_REGISTRY_name for named', () => {
-    expect(getRegistryToken('analytics')).toBe('__PAPR_REGISTRY_analytics')
+  it('returns different tokens for different names', () => {
+    expect(getRegistryToken()).not.toBe(getRegistryToken('analytics'))
+    expect(getRegistryToken('a')).not.toBe(getRegistryToken('b'))
+  })
+
+  it('differs from the service token of the same connection', () => {
+    expect(getRegistryToken()).not.toBe(getInternalServiceToken() as unknown)
   })
 })
 
 describe('defineModel', () => {
-  it('returns a class-token with collectionName, schema, and brand', () => {
+  it('returns a frozen token object with collectionName, schema, and brand', () => {
     const User = defineModel('users', fakeSchema)
-    expect(typeof User).toBe('function')
+    expect(typeof User).toBe('object')
+    expect(Object.isFrozen(User)).toBe(true)
     expect(User.collectionName).toBe('users')
     expect(User.schema).toBe(fakeSchema)
     expect(User.__miiaPaprModel).toBe(true)
   })
 
-  it('embeds collection name into class name for debug clarity', () => {
+  it('embeds collection name into the token name for debug clarity', () => {
     const Post = defineModel('posts', fakeSchema)
     expect(Post.name).toBe('PaprModel(posts)')
+  })
+
+  it('hints at PaprModule.register()', () => {
+    expect(defineModel('posts', fakeSchema).hint).toBe('PaprModule.register([...])')
   })
 
   it('returns a fresh token on each call (no memoization)', () => {
@@ -79,43 +105,68 @@ describe('PaprModule.configure (default)', () => {
   it('registers registry, service, and db-token providers', () => {
     const result = PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } })
     expect(result.module).toBe(PaprModule)
+    expect(result.name).toBeUndefined()
     expect(result.providers).toHaveLength(3)
     const tokens = (result.providers as FactoryProvider[]).map((p) => p.token)
-    expect(tokens).toContain('__PAPR_REGISTRY')
-    expect(tokens).toContain('__PAPR_SERVICE')
+    expect(tokens).toContain(getRegistryToken())
+    expect(tokens).toContain(getInternalServiceToken())
     expect(tokens).toContain(paprDb())
   })
 
   it('builds a PaprService from the service-token factory', () => {
-    const configured = PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } })
-    const container = new Container()
-    registerProviders(container, configured.providers as FactoryProvider[])
-    const service = container.resolve('__PAPR_SERVICE')
-    expect(service).toBeInstanceOf(PaprService)
+    const app = createApp(PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } }))
+    expect(app.get(getInternalServiceToken())).toBeInstanceOf(PaprService)
   })
 
   it('builds a lazy Db proxy from the db-token factory', () => {
-    const configured = PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } })
-    const container = new Container()
-    registerProviders(container, configured.providers as FactoryProvider[])
+    const app = createApp(PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } }))
     // Resolve doesn't throw even though service is not yet onInit-ed (lazy proxy).
-    const dbProxy = container.resolve(paprDb()) as any
+    const dbProxy = app.get(paprDb())
     expect(typeof dbProxy).toBe('object')
   })
 })
 
 describe('PaprModule.configure (named)', () => {
-  it('uses a unique module class for named connections', () => {
-    const configured = PaprModule.configure({ connection: { url: 'mongodb://localhost/analytics' } }, 'analytics')
-    expect(configured.module).not.toBe(PaprModule)
+  it('keeps PaprModule as the module and carries the name', () => {
+    const configured = PaprModule.configure(
+      { connection: { url: 'mongodb://localhost/analytics' } },
+      { name: 'analytics' },
+    )
+    expect(configured.module).toBe(PaprModule)
+    expect(configured.name).toBe('analytics')
   })
 
-  it('uses suffixed internal tokens and the named paprDb token', () => {
-    const configured = PaprModule.configure({ connection: { url: 'mongodb://localhost/analytics' } }, 'analytics')
+  it('uses the named internal tokens and the named paprDb token', () => {
+    const configured = PaprModule.configure(
+      { connection: { url: 'mongodb://localhost/analytics' } },
+      { name: 'analytics' },
+    )
     const tokens = (configured.providers as FactoryProvider[]).map((p) => p.token)
-    expect(tokens).toContain('__PAPR_REGISTRY_analytics')
-    expect(tokens).toContain('__PAPR_SERVICE_analytics')
+    expect(tokens).toContain(getRegistryToken('analytics'))
+    expect(tokens).toContain(getInternalServiceToken('analytics'))
     expect(tokens).toContain(paprDb('analytics'))
+  })
+
+  it('throws when the same name is configured twice', () => {
+    const a = PaprModule.configure({ connection: { url: 'mongodb://localhost/a' } }, { name: 'analytics' })
+    const b = PaprModule.configure({ connection: { url: 'mongodb://localhost/b' } }, { name: 'analytics' })
+    expect(() => createApp(a, b).get(paprDb('analytics'))).toThrow(/configured twice/)
+  })
+
+  it('overrideModule() replaces the named connection and leaves the default one alone', () => {
+    @Module({
+      imports: [
+        PaprModule.configure({ connection: { url: 'mongodb://localhost/main' } }),
+        PaprModule.configure({ connection: { url: 'mongodb://localhost/analytics' } }, { name: 'analytics' }),
+      ],
+    })
+    class Root {}
+
+    const test = PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } }, { name: 'analytics' })
+    const app = createApp(Root, overrideModule(test))
+
+    expect(urlOf(app.get(getInternalServiceToken('analytics')))).toBe('mongodb://localhost/test')
+    expect(urlOf(app.get(getInternalServiceToken()))).toBe('mongodb://localhost/main')
   })
 })
 
@@ -134,26 +185,27 @@ describe('PaprModule.register', () => {
     const User = defineModel('users', fakeSchema)
     const configured = PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } })
     const registered = PaprModule.register([User])
+    const app = createApp(configured, registered)
 
-    const container = new Container()
-    registerProviders(container, configured.providers as FactoryProvider[])
-    registerProviders(container, registered.providers as FactoryProvider[])
-
-    const userModel = container.resolve(User)
+    const userModel = app.get(User)
     expect(typeof userModel).toBe('object')
 
-    const registry = container.resolve('__PAPR_REGISTRY') as Map<unknown, unknown>
+    const registry = app.get(getRegistryToken())
     expect(registry.has(User)).toBe(true)
   })
 
   it('throws a friendly error when configure() is missing', () => {
     const User = defineModel('users', fakeSchema)
-    const registered = PaprModule.register([User])
+    const app = createApp(PaprModule.register([User]))
 
-    const container = new Container()
-    registerProviders(container, registered.providers as FactoryProvider[])
+    expect(() => app.get(User)).toThrow(/PaprModule.configure\(\) is missing/)
+  })
 
-    expect(() => container.resolve(User)).toThrow(/PaprModule.configure\(\) is missing/)
+  it('names the named configure() call when it is missing', () => {
+    const Event = defineModel('events', fakeSchema)
+    const app = createApp(PaprModule.register([Event], { name: 'analytics' }))
+
+    expect(() => app.get(Event)).toThrow("PaprModule.configure(opts, { name: 'analytics' }) is missing")
   })
 
   it('routes model lookup through PaprService.getModel via the proxy', () => {
@@ -161,15 +213,12 @@ describe('PaprModule.register', () => {
     const fakeModel = { find: () => 'fake-find' } as any
     const configured = PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } })
     const registered = PaprModule.register([User])
+    const app = createApp(configured, registered)
 
-    const container = new Container()
-    registerProviders(container, configured.providers as FactoryProvider[])
-    registerProviders(container, registered.providers as FactoryProvider[])
-
-    const service = container.resolve('__PAPR_SERVICE') as any
+    const service = app.get(getInternalServiceToken())
     const getModelSpy = spyOn(service, 'getModel').mockReturnValue(fakeModel)
 
-    const proxy = container.resolve(User) as any
+    const proxy = app.get(User) as any
     expect(proxy.find()).toBe('fake-find')
     expect(getModelSpy).toHaveBeenCalledWith(User)
   })
@@ -179,21 +228,16 @@ describe('PaprModule.register', () => {
     const Event = defineModel('events', fakeSchema)
 
     const def = PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } })
-    const ana = PaprModule.configure({ connection: { url: 'mongodb://localhost/analytics' } }, 'analytics')
+    const ana = PaprModule.configure({ connection: { url: 'mongodb://localhost/analytics' } }, { name: 'analytics' })
     const regDef = PaprModule.register([User])
-    const regAna = PaprModule.register([Event], 'analytics')
+    const regAna = PaprModule.register([Event], { name: 'analytics' })
+    const app = createApp(def, ana, regDef, regAna)
 
-    const container = new Container()
-    registerProviders(container, def.providers as FactoryProvider[])
-    registerProviders(container, ana.providers as FactoryProvider[])
-    registerProviders(container, regDef.providers as FactoryProvider[])
-    registerProviders(container, regAna.providers as FactoryProvider[])
+    app.get(User)
+    app.get(Event)
 
-    container.resolve(User)
-    container.resolve(Event)
-
-    const defReg = container.resolve('__PAPR_REGISTRY') as Map<unknown, unknown>
-    const anaReg = container.resolve('__PAPR_REGISTRY_analytics') as Map<unknown, unknown>
+    const defReg = app.get(getRegistryToken())
+    const anaReg = app.get(getRegistryToken('analytics'))
     expect(defReg.has(User)).toBe(true)
     expect(defReg.has(Event)).toBe(false)
     expect(anaReg.has(Event)).toBe(true)
@@ -205,7 +249,7 @@ describe('PaprModule.register', () => {
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {})
     try {
       PaprModule.register([User])
-      PaprModule.register([User], 'analytics')
+      PaprModule.register([User], { name: 'analytics' })
       expect(warnSpy).toHaveBeenCalled()
       const args = warnSpy.mock.calls[warnSpy.mock.calls.length - 1] as string[]
       expect(args[0]).toContain('registered in connections')

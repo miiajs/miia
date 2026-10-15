@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { Injectable, Module } from '@miiajs/core'
+import { Injectable, Miia, Module } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { z } from 'zod'
 import { ConfigModule } from '../src/config.module.js'
@@ -114,7 +114,7 @@ describe('ConfigModule', () => {
 
   describe('factory form', () => {
     it('resolves dependencies from the DI container', async () => {
-      @Injectable({ token: 'EnvProvider' })
+      @Injectable()
       class EnvProvider {
         readonly env = { PORT: '8080', HOST: '0.0.0.0' }
       }
@@ -123,7 +123,7 @@ describe('ConfigModule', () => {
         providers: [EnvProvider],
         imports: [
           ConfigModule.configure((resolve) => {
-            const provider = resolve<EnvProvider>('EnvProvider')
+            const provider = resolve(EnvProvider)
             return { env: provider.env }
           }),
         ],
@@ -135,6 +135,14 @@ describe('ConfigModule', () => {
       expect(config.get('PORT')).toBe('8080')
       expect(config.get('HOST')).toBe('0.0.0.0')
       await app.close()
+    })
+  })
+
+  describe('without ConfigModule.configure()', () => {
+    it('names ConfigModule.configure() when ConfigService is not provided', () => {
+      expect(() => new Miia({ logger: false }).get(ConfigService)).toThrow(
+        'ConfigService is provided by ConfigModule.configure()',
+      )
     })
   })
 

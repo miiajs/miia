@@ -1,6 +1,8 @@
+import type { Token } from '@miiajs/core'
+import { createToken } from '@miiajs/core'
 import type mongoose from 'mongoose'
 
-export type ModelToken<T> = (new () => mongoose.Model<T>) & {
+export type ModelToken<T> = Token<mongoose.Model<T>> & {
   readonly modelName: string
   readonly schema: mongoose.Schema<T>
   readonly __miiaMongooseModel: true
@@ -11,11 +13,8 @@ export type ModelToken<T> = (new () => mongoose.Model<T>) & {
 // для multi-connection use-case. Колізія імен моделей ловиться runtime у
 // MongooseService.onInit, cross-registry колізія - через console.warn у register().
 export function defineModel<T>(name: string, schema: mongoose.Schema<T>): ModelToken<T> {
-  const Token = class {
-    static modelName = name
-    static schema = schema
-    static __miiaMongooseModel = true as const
-  }
-  Object.defineProperty(Token, 'name', { value: `MongooseModel(${name})` })
-  return Token as unknown as ModelToken<T>
+  const token = createToken<mongoose.Model<T>>(`MongooseModel(${name})`, {
+    hint: `MongooseModule.register([${name}])`,
+  })
+  return Object.freeze({ ...token, modelName: name, schema, __miiaMongooseModel: true as const })
 }

@@ -1,6 +1,31 @@
-export type DrizzleDbToken<TDb = any> = new () => TDb
+import type { Token } from '@miiajs/core'
+import { createToken } from '@miiajs/core'
+import type { DrizzleService } from './drizzle.service.js'
 
-const cache = new Map<string, DrizzleDbToken<unknown>>()
+export type DrizzleDbToken<TDb = any> = Token<TDb>
+
+// An empty name is the default connection, as in DrizzleModule.configure()
+function memoByName<T>(create: (name: string | undefined) => Token<T>): (name?: string) => Token<T> {
+  const cache = new Map<string, Token<T>>()
+  return (name) => {
+    const key = name || ''
+    let token = cache.get(key)
+    if (!token) {
+      token = create(name || undefined)
+      cache.set(key, token)
+    }
+    return token
+  }
+}
+
+/** The `configure()` call that provides the connection `name`, for hints and errors. */
+export function configureCall(name?: string): string {
+  return name ? `DrizzleModule.configure(opts, { name: '${name}' })` : 'DrizzleModule.configure()'
+}
+
+const dbToken = memoByName((name) =>
+  createToken<unknown>(`drizzleDb(${name ?? 'default'})`, { hint: configureCall(name) }),
+)
 
 /**
  * Returns a typed DI token for the Drizzle database of a DrizzleModule connection.
@@ -20,19 +45,11 @@ const cache = new Map<string, DrizzleDbToken<unknown>>()
  * call site. Keep a single `db.ts` per connection as the source of truth.
  */
 export function drizzleDb<TDb = any>(name?: string): DrizzleDbToken<TDb> {
-  const key = name ?? ''
-  let cls = cache.get(key)
-  if (!cls) {
-    cls = class {
-      static readonly __name = `drizzleDb(${name ?? 'default'})`
-    } as unknown as DrizzleDbToken<unknown>
-    cache.set(key, cls)
-  }
-  return cls as DrizzleDbToken<TDb>
+  return dbToken(name) as DrizzleDbToken<TDb>
 }
 
 // ─── Internal token helpers (not exported from package index) ─────────────
 
-export function getInternalServiceToken(name?: string): string {
-  return name ? `__DRIZZLE_SERVICE_${name}` : '__DRIZZLE_SERVICE'
-}
+export const getInternalServiceToken: (name?: string) => Token<DrizzleService> = memoByName((name) =>
+  createToken<DrizzleService>(`DrizzleService(${name ?? 'default'})`),
+)

@@ -61,7 +61,7 @@ export function buildGuardClass(overrides?: Partial<RateLimitModuleOptions>, mar
 
     // Resolve module options eagerly during construction (inside an active
     // container context); merging fails fast if neither layer configured the policy.
-    private cfg = mergeOptions(injectOptional<RateLimitModuleOptions>(RATE_LIMIT_OPTIONS), overrides)
+    private cfg = mergeOptions(injectOptional(RATE_LIMIT_OPTIONS), overrides)
     private limiter = new RateLimiter({ ...this.cfg, prefix: this.cfg.prefix ?? `rlg:${prefixSeq++}:` })
 
     async canActivate(ctx: RequestContext): Promise<boolean> {

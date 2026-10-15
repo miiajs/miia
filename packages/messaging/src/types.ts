@@ -203,12 +203,3 @@ export interface MessageTransport {
   onInit?(): Promise<void>
   onDestroy?(): Promise<void>
 }
-
-/**
- * DI token for the message transport. String token because an abstract class
- * is not type-compatible with core's `Constructor<T>` (abstract `new` vs
- * plain `new`). Matches the `JWT_OPTIONS` pattern in `@miiajs/jwt`.
- *
- * Usage: `private transport = inject<MessageTransport>(MESSAGE_TRANSPORT)`.
- */
-export const MESSAGE_TRANSPORT = 'miia:messaging:transport'

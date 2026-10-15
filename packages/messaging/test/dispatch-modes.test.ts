@@ -3,10 +3,10 @@ import { Injectable, Module } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { On } from '../src/decorators.js'
 import { MessageBus } from '../src/message-bus.js'
-import { IDEMPOTENCY_STORE } from '../src/idempotency.js'
 import { inMemoryTransport } from '../src/in-memory-transport.js'
 import { MessagingModule } from '../src/messaging.module.js'
-import { MESSAGE_TRANSPORT, type MessageTransport } from '../src/types.js'
+import { idempotencyStoreToken, transportToken } from '../src/tokens.js'
+import type { MessageTransport } from '../src/types.js'
 import { stubTransport, StubTransport } from './fixtures/stub-transport.js'
 
 function busProviders(
@@ -14,8 +14,8 @@ function busProviders(
   options: { dispatch?: { mode?: 'batch' | 'sliding'; concurrency?: number } | null; appName?: string | null } = {},
 ) {
   return [
-    { token: MESSAGE_TRANSPORT, factory: () => transport },
-    { token: IDEMPOTENCY_STORE, factory: () => null },
+    { token: transportToken(), factory: () => transport },
+    { token: idempotencyStoreToken(), factory: () => null },
     { token: MessageBus, factory: () => new MessageBus(transport, null, null, options) },
   ]
 }

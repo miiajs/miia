@@ -6,7 +6,20 @@ import type { LoggerService } from './logger.js'
 
 export type Constructor<T = any> = new (...args: any[]) => T
 
-export type Resolve = <T>(token: Constructor<T> | string) => T
+export type AbstractConstructor<T = any> = abstract new (...args: any[]) => T
+
+declare const TOKEN_BRAND: unique symbol
+
+/** A typed DI token. Identity is the object itself; `name` is for messages only. */
+export interface Token<T> {
+  readonly name: string
+  readonly hint?: string
+  readonly [TOKEN_BRAND]: T
+}
+
+export type AnyToken = Token<any> | AbstractConstructor
+
+export type Resolve = <T>(token: Token<T> | AbstractConstructor<T>) => T
 
 export type Scope = 'singleton' | 'transient' | 'request'
 
@@ -64,7 +77,7 @@ export interface RequestContext {
    * request and cached on the context; singletons and transients resolve as usual.
    * This is the only way to reach a request-scoped provider from a handler, middleware or guard.
    */
-  resolve<T>(token: Constructor<T> | string): T
+  resolve<T>(token: Token<T> | AbstractConstructor<T>): T
   /** @internal Used by the built-in JSON body reader to store validated data. */
   _setBody(value: unknown): void
 }
@@ -85,7 +98,7 @@ export type GuardResponseDeclaration = number | { status: number; description?: 
 // ─── DI Providers ────────────────────────────────────────────────
 
 export interface FactoryProvider<T = unknown> {
-  token: string | Constructor
+  token: Token<T> | AbstractConstructor<T>
   factory: ((resolve: Resolve) => T) | (() => T)
   scope?: Scope
 }

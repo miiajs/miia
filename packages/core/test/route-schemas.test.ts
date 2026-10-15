@@ -2,7 +2,6 @@ import { describe, expect, it } from 'bun:test'
 import type { CanActivate, Constructor, Middleware, RequestContext, RouteOptions, ZodLike } from '../src/index.js'
 import {
   BodyLimit,
-  Container,
   Controller,
   Delete,
   Get,
@@ -19,6 +18,7 @@ import {
   UseGuard,
 } from '../src/index.js'
 import { RouterExplorer } from '../src/app/router-explorer.js'
+import { Container } from '../src/di-container.js'
 
 interface SpySchema<T> extends ZodLike<T> {
   calls: number

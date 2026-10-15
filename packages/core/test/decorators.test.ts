@@ -15,7 +15,7 @@ describe('Decorators', () => {
       const meta = getMeta<InjectableMeta>(TestService, INJECTABLE)
       expect(meta).toBeDefined()
       expect(meta!.scope).toBe('singleton')
-      expect(meta!.token).toBeUndefined()
+      expect(meta!.hint).toBeUndefined()
     })
 
     it('should store custom scope in metadata', () => {
@@ -26,14 +26,14 @@ describe('Decorators', () => {
       expect(meta!.scope).toBe('transient')
     })
 
-    it('should store string token in metadata', () => {
-      @Injectable({ token: 'MY_SERVICE' })
-      class TokenService {
-        name = 'tokenized'
+    it('should store hint in metadata', () => {
+      @Injectable({ hint: 'UsersModule' })
+      class HintedService {
+        name = 'hinted'
       }
 
-      const meta = getMeta<InjectableMeta>(TokenService, INJECTABLE)
-      expect(meta!.token).toBe('MY_SERVICE')
+      const meta = getMeta<InjectableMeta>(HintedService, INJECTABLE)
+      expect(meta!.hint).toBe('UsersModule')
       expect(meta!.scope).toBe('singleton')
     })
 

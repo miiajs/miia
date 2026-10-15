@@ -4,6 +4,7 @@ import {
   BadRequestException,
   Controller,
   cors,
+  createToken,
   ForbiddenException,
   Get,
   inject,
@@ -127,9 +128,11 @@ describe('Miia Application', () => {
     })
 
     it('should register providers via factory', async () => {
+      const MY_TOKEN = createToken<string>('MY_TOKEN')
+
       @Controller('/test')
       class TestCtrl {
-        private val = inject<string>('MY_TOKEN')
+        private val = inject(MY_TOKEN)
 
         @Get('/')
         handler(_ctx: RequestContext) {
@@ -139,7 +142,7 @@ describe('Miia Application', () => {
 
       @Module({
         controllers: [TestCtrl],
-        providers: [{ token: 'MY_TOKEN', factory: () => 'hello-factory' }],
+        providers: [{ token: MY_TOKEN, factory: () => 'hello-factory' }],
       })
       class M {}
 

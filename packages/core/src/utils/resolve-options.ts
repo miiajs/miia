@@ -7,15 +7,12 @@ import type { Resolve } from '../types.js'
  *
  * @example
  * ```ts
- * static configure(optionsOrFactory: OptionsOrFactory<JwtOptions>): ConfiguredModule {
+ * const MAIL_OPTIONS = createToken<MailOptions>('MailOptions', { hint: 'MailModule.configure()' })
+ *
+ * static configure(optionsOrFactory: OptionsOrFactory<MailOptions>): ConfiguredModule {
  *   return {
- *     module: JwtModule,
- *     providers: [
- *       {
- *         token: JWT_OPTIONS,
- *         factory: (container) => resolveOptions(optionsOrFactory, container),
- *       },
- *     ],
+ *     module: MailModule,
+ *     providers: [provider(MAIL_OPTIONS, (resolve) => resolveOptions(optionsOrFactory, { resolve }))],
  *   }
  * }
  * ```

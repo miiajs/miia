@@ -1,51 +1,55 @@
 import { describe, expect, it } from 'bun:test'
 import { Container } from '../src/di-container.js'
+import { createToken } from '../src/di-token.js'
 import { Resolver } from '../src/resolver.js'
 
 describe('Resolver', () => {
   it('has() returns true for registered tokens', () => {
     const c = new Container()
-    c.register('greeting', () => 'hello')
+    const GREETING = createToken<string>('greeting')
+    c.register(GREETING, () => 'hello')
     const resolver = new Resolver(c)
 
-    expect(resolver.has('greeting')).toBe(true)
+    expect(resolver.has(GREETING)).toBe(true)
   })
 
   it('has() returns false for unregistered tokens', () => {
     const c = new Container()
     const resolver = new Resolver(c)
 
-    expect(resolver.has('missing')).toBe(false)
+    expect(resolver.has(createToken('missing'))).toBe(false)
   })
 
   it('resolve() returns the singleton instance', () => {
     const c = new Container()
-    c.register('val', () => ({ x: 1 }))
+    const VAL = createToken<{ x: number }>('val')
+    c.register(VAL, () => ({ x: 1 }))
     const resolver = new Resolver(c)
 
-    expect(resolver.resolve('val')).toEqual({ x: 1 })
+    expect(resolver.resolve(VAL)).toEqual({ x: 1 })
   })
 
   it('resolve() throws on unknown token', () => {
     const c = new Container()
     const resolver = new Resolver(c)
 
-    expect(() => resolver.resolve('unknown')).toThrow(/No provider found/)
+    expect(() => resolver.resolve(createToken('unknown'))).toThrow(/No provider found/)
   })
 
   it('resolveOptional() returns null on unknown token', () => {
     const c = new Container()
     const resolver = new Resolver(c)
 
-    expect(resolver.resolveOptional('unknown')).toBeNull()
+    expect(resolver.resolveOptional(createToken('unknown'))).toBeNull()
   })
 
   it('resolveOptional() returns instance on registered token', () => {
     const c = new Container()
-    c.register('val', () => 42)
+    const VAL = createToken<number>('val')
+    c.register(VAL, () => 42)
     const resolver = new Resolver(c)
 
-    expect(resolver.resolveOptional<number>('val')).toBe(42)
+    expect(resolver.resolveOptional(VAL)).toBe(42)
   })
 
   it('Miia auto-registers Resolver so it is injectable', async () => {

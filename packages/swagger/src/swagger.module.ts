@@ -1,10 +1,9 @@
 import type { ConfiguredModule, OptionsOrFactory } from '@miiajs/core'
-import { resolveOptions } from '@miiajs/core'
+import { createToken, resolveOptions } from '@miiajs/core'
 import { SwaggerService } from './swagger.service.js'
 import type { SwaggerSetupOptions } from './types.js'
 
-// String token - miia's DI container does not support Symbol tokens.
-export const SWAGGER_OPTIONS = 'SWAGGER_OPTIONS'
+export const SWAGGER_OPTIONS = createToken<SwaggerSetupOptions>('SwaggerOptions', { hint: 'SwaggerModule.configure()' })
 
 export class SwaggerModule {
   static configure(optionsOrFactory: OptionsOrFactory<SwaggerSetupOptions>): ConfiguredModule {

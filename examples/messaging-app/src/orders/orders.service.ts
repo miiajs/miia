@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { Injectable, inject } from '@miiajs/core'
-import { MessageBus, getMessageBusToken } from '@miiajs/messaging'
+import { MessageBus, messageBus } from '@miiajs/messaging'
 import { TOPIC } from './orders.constants.js'
 import type { NotificationSend, OrderPlaced, PaymentCharge } from './orders.types.js'
 
 @Injectable()
 export class OrdersService {
   private memoryBus = inject(MessageBus)
-  private redisBus = inject<MessageBus>(getMessageBusToken('redis') as string)
+  private redisBus = inject(messageBus('redis'))
 
   async placeOrder(input: { orderId?: string; customerEmail: string; total: number; items: OrderPlaced['items'] }) {
     const orderId = input.orderId ?? randomUUID()

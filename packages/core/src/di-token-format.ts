@@ -1,8 +1,5 @@
-import type { Constructor } from './types.js'
+import type { AnyToken } from './types.js'
 
-export function formatToken(token: string | Constructor): string {
-  if (typeof token === 'string') return token
-  const name = (token as { __name?: unknown }).__name
-  if (typeof name === 'string') return name
+export function formatToken(token: AnyToken): string {
   return token.name || '<anonymous>'
 }

@@ -3,17 +3,17 @@ import { Injectable, inject, Module } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { Idempotent, On } from '../src/decorators.js'
 import { MessageBus } from '../src/message-bus.js'
-import { IDEMPOTENCY_STORE, memoryIdempotencyStore } from '../src/idempotency.js'
+import { memoryIdempotencyStore } from '../src/idempotency.js'
 import { inMemoryTransport } from '../src/in-memory-transport.js'
 import { MessagingModule } from '../src/messaging.module.js'
-import { getMessageBusToken } from '../src/tokens.js'
-import { MESSAGE_TRANSPORT, type MessageTransport } from '../src/types.js'
+import { idempotencyStoreToken, messageBus, transportToken } from '../src/tokens.js'
+import type { MessageTransport } from '../src/types.js'
 
 function transportProvider(transport?: MessageTransport) {
   const t = transport ?? inMemoryTransport({ retry: { backoffMs: 10, maxAttempts: 3 }, drainTimeoutMs: 100 })
   return [
-    { token: MESSAGE_TRANSPORT, factory: () => t },
-    { token: IDEMPOTENCY_STORE, factory: () => null },
+    { token: transportToken(), factory: () => t },
+    { token: idempotencyStoreToken(), factory: () => null },
     { token: MessageBus, factory: () => new MessageBus(t, null, null) },
   ]
 }
@@ -22,8 +22,8 @@ function busWithIdempotency(transport?: MessageTransport) {
   const t = transport ?? inMemoryTransport({ retry: { backoffMs: 10, maxAttempts: 3 }, drainTimeoutMs: 100 })
   const store = memoryIdempotencyStore()
   return [
-    { token: MESSAGE_TRANSPORT, factory: () => t },
-    { token: IDEMPOTENCY_STORE, factory: () => store },
+    { token: transportToken(), factory: () => t },
+    { token: idempotencyStoreToken(), factory: () => store },
     { token: MessageBus, factory: () => new MessageBus(t, store, null) },
   ]
 }
@@ -401,7 +401,7 @@ describe('MessageBus', () => {
           MessagingModule.configure({ transport: inMemoryTransport({ retry: { backoffMs: 5 }, drainTimeoutMs: 50 }) }),
           MessagingModule.configure(
             { transport: inMemoryTransport({ retry: { backoffMs: 5 }, drainTimeoutMs: 50 }) },
-            'kafka',
+            { name: 'kafka' },
           ),
         ],
         providers: [DefaultHandler, KafkaHandler],
@@ -412,7 +412,7 @@ describe('MessageBus', () => {
       cleanup.push(() => app.close())
 
       const defaultBus = app.resolve(MessageBus)
-      const kafkaBus = app.resolve<MessageBus>(getMessageBusToken('kafka') as string)
+      const kafkaBus = app.resolve(messageBus('kafka'))
 
       // Different instances
       expect(defaultBus).not.toBe(kafkaBus)
@@ -440,7 +440,7 @@ describe('MessageBus', () => {
           MessagingModule.configure({ transport: inMemoryTransport({ retry: { backoffMs: 5 }, drainTimeoutMs: 50 }) }),
           MessagingModule.configure(
             { transport: inMemoryTransport({ retry: { backoffMs: 5 }, drainTimeoutMs: 50 }) },
-            'kafka',
+            { name: 'kafka' },
           ),
         ],
         providers: [KafkaOnly],
@@ -456,7 +456,7 @@ describe('MessageBus', () => {
       expect(app.resolve(KafkaOnly).calls).toBe(0)
 
       // Kafka bus emits - KafkaOnly runs
-      await app.resolve<MessageBus>(getMessageBusToken('kafka') as string).publish('topic', {})
+      await app.resolve(messageBus('kafka')).publish('topic', {})
       await wait(20)
       expect(app.resolve(KafkaOnly).calls).toBe(1)
     })
@@ -477,7 +477,9 @@ describe('MessageBus', () => {
       class AppModule {}
 
       const promise = TestApp.create(AppModule).compile()
-      await expect(promise).rejects.toThrow(/references bus 'unknown'/)
+      await expect(promise).rejects.toThrow(
+        /references bus 'unknown', but no MessagingModule\.configure\(opts, \{ name: 'unknown' \}\) is registered/,
+      )
     })
 
     it('throws when @On (no bus) is used but no default MessagingModule is registered', async () => {
@@ -491,7 +493,7 @@ describe('MessageBus', () => {
         imports: [
           MessagingModule.configure(
             { transport: inMemoryTransport({ retry: { backoffMs: 5 }, drainTimeoutMs: 50 }) },
-            'kafka',
+            { name: 'kafka' },
           ),
         ],
         providers: [Lonely],
@@ -499,7 +501,9 @@ describe('MessageBus', () => {
       class AppModule {}
 
       const promise = TestApp.create(AppModule).compile()
-      await expect(promise).rejects.toThrow(/references bus '<default>'/)
+      await expect(promise).rejects.toThrow(
+        /references bus '<default>', but no MessagingModule\.configure\(opts\) is registered/,
+      )
     })
 
     it('per-bus idempotency stores are isolated', async () => {
@@ -534,7 +538,7 @@ describe('MessageBus', () => {
               transport: inMemoryTransport({ retry: { backoffMs: 5 }, drainTimeoutMs: 50 }),
               idempotency: memoryIdempotencyStore(),
             },
-            'kafka',
+            { name: 'kafka' },
           ),
         ],
         providers: [DefaultH, KafkaH],
@@ -546,7 +550,7 @@ describe('MessageBus', () => {
 
       // Each bus delivers once - claims live in separate stores, no collisions.
       await app.resolve(MessageBus).publish('topic', {})
-      await app.resolve<MessageBus>(getMessageBusToken('kafka') as string).publish('topic', {})
+      await app.resolve(messageBus('kafka')).publish('topic', {})
       await wait(20)
 
       expect(app.resolve(DefaultH).calls).toBe(1)

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import type { RequestContext } from '../src/index.js'
-import { Container, Controller, Get, inject, Injectable, Miia, Module } from '../src/index.js'
+import { Controller, Get, inject, Injectable, Miia, Module } from '../src/index.js'
+import { Container } from '../src/di-container.js'
 
 function get(app: Miia, path: string): Promise<Response> {
   return Promise.resolve(app.fetch(new Request(`http://localhost${path}`)))

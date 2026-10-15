@@ -4,7 +4,14 @@ import { Logger } from '../logger.js'
 import { getMeta, setMeta, MODULE, INJECTABLE, PREFIX, RESOLVED_PREFIX } from '../decorators/index.js'
 import type { InjectableMeta } from '../decorators/index.js'
 import type { Router } from '../router.js'
-import type { ConfiguredModule, Constructor, FactoryProvider, ModuleOptions, ProviderDefinition } from '../types.js'
+import type {
+  AnyToken,
+  ConfiguredModule,
+  Constructor,
+  FactoryProvider,
+  ModuleOptions,
+  ProviderDefinition,
+} from '../types.js'
 import { RoutesResolver } from './routes-resolver.js'
 import { isOverride, OVERRIDE_KIND } from './overrides.js'
 import type { OverrideDescriptor } from './overrides.js'
@@ -31,10 +38,10 @@ export class ModuleLoader {
   private logger = new Logger(ModuleLoader.name)
   /** By the pair (class, name); a bare class is the pair (class, ''). */
   private processedModules = new Map<Constructor, Set<string>>()
-  private registeredTokens = new Set<Constructor | string>()
+  private registeredTokens = new Set<AnyToken>()
   private configured = new Map<Constructor, Map<string, ConfiguredEntry>>()
-  private providerOverrides = new Map<Constructor | string, () => unknown>()
-  private usedOverrides = new Set<Constructor | string>()
+  private providerOverrides = new Map<AnyToken, () => unknown>()
+  private usedOverrides = new Set<AnyToken>()
   private routesResolver: RoutesResolver
   private pendingRoutes: PendingRoute[] = []
 
@@ -209,19 +216,9 @@ export class ModuleLoader {
         }
         return
       }
-      const meta = getMeta<InjectableMeta>(provider, INJECTABLE)
-      const scope = meta?.scope ?? 'singleton'
-      const token = meta?.token
-
-      if (this.registerOverride(token ? [token, provider] : [provider])) return
-
-      if (token) {
-        this.container.register(token, () => new provider(), scope)
-        this.container.register(provider, (resolve) => resolve(token), scope)
-        this.registeredTokens.add(token)
-      } else {
-        this.container.register(provider, () => new provider(), scope)
-      }
+      if (this.registerOverride(provider)) return
+      const scope = getMeta<InjectableMeta>(provider, INJECTABLE)?.scope ?? 'singleton'
+      this.container.register(provider, () => new provider(), scope)
       this.registeredTokens.add(provider)
     } else {
       const fp = provider as FactoryProvider
@@ -233,28 +230,20 @@ export class ModuleLoader {
         }
         return
       }
-      if (this.registerOverride([fp.token])) return
+      if (this.registerOverride(fp.token)) return
       this.container.register(fp.token, fp.factory, fp.scope)
       this.registeredTokens.add(fp.token)
     }
   }
 
-  /**
-   * A class and its `@Injectable({ token })` alias are one provider: overridden keys get their
-   * override, the rest resolve to the first overridden one. Runs even for a token replaced before
-   * phase 1, since the alias registration would overwrite it.
-   */
-  private registerOverride(keys: (Constructor | string)[]): boolean {
-    const primary = keys.find((key) => this.providerOverrides.has(key))
-    if (primary === undefined) return false
-    for (const key of keys) {
-      if (!this.applyOverride(key)) this.container.register(key, (resolve) => resolve(primary), 'singleton')
-      this.registeredTokens.add(key)
-    }
+  /** An overridden provider still counts as registered, so a second module declaring it is a duplicate. */
+  private registerOverride(token: AnyToken): boolean {
+    if (!this.applyOverride(token)) return false
+    this.registeredTokens.add(token)
     return true
   }
 
-  private applyOverride(token: Constructor | string): boolean {
+  private applyOverride(token: AnyToken): boolean {
     const factory = this.providerOverrides.get(token)
     if (!factory) return false
     this.container.register(token, factory, 'singleton')

@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
 import {
-  Container,
   Controller,
   createMethodDecorator,
   DiscoveryService,
@@ -15,6 +14,8 @@ import {
   pushMeta,
 } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
+import { Container } from '../src/di-container.js'
+import { createToken } from '../src/di-token.js'
 
 // ─── Container-level tests ──────────────────────────────────────
 
@@ -39,10 +40,10 @@ describe('Container.getSingletonInstances', () => {
     expect(list[0]?.instance).toBeInstanceOf(list[0]!.ctor)
   })
 
-  it('filters out string-token registrations', async () => {
+  it('filters out token-object registrations', async () => {
     class A {}
     c.registerClass(A)
-    c.register('STRING_TOKEN', () => ({ value: 1 }))
+    c.register(createToken('Options'), () => ({ value: 1 }))
     await c.initAll()
 
     const list = c.getSingletonInstances()
@@ -81,12 +82,12 @@ describe('Container.bootstrapAll', () => {
 
   it('calls onReady on all singletons that define it', async () => {
     const calls: string[] = []
-    c.register('a', () => ({
+    c.register(createToken('a'), () => ({
       onReady: async () => {
         calls.push('a-ready')
       },
     }))
-    c.register('b', () => ({
+    c.register(createToken('b'), () => ({
       onReady: async () => {
         calls.push('b-ready')
       },
@@ -100,7 +101,7 @@ describe('Container.bootstrapAll', () => {
 
   it('runs onReady strictly after all onInit hooks', async () => {
     const order: string[] = []
-    c.register('a', () => ({
+    c.register(createToken('a'), () => ({
       onInit: async () => {
         order.push('a-init')
       },
@@ -108,7 +109,7 @@ describe('Container.bootstrapAll', () => {
         order.push('a-ready')
       },
     }))
-    c.register('b', () => ({
+    c.register(createToken('b'), () => ({
       onInit: async () => {
         order.push('b-init')
       },
@@ -127,7 +128,7 @@ describe('Container.bootstrapAll', () => {
   })
 
   it('skips providers without onReady', async () => {
-    c.register('noop', () => ({}))
+    c.register(createToken('noop'), () => ({}))
     await c.initAll()
     await expect(c.bootstrapAll()).resolves.toBeUndefined()
   })
@@ -135,7 +136,7 @@ describe('Container.bootstrapAll', () => {
   it('skips transient providers', async () => {
     const calls: string[] = []
     c.register(
-      't',
+      createToken('t'),
       () => ({
         onReady: async () => {
           calls.push('transient-ready')

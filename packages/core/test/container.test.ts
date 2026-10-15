@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'bun:test'
-import { Container, inject, Injectable } from '../src/index.js'
+import { Container } from '../src/di-container.js'
+import { createToken } from '../src/index.js'
 
 describe('Container', () => {
   let c: Container
@@ -9,9 +10,10 @@ describe('Container', () => {
   })
 
   describe('register & resolve', () => {
-    it('should register and resolve by string token', () => {
-      c.register('greeting', () => 'hello')
-      expect(c.resolve<string>('greeting')).toBe('hello')
+    it('should register and resolve by token object', () => {
+      const GREETING = createToken<string>('greeting')
+      c.register(GREETING, () => 'hello')
+      expect(c.resolve(GREETING)).toBe('hello')
     })
 
     it('should register and resolve by class constructor', () => {
@@ -26,87 +28,93 @@ describe('Container', () => {
     })
 
     it('should throw when resolving unregistered token', () => {
-      expect(() => c.resolve('unknown')).toThrow('[Miia] No provider found for token')
+      expect(() => c.resolve(createToken('unknown'))).toThrow('[Miia] No provider found for token')
     })
   })
 
   describe('resolveOptional', () => {
     it('should return null for unregistered token', () => {
-      expect(c.resolveOptional('unknown')).toBeNull()
+      expect(c.resolveOptional(createToken('unknown'))).toBeNull()
     })
 
     it('should return instance for registered token', () => {
-      c.register('val', () => 123)
-      expect(c.resolveOptional<number>('val')).toBe(123)
+      const VAL = createToken<number>('val')
+      c.register(VAL, () => 123)
+      expect(c.resolveOptional(VAL)).toBe(123)
     })
   })
 
   describe('has', () => {
     it('should return true for registered token', () => {
-      c.register('key', () => 'value')
-      expect(c.has('key')).toBe(true)
+      const KEY = createToken<string>('key')
+      c.register(KEY, () => 'value')
+      expect(c.has(KEY)).toBe(true)
     })
 
     it('should return false for unregistered token', () => {
-      expect(c.has('missing')).toBe(false)
+      expect(c.has(createToken('missing'))).toBe(false)
     })
   })
 
   describe('scopes', () => {
+    const COUNTER = createToken<number>('counter')
+
     it('singleton: should return same instance', () => {
       let count = 0
-      c.register('counter', () => ++count, 'singleton')
-      expect(c.resolve<number>('counter')).toBe(1)
-      expect(c.resolve<number>('counter')).toBe(1)
+      c.register(COUNTER, () => ++count, 'singleton')
+      expect(c.resolve(COUNTER)).toBe(1)
+      expect(c.resolve(COUNTER)).toBe(1)
     })
 
     it('transient: should return new instance each time', () => {
       let count = 0
-      c.register('counter', () => ++count, 'transient')
-      expect(c.resolve<number>('counter')).toBe(1)
-      expect(c.resolve<number>('counter')).toBe(2)
-      expect(c.resolve<number>('counter')).toBe(3)
+      c.register(COUNTER, () => ++count, 'transient')
+      expect(c.resolve(COUNTER)).toBe(1)
+      expect(c.resolve(COUNTER)).toBe(2)
+      expect(c.resolve(COUNTER)).toBe(3)
     })
 
     it('request: should cache per request scope', () => {
       let count = 0
-      c.register('counter', () => ++count, 'request')
+      c.register(COUNTER, () => ++count, 'request')
       const first = new Map()
-      expect(c.resolveInRequest<number>('counter', first)).toBe(1)
-      expect(c.resolveInRequest<number>('counter', first)).toBe(1)
+      expect(c.resolveInRequest(COUNTER, first)).toBe(1)
+      expect(c.resolveInRequest(COUNTER, first)).toBe(1)
 
       const second = new Map()
-      expect(c.resolveInRequest<number>('counter', second)).toBe(2)
-      expect(c.resolveInRequest<number>('counter', second)).toBe(2)
-      expect(c.resolveInRequest<number>('counter', first)).toBe(1)
+      expect(c.resolveInRequest(COUNTER, second)).toBe(2)
+      expect(c.resolveInRequest(COUNTER, second)).toBe(2)
+      expect(c.resolveInRequest(COUNTER, first)).toBe(1)
     })
 
     it('request: should throw when resolved outside a request', () => {
-      c.register('counter', () => 1, 'request')
-      expect(() => c.resolve('counter')).toThrow(/can only be resolved inside a request/)
+      c.register(COUNTER, () => 1, 'request')
+      expect(() => c.resolve(COUNTER)).toThrow(/can only be resolved inside a request/)
     })
   })
 
   describe('factory with resolve', () => {
     it('should pass resolve to factory when it accepts an argument', () => {
-      c.register('dep', () => 'dependency')
-      c.register('service', (resolve) => {
-        const dep = resolve<string>('dep')
+      const DEP = createToken<string>('dep')
+      const SERVICE = createToken<string>('service')
+      c.register(DEP, () => 'dependency')
+      c.register(SERVICE, (resolve) => {
+        const dep = resolve(DEP)
         return `service-${dep}`
       })
-      expect(c.resolve<string>('service')).toBe('service-dependency')
+      expect(c.resolve(SERVICE)).toBe('service-dependency')
     })
   })
 
   describe('lifecycle', () => {
     it('initAll should call onInit on singletons', async () => {
       const calls: string[] = []
-      c.register('a', () => ({
+      c.register(createToken('a'), () => ({
         onInit: async () => {
           calls.push('a-init')
         },
       }))
-      c.register('b', () => ({
+      c.register(createToken('b'), () => ({
         onInit: async () => {
           calls.push('b-init')
         },
@@ -119,14 +127,15 @@ describe('Container', () => {
 
     it('destroyAll should call onDestroy on singletons', async () => {
       const calls: string[] = []
-      c.register('a', () => ({
+      const A = createToken('a')
+      c.register(A, () => ({
         onDestroy: async () => {
           calls.push('a-destroy')
         },
       }))
 
       // Must resolve first to create the instance
-      c.resolve('a')
+      c.resolve(A)
       await c.destroyAll()
       expect(calls).toEqual(['a-destroy'])
     })
@@ -134,7 +143,7 @@ describe('Container', () => {
     it('initAll should not call onInit on transient providers', async () => {
       const calls: string[] = []
       c.register(
-        't',
+        createToken('t'),
         () => ({
           onInit: async () => {
             calls.push('transient-init')
@@ -150,9 +159,11 @@ describe('Container', () => {
 
   describe('circular dependencies', () => {
     it('should throw on circular dependency', () => {
-      c.register('A', (resolve) => resolve('B'))
-      c.register('B', (resolve) => resolve('A'))
-      expect(() => c.resolve('A')).toThrow('[Miia] Circular dependency detected')
+      const A = createToken('A')
+      const B = createToken('B')
+      c.register(A, (resolve) => resolve(B))
+      c.register(B, (resolve) => resolve(A))
+      expect(() => c.resolve(A)).toThrow('[Miia] Circular dependency detected')
     })
   })
 })

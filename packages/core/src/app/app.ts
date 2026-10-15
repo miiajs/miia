@@ -18,6 +18,8 @@ import { CookieJar } from '../cookies.js'
 import { ModuleLoader } from './module-loader.js'
 import type { OverrideDescriptor } from './overrides.js'
 import type {
+  AbstractConstructor,
+  AnyToken,
   CanActivate,
   ConfiguredModule,
   ConnInfo,
@@ -29,6 +31,7 @@ import type {
   ProviderDefinition,
   RequestContext,
   ServerHandle,
+  Token,
 } from '../types.js'
 
 // ─── Options ─────────────────────────────────────────────────────
@@ -250,7 +253,7 @@ export class Miia {
     return this
   }
 
-  get<T>(token: Constructor<T> | string): T {
+  get<T>(token: Token<T> | AbstractConstructor<T>): T {
     this.processGraph()
     return this.container.resolve<T>(token)
   }
@@ -713,7 +716,7 @@ class Context implements RequestContext {
   private _connInfo: ConnInfo | null = null
   private _cookieJar: CookieJar | null = null
   private _container: Container
-  private _scope: Map<string | Constructor, unknown> | null = null
+  private _scope: Map<AnyToken, unknown> | null = null
 
   constructor(req: Request, search: string, env: unknown, trustProxy: string[] | false, container: Container) {
     this.req = req
@@ -787,7 +790,7 @@ class Context implements RequestContext {
     this._jsonPromise = Promise.resolve(value)
   }
 
-  resolve<T>(token: Constructor<T> | string): T {
+  resolve<T>(token: Token<T> | AbstractConstructor<T>): T {
     return this._container.resolveInRequest(token, (this._scope ??= new Map()))
   }
 }

@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'bun:test'
-import { Container, runInContainerContext } from '@miiajs/core'
+import { Miia } from '@miiajs/core'
 import { SignJWT, decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair } from 'jose'
-import { JWT_OPTIONS } from '../src/constants.js'
+import { JwtModule } from '../src/jwt.module.js'
 import { JwtService } from '../src/jwt.service.js'
 import type { JwtOptions } from '../src/jwt.types.js'
 
 function makeService(options: JwtOptions): JwtService {
-  const container = new Container()
-  container.register(JWT_OPTIONS, () => options, 'singleton')
-  container.register(JwtService, () => new JwtService(), 'singleton')
-  return container.resolve(JwtService)
+  return new Miia({ logger: false }).register(JwtModule.configure(options)).get(JwtService)
 }
 
 const secret = 'a-very-long-shared-secret-for-hs256-tests-0123456789'
@@ -72,17 +69,25 @@ describe('JwtService - standalone construction', () => {
     expect(payload.sub).toBe('carol')
   })
 
-  it('new JwtService() inside runInContainerContext resolves JWT_OPTIONS from container', async () => {
-    const container = new Container()
-    container.register(JWT_OPTIONS, () => ({ secret, algorithm: 'HS256' }) satisfies JwtOptions, 'singleton')
+  it('JwtService reads the options JwtModule.configure() registered', async () => {
+    const svc = makeService({ secret, algorithm: 'HS256' })
+    const token = await svc.sign({ sub: 'dave' })
+    expect(decodeProtectedHeader(token).alg).toBe('HS256')
 
-    const payload = await runInContainerContext(container, async () => {
-      const svc = new JwtService()
-      const token = await svc.sign({ sub: 'dave' })
-      return svc.verify<{ sub: string }>(token)
-    })
-
+    const payload = await svc.verify<{ sub: string }>(token)
     expect(payload.sub).toBe('dave')
+  })
+})
+
+describe('JwtService - without JwtModule.configure()', () => {
+  it('names JwtModule.configure() when JwtService is not provided', () => {
+    expect(() => new Miia({ logger: false }).get(JwtService)).toThrow('JwtService is provided by JwtModule.configure()')
+  })
+
+  it('names JwtModule.configure() when JwtService is provided without its options', () => {
+    expect(() => new Miia({ logger: false }).provide(JwtService).get(JwtService)).toThrow(
+      'JwtOptions is provided by JwtModule.configure()',
+    )
   })
 })
 

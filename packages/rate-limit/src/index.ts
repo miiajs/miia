@@ -1,6 +1,5 @@
 // @miiajs/rate-limit - public API
 
-export { RATE_LIMIT_OPTIONS } from './constants.js'
 export { RateLimit, SkipRateLimit } from './decorators.js'
 export type { RateLimitModuleOptions } from './guard.js'
 export { RateLimitGuard } from './guard.js'

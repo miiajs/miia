@@ -1,6 +1,7 @@
 import type { ConfiguredModule, FactoryProvider, OptionsOrFactory, ZodLike } from '@miiajs/core'
 import { resolveOptions } from '@miiajs/core'
 import { ConfigService } from './config.service.js'
+import { CONFIG_VALUES } from './tokens.js'
 
 export interface ConfigModuleOptions {
   schema?: ZodLike
@@ -13,7 +14,7 @@ export class ConfigModule {
       module: ConfigModule,
       providers: [
         {
-          token: 'CONFIG_VALUES',
+          token: CONFIG_VALUES,
           factory: (resolve) => {
             const options = resolveOptions(optionsOrFactory, { resolve })
             const env = options.env ?? process.env

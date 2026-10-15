@@ -3,19 +3,18 @@ import { Injectable, Module } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { On } from '../src/decorators.js'
 import { MessageBus } from '../src/message-bus.js'
-import { IDEMPOTENCY_STORE } from '../src/idempotency.js'
 import { inMemoryTransport } from '../src/in-memory-transport.js'
 import { MessagingModule } from '../src/messaging.module.js'
-import { getMessageBusToken } from '../src/tokens.js'
-import { type InitialPositionKind, MESSAGE_TRANSPORT, type MessageTransport } from '../src/types.js'
+import { idempotencyStoreToken, messageBus, transportToken } from '../src/tokens.js'
+import type { InitialPositionKind, MessageTransport } from '../src/types.js'
 import { stubTransport, StubTransport } from './fixtures/stub-transport.js'
 
 const ALL_POSITIONS: readonly InitialPositionKind[] = ['latest', 'earliest', 'since']
 
 function busProviders(transport: MessageTransport, options: ConstructorParameters<typeof MessageBus>[3] = {}) {
   return [
-    { token: MESSAGE_TRANSPORT, factory: () => transport },
-    { token: IDEMPOTENCY_STORE, factory: () => null },
+    { token: transportToken(), factory: () => transport },
+    { token: idempotencyStoreToken(), factory: () => null },
     { token: MessageBus, factory: () => new MessageBus(transport, null, null, options) },
   ]
 }
@@ -415,7 +414,7 @@ describe('Initial position', () => {
       @Module({
         imports: [
           MessagingModule.configure({ transport: defaultTransport, initialPosition: 'earliest' }),
-          MessagingModule.configure({ transport: namedTransport }, 'other'),
+          MessagingModule.configure({ transport: namedTransport }, { name: 'other' }),
         ],
         providers: [OnDefault, OnNamed],
       })
@@ -424,7 +423,7 @@ describe('Initial position', () => {
       const app = await TestApp.create(AppModule).compile()
       cleanup.push(() => app.close())
 
-      expect(app.resolve<MessageBus>(getMessageBusToken('other') as string)).not.toBe(app.resolve(MessageBus))
+      expect(app.resolve(messageBus('other'))).not.toBe(app.resolve(MessageBus))
       expect(defaultTransport.subscribes).toHaveLength(1)
       expect(defaultTransport.subscribes[0]?.options.initialPosition).toBe('earliest')
       expect(namedTransport.subscribes).toHaveLength(1)

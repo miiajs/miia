@@ -5,13 +5,14 @@ import { createClassDecorator } from './create-decorator.js'
 
 export interface InjectableOptions {
   scope?: Scope
-  token?: string
+  /** What provides this class (e.g. `'UsersModule'`), shown in "No provider" errors. */
+  hint?: string
 }
 
 export const Injectable = createClassDecorator<[options?: InjectableOptions]>((_target, context, options) => {
   setMeta<InjectableMeta>(context.metadata!, INJECTABLE, {
     scope: options?.scope ?? 'singleton',
-    token: options?.token,
+    hint: options?.hint,
   })
 })
 

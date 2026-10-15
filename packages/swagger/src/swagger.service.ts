@@ -5,15 +5,14 @@ import { createStaticHandler } from '@miiajs/serve-static'
 import { SpecBuilder, type DiscoveredController } from './builder/index.js'
 import { SWAGGER_OPTIONS } from './swagger.module.js'
 import { buildSwaggerInitializer } from './swagger-ui.js'
-import type { SwaggerSetupOptions } from './types.js'
 
 const swaggerUiDistPath = dirname(fileURLToPath(import.meta.resolve('swagger-ui-dist/package.json')))
 
-@Injectable()
+@Injectable({ hint: 'SwaggerModule.configure()' })
 export class SwaggerService {
   private discovery = inject(DiscoveryService)
   private router = inject(Router)
-  private options = inject<SwaggerSetupOptions>(SWAGGER_OPTIONS)
+  private options = inject(SWAGGER_OPTIONS)
 
   async onReady(): Promise<void> {
     const controllers = this.collectControllers()

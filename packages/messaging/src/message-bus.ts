@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { type Constructor, DiscoveryService, getMeta, inject, Logger, Resolver } from '@miiajs/core'
+import { type Constructor, DiscoveryService, getMeta, Injectable, inject, Logger, Resolver } from '@miiajs/core'
 import { IDEMPOTENT, type IdempotentMeta, ON, type OnMeta } from './decorators.js'
 import { deriveGroupName } from './group-name.js'
 import type { IdempotencyStore } from './idempotency.js'
-import { getMessageBusToken } from './tokens.js'
+import { busToken, configureCall } from './tokens.js'
 import {
   type DispatchMode,
   type HandlerResult,
@@ -67,9 +67,9 @@ const VALID_INITIAL_POSITIONS = "'latest', 'earliest' or { since: ms } with a po
  * provides `appName`). Handlers run independently - retry, ack/nack,
  * mode/concurrency are isolated per handler.
  *
- * For multi-bus setups, use `MessagingModule.configure(opts, name)` and inject
- * the named bus via `inject<MessageBus>(getMessageBusToken(name))`. Handlers
- * target a specific bus via `@On(topic, { bus: name })`.
+ * For multi-bus setups, use `MessagingModule.configure(opts, { name })` and inject
+ * the named bus via `inject(messageBus(name))`. Handlers target a specific bus
+ * via `@On(topic, { bus: name })`.
  *
  * `MessageBus.publish` and `MessageTransport.publish` share the method name
  * but live at different layers: `MessageBus.publish(topic, payload, meta)`
@@ -78,6 +78,7 @@ const VALID_INITIAL_POSITIONS = "'latest', 'earliest' or { since: ms } with a po
  * appear in stack traces; signature shape (envelope vs payload+meta) makes
  * the layer obvious.
  */
+@Injectable({ hint: 'MessagingModule.configure()' })
 export class MessageBus {
   // Field-init for shared globals (idiomatic MiiaJS pattern).
   private discovery = inject(DiscoveryService)
@@ -102,11 +103,11 @@ export class MessageBus {
     // Each bus instance runs this check; first onReady to fail throws.
     for (const h of allHandlers) {
       const refBus = h.metadata.bus ?? null
-      const token = getMessageBusToken(refBus ?? undefined)
+      const token = busToken(refBus ?? undefined)
       if (!this.resolver.has(token)) {
         throw new Error(
           `[messaging] @On on ${h.ctor.name}.${h.methodName} references bus '${refBus ?? '<default>'}', ` +
-            `but no MessagingModule.configure(opts${refBus ? `, '${refBus}'` : ''}) is registered.`,
+            `but no ${configureCall(refBus ?? undefined)} is registered.`,
         )
       }
     }

@@ -4,7 +4,7 @@ import type mongoose from 'mongoose'
 import type { MongooseModuleOptions } from './types.js'
 import type { ModelToken } from './define-model.js'
 import { MongooseService } from './mongoose.service.js'
-import { getInternalServiceToken, getRegistryToken, mongooseConnection } from './tokens.js'
+import { configureCall, getInternalServiceToken, getRegistryToken, mongooseConnection } from './tokens.js'
 
 // ─── Cross-connection collision warning ──────────────────────────────────────
 
@@ -27,24 +27,24 @@ function checkCrossConnectionCollision(models: ModelToken<any>[], conn: string):
 // ─── Friendly error helper ───────────────────────────────────────────────────
 
 function configureMissingError(name: string | undefined, suffix: string): Error {
-  return new Error(
-    `[Miia/Mongoose] ${suffix} ` +
-      `MongooseModule.configure() is missing in the root module${name ? ` for connection "${name}"` : ''}.`,
-  )
+  return new Error(`[Miia/Mongoose] ${suffix} ${configureCall(name)} is missing in the root module.`)
 }
 
 // ─── MongooseModule ──────────────────────────────────────────────────────────
 
 export class MongooseModule {
-  static configure(optionsOrFactory: OptionsOrFactory<MongooseModuleOptions>, name?: string): ConfiguredModule {
+  static configure(
+    optionsOrFactory: OptionsOrFactory<MongooseModuleOptions>,
+    options?: { name?: string },
+  ): ConfiguredModule {
+    const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
     const registryToken = getRegistryToken(name)
     const connToken = mongooseConnection(name)
 
-    const ModuleClass = name ? (class MongooseNamedModule {} as Constructor) : MongooseModule
-
     return {
-      module: ModuleClass,
+      module: MongooseModule,
+      name,
       providers: [
         {
           token: registryToken,
@@ -54,7 +54,7 @@ export class MongooseModule {
           token: serviceToken,
           factory: (resolve) => {
             const options = resolveOptions(optionsOrFactory, { resolve })
-            const registry = resolve<Map<ModelToken<any>, ModelToken<any>>>(registryToken)
+            const registry = resolve(registryToken)
             return new MongooseService(options, registry)
           },
         } satisfies FactoryProvider,
@@ -62,14 +62,15 @@ export class MongooseModule {
           token: connToken,
           factory: (resolve) => {
             // MongooseService.onInit runs after provider factories, so the Connection is looked up on first use
-            return createLazyProxy<mongoose.Connection>(() => resolve<MongooseService>(serviceToken).connection)
+            return createLazyProxy<mongoose.Connection>(() => resolve(serviceToken).connection)
           },
         } satisfies FactoryProvider,
       ],
     }
   }
 
-  static register(models: ModelToken<any>[], name?: string): ConfiguredModule {
+  static register(models: ModelToken<any>[], options?: { name?: string }): ConfiguredModule {
+    const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
     const registryToken = getRegistryToken(name)
     const conn = name ?? ''
@@ -84,13 +85,13 @@ export class MongooseModule {
         let service: MongooseService
         let registry: Map<ModelToken<any>, ModelToken<any>>
         try {
-          service = resolve<MongooseService>(serviceToken)
-          registry = resolve<Map<ModelToken<any>, ModelToken<any>>>(registryToken)
+          service = resolve(serviceToken)
+          registry = resolve(registryToken)
         } catch {
           throw configureMissingError(name, `inject(${token.name}) failed:`)
         }
         registry.set(token, token)
-        // Constructable for mongoose's `new User({...})` document idiom; `doc instanceof User` keeps working
+        // Constructable for the injected model's `new this.users({...})`; `doc instanceof this.users` keeps working
         return createLazyProxy<mongoose.Model<any>>(() => service.getModel(token), { constructable: true })
       },
     }))

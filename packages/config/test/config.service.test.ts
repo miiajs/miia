@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { Container, runInContainerContext } from '@miiajs/core'
+import { Miia } from '@miiajs/core'
+import { ConfigModule } from '../src/config.module.js'
 import { ConfigService } from '../src/config.service.js'
 
 interface AppConfig {
@@ -9,11 +10,11 @@ interface AppConfig {
 }
 
 function createService<T extends Record<string, any>>(values?: T): ConfigService<T> {
-  const container = new Container()
-  if (values !== undefined) {
-    container.register('CONFIG_VALUES', () => values, 'singleton')
-  }
-  return runInContainerContext(container, () => new ConfigService<T>())
+  const app = new Miia({ logger: false })
+  if (values === undefined) return app.provide(ConfigService).get(ConfigService<T>)
+  return app
+    .register(ConfigModule.configure({ env: values as Record<string, string | undefined> }))
+    .get(ConfigService<T>)
 }
 
 describe('ConfigService', () => {
@@ -66,7 +67,7 @@ describe('ConfigService', () => {
     })
   })
 
-  describe('without CONFIG_VALUES registered', () => {
+  describe('without ConfigModule.configure()', () => {
     it('falls back to an empty object', () => {
       const service = createService()
       expect(service.get('ANYTHING' as any)).toBeUndefined()

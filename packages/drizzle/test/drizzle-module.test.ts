@@ -1,15 +1,17 @@
 import { describe, expect, it } from 'bun:test'
-import { Container } from '@miiajs/core'
+import { Miia, Module, overrideModule } from '@miiajs/core'
 import type { FactoryProvider } from '@miiajs/core'
 import { DrizzleModule } from '../src/drizzle.module.js'
 import { DrizzleService } from '../src/drizzle.service.js'
 import { drizzleDb, getInternalServiceToken } from '../src/tokens.js'
+import type { DrizzleModuleOptions } from '../src/types.js'
 
-function registerProviders(container: Container, providers: FactoryProvider[]) {
-  for (const p of providers) {
-    container.register(p.token, p.factory as any, p.scope)
-  }
+function createApp(...modules: Parameters<Miia['register']>): Miia {
+  return new Miia({ logger: false }).register(...modules)
 }
+
+const pg = (url: string): DrizzleModuleOptions => ({ dialect: 'postgres', connection: { url } })
+const urlOf = (service: DrizzleService) => (service as any).options.connection.url
 
 describe('drizzleDb', () => {
   it('returns the same token for the default connection', () => {
@@ -25,134 +27,156 @@ describe('drizzleDb', () => {
     expect(drizzleDb('a')).not.toBe(drizzleDb('b'))
   })
 
-  it('returns the same runtime token regardless of generic instantiation', () => {
-    expect(drizzleDb<{ a: 1 }>()).toBe(drizzleDb<{ b: 2 }>())
+  it('treats an empty name as the default connection', () => {
+    expect(drizzleDb('')).toBe(drizzleDb())
   })
 
-  it('returns a class-like (Constructor) so DI accepts it as a token', () => {
-    expect(typeof drizzleDb()).toBe('function')
-    expect(typeof drizzleDb('analytics')).toBe('function')
+  it('returns the same runtime token regardless of generic instantiation', () => {
+    expect(drizzleDb<{ a: 1 }>() as unknown).toBe(drizzleDb<{ b: 2 }>())
+  })
+
+  it('returns a frozen token object named after the connection', () => {
+    expect(typeof drizzleDb()).toBe('object')
+    expect(Object.isFrozen(drizzleDb('analytics'))).toBe(true)
+    expect(drizzleDb().name).toBe('drizzleDb(default)')
+    expect(drizzleDb('analytics').name).toBe('drizzleDb(analytics)')
+  })
+
+  it('hints at the configure() call that provides it', () => {
+    expect(drizzleDb().hint).toBe('DrizzleModule.configure()')
+    expect(drizzleDb('analytics').hint).toBe("DrizzleModule.configure(opts, { name: 'analytics' })")
   })
 })
 
 describe('getInternalServiceToken', () => {
-  it('returns __DRIZZLE_SERVICE for default', () => {
-    expect(getInternalServiceToken()).toBe('__DRIZZLE_SERVICE')
+  it('returns the same token for the same name', () => {
+    expect(getInternalServiceToken()).toBe(getInternalServiceToken())
+    expect(getInternalServiceToken('analytics')).toBe(getInternalServiceToken('analytics'))
+    expect(getInternalServiceToken('')).toBe(getInternalServiceToken())
   })
 
-  it('returns __DRIZZLE_SERVICE_name for named', () => {
-    expect(getInternalServiceToken('analytics')).toBe('__DRIZZLE_SERVICE_analytics')
+  it('returns different tokens for different names', () => {
+    expect(getInternalServiceToken()).not.toBe(getInternalServiceToken('analytics'))
+    expect(getInternalServiceToken('a')).not.toBe(getInternalServiceToken('b'))
+  })
+
+  it('is a token of its own, not the db token', () => {
+    expect(getInternalServiceToken()).not.toBe(drizzleDb() as unknown)
+    expect(getInternalServiceToken().name).toBe('DrizzleService(default)')
   })
 })
 
 describe('DrizzleModule.configure (default)', () => {
   it('returns ConfiguredModule with module === DrizzleModule and 2 providers', () => {
-    const configured = DrizzleModule.configure({
-      dialect: 'postgres',
-      connection: { url: 'postgres://localhost/test' },
-    })
+    const configured = DrizzleModule.configure(pg('postgres://localhost/test'))
     expect(configured.module).toBe(DrizzleModule)
+    expect(configured.name).toBeUndefined()
     expect(configured.providers).toHaveLength(2)
     const tokens = (configured.providers as FactoryProvider[]).map((p) => p.token)
-    expect(tokens).toContain('__DRIZZLE_SERVICE')
+    expect(tokens).toContain(getInternalServiceToken())
     expect(tokens).toContain(drizzleDb())
   })
 
   it('builds a DrizzleService from the service-token factory', () => {
-    const configured = DrizzleModule.configure({
-      dialect: 'postgres',
-      connection: { url: 'postgres://localhost/test' },
-    })
-    const container = new Container()
-    registerProviders(container, configured.providers as FactoryProvider[])
-    const service = container.resolve('__DRIZZLE_SERVICE')
-    expect(service).toBeInstanceOf(DrizzleService)
+    const app = createApp(DrizzleModule.configure(pg('postgres://localhost/test')))
+    expect(app.get(getInternalServiceToken())).toBeInstanceOf(DrizzleService)
   })
 
   it('accepts a factory function for options', () => {
-    const configured = DrizzleModule.configure(() => ({
-      dialect: 'postgres' as const,
-      connection: { url: 'postgres://localhost/test' },
-    }))
-    const container = new Container()
-    registerProviders(container, configured.providers as FactoryProvider[])
-    const service = container.resolve('__DRIZZLE_SERVICE')
+    const configured = DrizzleModule.configure(() => pg('postgres://localhost/test'))
+    const service = createApp(configured).get(getInternalServiceToken())
     expect(service).toBeInstanceOf(DrizzleService)
+    expect(urlOf(service)).toBe('postgres://localhost/test')
   })
 
   it('builds a lazy db proxy from the db-token factory', () => {
-    const configured = DrizzleModule.configure({
-      dialect: 'postgres',
-      connection: { url: 'postgres://localhost/test' },
-    })
-    const container = new Container()
-    registerProviders(container, configured.providers as FactoryProvider[])
+    const app = createApp(DrizzleModule.configure(pg('postgres://localhost/test')))
     // Resolve does not throw even though service has not yet been onInit-ed - the proxy is lazy.
-    const dbProxy = container.resolve(drizzleDb()) as any
+    const dbProxy = app.get(drizzleDb())
     expect(typeof dbProxy).toBe('object')
   })
 })
 
 describe('DrizzleModule.configure (named)', () => {
-  it('uses a unique module class for named connections', () => {
-    const configured = DrizzleModule.configure(
-      { dialect: 'postgres', connection: { url: 'postgres://localhost/analytics' } },
-      'analytics',
-    )
-    expect(configured.module).not.toBe(DrizzleModule)
+  it('keeps DrizzleModule as the module and carries the name', () => {
+    const configured = DrizzleModule.configure(pg('postgres://localhost/analytics'), { name: 'analytics' })
+    expect(configured.module).toBe(DrizzleModule)
+    expect(configured.name).toBe('analytics')
   })
 
-  it('uses suffixed internal service token and the named drizzleDb token', () => {
-    const configured = DrizzleModule.configure(
-      { dialect: 'postgres', connection: { url: 'postgres://localhost/analytics' } },
-      'analytics',
-    )
+  it('treats an empty name as the default connection', () => {
+    const configured = DrizzleModule.configure(pg('postgres://localhost/test'), { name: '' })
+    expect(configured.name).toBeUndefined()
     const tokens = (configured.providers as FactoryProvider[]).map((p) => p.token)
-    expect(tokens).toContain('__DRIZZLE_SERVICE_analytics')
+    expect(tokens).toContain(getInternalServiceToken())
+    expect(tokens).toContain(drizzleDb())
+  })
+
+  it('uses the named internal service token and the named drizzleDb token', () => {
+    const configured = DrizzleModule.configure(pg('postgres://localhost/analytics'), { name: 'analytics' })
+    const tokens = (configured.providers as FactoryProvider[]).map((p) => p.token)
+    expect(tokens).toContain(getInternalServiceToken('analytics'))
     expect(tokens).toContain(drizzleDb('analytics'))
   })
 
-  it('isolates default and named db tokens', () => {
-    const def = DrizzleModule.configure({ dialect: 'postgres', connection: { url: 'postgres://localhost/main' } })
-    const ana = DrizzleModule.configure(
-      { dialect: 'postgres', connection: { url: 'postgres://localhost/analytics' } },
-      'analytics',
-    )
+  it('isolates default and named connections', () => {
+    const def = DrizzleModule.configure(pg('postgres://localhost/main'))
+    const ana = DrizzleModule.configure(pg('postgres://localhost/analytics'), { name: 'analytics' })
+    const app = createApp(def, ana)
 
-    const container = new Container()
-    registerProviders(container, def.providers as FactoryProvider[])
-    registerProviders(container, ana.providers as FactoryProvider[])
+    expect(app.get(drizzleDb())).not.toBe(app.get(drizzleDb('analytics')))
+    expect(urlOf(app.get(getInternalServiceToken()))).toBe('postgres://localhost/main')
+    expect(urlOf(app.get(getInternalServiceToken('analytics')))).toBe('postgres://localhost/analytics')
+  })
 
-    const defDb = container.resolve(drizzleDb())
-    const anaDb = container.resolve(drizzleDb('analytics'))
-    expect(defDb).not.toBe(anaDb)
+  it('throws when the same name is configured twice', () => {
+    const a = DrizzleModule.configure(pg('postgres://localhost/a'), { name: 'analytics' })
+    const b = DrizzleModule.configure(pg('postgres://localhost/b'), { name: 'analytics' })
+    expect(() => createApp(a, b).get(drizzleDb('analytics'))).toThrow(/configured twice/)
+  })
+
+  it('overrideModule() replaces the named connection and leaves the default one alone', () => {
+    @Module({
+      imports: [
+        DrizzleModule.configure(pg('postgres://localhost/main')),
+        DrizzleModule.configure(pg('postgres://localhost/analytics'), { name: 'analytics' }),
+      ],
+    })
+    class Root {}
+
+    const test = DrizzleModule.configure(pg('postgres://localhost/test'), { name: 'analytics' })
+    const app = createApp(Root, overrideModule(test))
+
+    expect(urlOf(app.get(getInternalServiceToken('analytics')))).toBe('postgres://localhost/test')
+    expect(urlOf(app.get(getInternalServiceToken()))).toBe('postgres://localhost/main')
   })
 })
 
 describe('lazy proxy forwarding', () => {
   it('routes property access through DrizzleService.db getter', () => {
     const fakeDb = { select: () => 'fake-select' } as any
-    const configured = DrizzleModule.configure({
-      dialect: 'postgres',
-      connection: { url: 'postgres://localhost/test' },
-    })
+    const app = createApp(DrizzleModule.configure(pg('postgres://localhost/test')))
 
-    const container = new Container()
-    registerProviders(container, configured.providers as FactoryProvider[])
-
-    const service = container.resolve('__DRIZZLE_SERVICE') as DrizzleService
+    const service = app.get(getInternalServiceToken())
     // Inject the fake db without going through onInit.
     ;(service as any)._db = fakeDb
 
-    const proxy = container.resolve(drizzleDb()) as any
+    const proxy = app.get(drizzleDb()) as any
     expect(proxy.select()).toBe('fake-select')
   })
 })
 
 describe('DrizzleModule without configure', () => {
-  it('throws when resolving drizzleDb() in a container without configure providers', () => {
-    const container = new Container()
-    expect(() => container.resolve(drizzleDb())).toThrow()
+  it('names the configure() call when drizzleDb() has no provider', () => {
+    const app = new Miia({ logger: false })
+    expect(() => app.get(drizzleDb())).toThrow('drizzleDb(default) is provided by DrizzleModule.configure()')
+  })
+
+  it('names the configure() call with the name when drizzleDb(name) has no provider', () => {
+    const app = new Miia({ logger: false })
+    expect(() => app.get(drizzleDb('analytics'))).toThrow(
+      "drizzleDb(analytics) is provided by DrizzleModule.configure(opts, { name: 'analytics' })",
+    )
   })
 })
 

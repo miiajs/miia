@@ -18,7 +18,7 @@ export interface OnMeta extends DiscoverableMethodMeta {
   group?: string
   concurrency?: number
   /**
-   * Target bus name when multiple `MessagingModule.configure(opts, name)` are
+   * Target bus name when multiple `MessagingModule.configure(opts, { name })` are
    * registered. Omit (or `undefined`) to target the default bus. Throws at
    * startup if the referenced bus name has no matching `MessagingModule`.
    */

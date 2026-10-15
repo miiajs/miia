@@ -1,12 +1,13 @@
 import { injectOptional } from '@miiajs/core'
 import { Injectable } from '@miiajs/core'
+import { CONFIG_VALUES } from './tokens.js'
 
-@Injectable({ token: 'ConfigService' })
+@Injectable({ hint: 'ConfigModule.configure()' })
 export class ConfigService<T extends Record<string, any> = Record<string, string | undefined>> {
   private config: T
 
   constructor() {
-    const config = injectOptional<T>('CONFIG_VALUES')
+    const config = injectOptional(CONFIG_VALUES) as T | null
     this.config = config ?? ({} as T)
   }
 

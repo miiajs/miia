@@ -1,11 +1,14 @@
 import { Miia, overrideModule, overrideProvider } from '@miiajs/core'
 import type {
+  AbstractConstructor,
+  AnyToken,
   ConfiguredModule,
   Constructor,
   Guard,
   Middleware,
   OverrideDescriptor,
   ProviderDefinition,
+  Token,
 } from '@miiajs/core'
 
 function isConfiguredModule(value: unknown): value is ConfiguredModule {
@@ -18,8 +21,8 @@ function isConfiguredModule(value: unknown): value is ConfiguredModule {
   )
 }
 
-function nameOf(token: Constructor | string): string {
-  return typeof token === 'string' ? token : token.name || '<anonymous>'
+function nameOf(token: AnyToken): string {
+  return token.name || '<anonymous>'
 }
 
 export class TestApp {
@@ -45,13 +48,15 @@ export class TestApp {
     return this
   }
 
-  override(token: Constructor | string, value: unknown): this {
+  override(module: Constructor, configured: ConfiguredModule): this
+  override<T>(token: Token<T> | AbstractConstructor<T>, value: Partial<T> | (() => Partial<T>)): this
+  override(token: AnyToken, value: unknown): this {
     this.assertNotCompiled('override')
     if (isConfiguredModule(value)) {
       if (value.module !== token) {
         throw new Error(
           `[Miia] TestApp.override(${nameOf(token)}, ...): the configured module's class is ${nameOf(value.module)}, ` +
-            `not ${nameOf(token)} - named package modules cannot be overridden until they carry name (stage 5)`,
+            `not ${nameOf(token)}`,
         )
       }
       this.overrides.push(overrideModule(value))
@@ -125,7 +130,7 @@ export class TestApp {
     return app.fetch(req)
   }
 
-  resolve<T>(token: Constructor<T> | string): T {
+  resolve<T>(token: Token<T> | AbstractConstructor<T>): T {
     return this.compiled().get<T>(token)
   }
 

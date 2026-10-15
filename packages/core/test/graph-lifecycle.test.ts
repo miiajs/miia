@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { CanActivate, Middleware, RequestContext } from '../src/index.js'
-import { Controller, Get, inject, Injectable, Miia, Module } from '../src/index.js'
+import { Controller, createToken, Get, inject, Injectable, Miia, Module } from '../src/index.js'
 
 function get(app: Miia, path: string, headers?: Record<string, string>): Promise<Response> {
   return Promise.resolve(app.fetch(new Request(`http://localhost${path}`, { headers })))
@@ -81,7 +81,7 @@ describe('module graph', () => {
     )
     expect(late.constructor).toBe(Error)
 
-    const lateProvide = thrownBy(() => afterGet.provide({ token: 'X', factory: () => 1 }))
+    const lateProvide = thrownBy(() => afterGet.provide({ token: createToken('X'), factory: () => 1 }))
     expect(lateProvide.message).toStartWith('[Miia] provide() after the module graph was processed')
     expect(lateProvide.constructor).toBe(Error)
 
@@ -91,7 +91,7 @@ describe('module graph', () => {
 
     const afterFetch = new Miia({ logger: false }).register(OtherModule)
     await get(afterFetch, '/nothing')
-    expect(() => afterFetch.provide({ token: 'X', factory: () => 1 })).toThrow(
+    expect(() => afterFetch.provide({ token: createToken('X'), factory: () => 1 })).toThrow(
       '[Miia] provide() after the module graph was processed',
     )
   })

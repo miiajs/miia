@@ -1,13 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import type { RequestContext } from '@miiajs/core'
-import {
-  Container,
-  ForbiddenException,
-  GUARD_RESPONSES,
-  Injectable,
-  runInContainerContext,
-  UnauthorizedException,
-} from '@miiajs/core'
+import type { CanActivate, Guard, RequestContext } from '@miiajs/core'
+import { ForbiddenException, GUARD_RESPONSES, Injectable, Miia, UnauthorizedException } from '@miiajs/core'
 import { AuthGuard } from '../src/index.js'
 import type { AuthProvider } from '../src/provider.js'
 
@@ -61,36 +54,26 @@ class BuggyProvider implements AuthProvider {
   }
 }
 
-function setupContainer(...providers: Array<new () => AuthProvider>): Container {
-  const container = new Container()
-  for (const P of providers) container.register(P, () => new P(), 'singleton')
-  return container
+function buildGuard(GuardCtor: Guard, ...providers: Array<new () => AuthProvider>): CanActivate {
+  return new Miia({ logger: false }).provide(...providers, GuardCtor).get(GuardCtor)
 }
 
 describe('AuthGuard', () => {
   it('single provider success → sets ctx.user, returns true', async () => {
-    const container = setupContainer(SuccessProvider)
-    const GuardCtor = AuthGuard(SuccessProvider)
+    const guard = buildGuard(AuthGuard(SuccessProvider), SuccessProvider)
     const ctx = makeCtx()
 
-    const result = await runInContainerContext(container, async () => {
-      const guard = new GuardCtor()
-      return guard.canActivate(ctx)
-    })
+    const result = await guard.canActivate(ctx)
 
     expect(result).toBe(true)
     expect(ctx.user).toEqual({ id: 1, name: 'alice' })
   })
 
   it('single provider throws UnauthorizedException → guard rethrows it', async () => {
-    const container = setupContainer(UnauthorizedProvider)
-    const GuardCtor = AuthGuard(UnauthorizedProvider)
+    const guard = buildGuard(AuthGuard(UnauthorizedProvider), UnauthorizedProvider)
     const ctx = makeCtx()
 
-    await runInContainerContext(container, async () => {
-      const guard = new GuardCtor()
-      await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(UnauthorizedException)
-    })
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(UnauthorizedException)
   })
 
   it('multi-provider: first succeeds → second is never invoked', async () => {
@@ -104,52 +87,45 @@ describe('AuthGuard', () => {
       }
     }
 
-    const container = setupContainer(SuccessProvider, TrackingProvider)
-    const GuardCtor = AuthGuard(SuccessProvider, TrackingProvider)
+    const guard = buildGuard(AuthGuard(SuccessProvider, TrackingProvider), SuccessProvider, TrackingProvider)
     const ctx = makeCtx()
 
-    await runInContainerContext(container, async () => {
-      const guard = new GuardCtor()
-      await guard.canActivate(ctx)
-    })
+    await guard.canActivate(ctx)
 
     expect(ctx.user).toEqual({ id: 1, name: 'alice' })
     expect(secondCalled).toBe(false)
   })
 
   it('multi-provider: first throws HttpException, second succeeds → ctx.user from second', async () => {
-    const container = setupContainer(UnauthorizedProvider, OtherSuccessProvider)
-    const GuardCtor = AuthGuard(UnauthorizedProvider, OtherSuccessProvider)
+    const guard = buildGuard(
+      AuthGuard(UnauthorizedProvider, OtherSuccessProvider),
+      UnauthorizedProvider,
+      OtherSuccessProvider,
+    )
     const ctx = makeCtx()
 
-    await runInContainerContext(container, async () => {
-      const guard = new GuardCtor()
-      await guard.canActivate(ctx)
-    })
+    await guard.canActivate(ctx)
 
     expect(ctx.user).toEqual({ id: 2, name: 'bob' })
   })
 
   it('multi-provider: all throw HttpException → last error rethrown', async () => {
-    const container = setupContainer(UnauthorizedProvider, ForbiddenProvider)
-    const GuardCtor = AuthGuard(UnauthorizedProvider, ForbiddenProvider)
+    const guard = buildGuard(
+      AuthGuard(UnauthorizedProvider, ForbiddenProvider),
+      UnauthorizedProvider,
+      ForbiddenProvider,
+    )
     const ctx = makeCtx()
 
-    await runInContainerContext(container, async () => {
-      const guard = new GuardCtor()
-      await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException)
-    })
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(ForbiddenException)
   })
 
   it('canActivate works after the active container context is gone (request-time invocation)', async () => {
     // Repro for the production bug: guard is constructed inside container context
     // (at route registration), but canActivate runs later during request handling
     // when there is no active container. inject() must NOT be called in canActivate.
-    const container = setupContainer(SuccessProvider)
-    const GuardCtor = AuthGuard(SuccessProvider)
-
     // Construct guard inside container context (this is what the framework does).
-    const guard = runInContainerContext(container, () => new GuardCtor())
+    const guard = buildGuard(AuthGuard(SuccessProvider), SuccessProvider)
 
     // Now invoke canActivate OUTSIDE any container context.
     const ctx = makeCtx()
@@ -169,14 +145,10 @@ describe('AuthGuard', () => {
       }
     }
 
-    const container = setupContainer(BuggyProvider, ShouldNotBeCalled)
-    const GuardCtor = AuthGuard(BuggyProvider, ShouldNotBeCalled)
+    const guard = buildGuard(AuthGuard(BuggyProvider, ShouldNotBeCalled), BuggyProvider, ShouldNotBeCalled)
     const ctx = makeCtx()
 
-    await runInContainerContext(container, async () => {
-      const guard = new GuardCtor()
-      await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(TypeError)
-    })
+    await expect(guard.canActivate(ctx)).rejects.toBeInstanceOf(TypeError)
 
     expect(secondCalled).toBe(false)
   })

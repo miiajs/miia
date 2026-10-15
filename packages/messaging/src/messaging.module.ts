@@ -1,8 +1,8 @@
-import type { ConfiguredModule, Constructor, OptionsOrFactory } from '@miiajs/core'
-import { resolveOptions } from '@miiajs/core'
+import type { ConfiguredModule, OptionsOrFactory } from '@miiajs/core'
+import { provider, resolveOptions } from '@miiajs/core'
 import { MessageBus } from './message-bus.js'
 import { type IdempotencyStore } from './idempotency.js'
-import { getMessageBusToken, getMessageTransportToken, getIdempotencyStoreToken } from './tokens.js'
+import { busToken, idempotencyStoreToken, transportToken } from './tokens.js'
 import { type DispatchMode, type InitialPosition, type MessageTransport } from './types.js'
 
 /**
@@ -55,10 +55,10 @@ export interface MessagingModuleOptions {
  * Dynamic module that registers a message transport, optional idempotency
  * store, and `MessageBus` in the container.
  *
- * Pass an optional `name` to register a **named bus** alongside the default
+ * Pass `{ name }` to register a **named bus** alongside the default
  * one - useful when an app needs more than one transport (Kafka + Redis,
  * internal in-memory bus + external Redis, etc.). Handlers target a specific
- * bus via `@On(topic, { bus: name })`.
+ * bus via `@On(topic, { bus: name })`, providers inject it via `inject(messageBus(name))`.
  *
  * @example
  * ```ts
@@ -74,49 +74,44 @@ export interface MessagingModuleOptions {
  *
  * // Multi-bus: default + named
  * MessagingModule.configure({ transport: redisStreamsTransport({ url: '...' }) })
- * MessagingModule.configure({ transport: kafkaTransport({ ... }) }, 'kafka')
+ * MessagingModule.configure({ transport: kafkaTransport({ ... }) }, { name: 'kafka' })
  *
  * // In a handler
  * @On('order.placed')                      // default bus
  * @On('legacy.user', { bus: 'kafka' })     // named bus
+ *
+ * // In a provider
+ * private kafka = inject(messageBus('kafka'))
  * ```
  */
 export class MessagingModule {
-  static configure(optionsOrFactory: OptionsOrFactory<MessagingModuleOptions>, name?: string): ConfiguredModule {
-    const transportToken = getMessageTransportToken(name)
-    const storeToken = getIdempotencyStoreToken(name)
-    const busToken = getMessageBusToken(name)
-
-    // Anonymous module class per name so the DI module loader does not flag
-    // a duplicate when configure() is called twice with different names.
-    const ModuleClass = name ? (class MessagingNamedModule {} as Constructor) : MessagingModule
+  static configure(
+    optionsOrFactory: OptionsOrFactory<MessagingModuleOptions>,
+    options?: { name?: string },
+  ): ConfiguredModule {
+    const name = options?.name || undefined
 
     return {
-      module: ModuleClass,
+      module: MessagingModule,
+      name,
       providers: [
-        {
-          token: transportToken,
-          factory: (resolve) => resolveOptions(optionsOrFactory, { resolve }).transport,
-        },
-        {
-          // Always registered so MessageBus's optional read resolves cleanly.
-          // Value is `null` when the user did not configure a store.
-          token: storeToken,
-          factory: (resolve) => resolveOptions(optionsOrFactory, { resolve }).idempotency ?? null,
-        },
-        {
-          token: busToken,
-          factory: (resolve) => {
-            const transport = resolve<MessageTransport>(transportToken)
-            const store = resolve<IdempotencyStore | null>(storeToken)
-            const opts = resolveOptions(optionsOrFactory, { resolve })
-            return new MessageBus(transport, store, name ?? null, {
-              dispatch: opts.dispatch ?? null,
-              appName: opts.appName ?? null,
-              initialPosition: opts.initialPosition ?? null,
-            })
-          },
-        },
+        provider(transportToken(name), (resolve) => resolveOptions(optionsOrFactory, { resolve }).transport),
+        // Always registered so MessageBus's optional read resolves cleanly.
+        // Value is `null` when the user did not configure a store.
+        provider(
+          idempotencyStoreToken(name),
+          (resolve) => resolveOptions(optionsOrFactory, { resolve }).idempotency ?? null,
+        ),
+        provider(busToken(name), (resolve) => {
+          const transport = resolve(transportToken(name))
+          const store = resolve(idempotencyStoreToken(name))
+          const opts = resolveOptions(optionsOrFactory, { resolve })
+          return new MessageBus(transport, store, name ?? null, {
+            dispatch: opts.dispatch ?? null,
+            appName: opts.appName ?? null,
+            initialPosition: opts.initialPosition ?? null,
+          })
+        }),
       ],
     }
   }
