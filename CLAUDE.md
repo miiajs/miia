@@ -217,7 +217,7 @@ ctx.res.status(201).header('X-Custom', 'value').json({ created: true })
 
 Methods: `status()`, `header()`, `json()`, `text()`, `html()`, `redirect()`, `stream()`, `build()`.
 
-Handlers can also return plain objects (auto-serialized to JSON), `Response` instances, or `null`/`undefined` (204 No Content).
+Handlers can also return plain objects (auto-serialized to JSON), `Response` instances, or `null`/`undefined` (empty body, status from `ctx.res`: 200 unless `@Status()` or `ctx.res.status()` changed it; use `@Status(204)` for No Content).
 
 ### Cookies: ctx.cookies + ResponseBuilder.cookie()
 
