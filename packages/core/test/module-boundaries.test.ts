@@ -12,6 +12,8 @@ import {
   Miia,
   Module,
   provider,
+  Resolver,
+  Router,
   UseGuard,
 } from '../src/index.js'
 
@@ -1063,36 +1065,498 @@ describe('module boundaries', () => {
     })
   })
 
-  it('a route guard no module declares is not checked yet', async () => {
+  describe('R9: guards', () => {
+    const makeController = (path: string, guard: Constructor) => {
+      @Controller(path)
+      @UseGuard(guard)
+      class Ctrl {
+        @Get()
+        get() {
+          return { ok: true }
+        }
+      }
+      return Ctrl
+    }
+
+    it('checks what a guard no module declares injects from the module of the controller', async () => {
+      @Injectable()
+      class Hidden {}
+
+      @Module({ providers: [Hidden] })
+      class OtherModule {}
+
+      class PeekGuard {
+        hidden = inject(Hidden)
+        canActivate() {
+          return true
+        }
+      }
+
+      @Module({ imports: [OtherModule], controllers: [makeController('/', PeekGuard)] })
+      class AppModule {}
+
+      const error = await initError(new Miia({ logger: false }).register(AppModule))
+      expect(error.message).toBe(
+        report(
+          'PeekGuard (guard of Ctrl in AppModule) injects Hidden (OtherModule):\n  - add Hidden to OtherModule `exports`',
+        ),
+      )
+    })
+
+    it('checks one guard instance from every module that uses it, once per module', async () => {
+      const built: object[] = []
+
+      @Injectable()
+      class TokenService {}
+
+      @Module({ providers: [TokenService], exports: [TokenService] })
+      class TokenModule {}
+
+      class SessionGuard {
+        tokens = inject(TokenService)
+        constructor() {
+          built.push(this)
+        }
+        canActivate() {
+          return true
+        }
+      }
+
+      @Module({ imports: [TokenModule], controllers: [makeController('/users', SessionGuard)] })
+      class UsersModule {}
+
+      @Controller('/posts')
+      @UseGuard(SessionGuard)
+      class PostsController {
+        @Get('a')
+        a() {}
+
+        @Get('b')
+        b() {}
+      }
+
+      @Module({ controllers: [PostsController, makeController('/comments', SessionGuard)] })
+      class PostsModule {}
+
+      const error = await initError(new Miia({ logger: false }).register(UsersModule, PostsModule))
+      expect(error.message).toBe(
+        report(
+          'SessionGuard (guard of PostsController in PostsModule) injects TokenService (TokenModule):\n' +
+            '  - add TokenModule to PostsModule `imports`',
+        ),
+      )
+      expect(built).toHaveLength(1)
+    })
+
+    it('a guard a module declares must be visible from the module of the controller', async () => {
+      @Injectable()
+      class PostsGuard {
+        canActivate() {
+          return true
+        }
+      }
+
+      @Module({ providers: [PostsGuard] })
+      class PostsModule {}
+
+      @Controller('/users')
+      @UseGuard(PostsGuard)
+      class UsersController {
+        @Get()
+        list() {}
+      }
+
+      @Module({ controllers: [UsersController] })
+      class UsersModule {}
+
+      const error = await initError(new Miia({ logger: false }).register(PostsModule, UsersModule))
+      expect(error.message).toBe(
+        report(
+          'UsersController (UsersModule) uses PostsGuard (PostsModule):\n' +
+            '  - add PostsGuard to PostsModule `exports`\n' +
+            '  - add PostsModule to UsersModule `imports`',
+        ),
+      )
+    })
+
+    it('a declared guard that is exported and imported runs on the routes of the importer', async () => {
+      let calls = 0
+
+      @Injectable()
+      class PostsGuard {
+        canActivate() {
+          calls++
+          return true
+        }
+      }
+
+      @Module({ providers: [PostsGuard], exports: [PostsGuard] })
+      class PostsModule {}
+
+      @Module({ imports: [PostsModule], controllers: [makeController('/', PostsGuard)] })
+      class UsersModule {}
+
+      const app = new Miia({ logger: false }).register(UsersModule)
+      await app.init()
+      expect((await request(app, '/')).status).toBe(200)
+      expect(calls).toBe(1)
+      await app.destroy()
+    })
+
+    it('a guard registered with app.provide() is visible to every module and checked from the root', async () => {
+      @Injectable()
+      class UsersService {}
+
+      @Module({ providers: [UsersService], exports: [UsersService] })
+      class UsersModule {}
+
+      class UsersGuard {
+        users = inject(UsersService)
+        canActivate() {
+          return true
+        }
+      }
+
+      // PostsModule does not import UsersModule: the guard is not checked from it
+      @Module({ controllers: [makeController('/', UsersGuard)] })
+      class PostsModule {}
+
+      const app = new Miia({ logger: false }).register(UsersModule, PostsModule).provide(UsersGuard)
+      await app.init()
+      expect((await request(app, '/')).status).toBe(200)
+      await app.destroy()
+    })
+
+    it('a guard both global and on a route is checked from both sides', async () => {
+      @Injectable()
+      class Hidden {}
+
+      @Module({ providers: [Hidden], exports: [Hidden] })
+      class OtherModule {}
+
+      class PeekGuard {
+        hidden = inject(Hidden)
+        canActivate() {
+          return true
+        }
+      }
+
+      @Module({ controllers: [makeController('/', PeekGuard)] })
+      class FeatureModule {}
+
+      @Module({ imports: [OtherModule, FeatureModule] })
+      class AppModule {}
+
+      const error = await initError(new Miia({ logger: false }).register(AppModule).useGuard(PeekGuard))
+      expect(error.message).toBe(
+        report(
+          'PeekGuard (guard of Ctrl in FeatureModule) injects Hidden (OtherModule):\n' +
+            '  - add OtherModule to FeatureModule `imports`',
+          'PeekGuard (global guard, checked from the root) injects Hidden (OtherModule):\n' +
+            '  - pass OtherModule to app.register(), or make OtherModule global',
+        ),
+      )
+    })
+
+    it('a guard from the providers of the root module in useGuard() must be exported to the root', async () => {
+      @Injectable()
+      class GlobalGuard {
+        canActivate() {
+          return true
+        }
+      }
+
+      @Module({ providers: [GlobalGuard] })
+      class AppModule {}
+
+      const error = await initError(new Miia({ logger: false }).register(AppModule).useGuard(GlobalGuard))
+      expect(error.message).toBe(
+        report(
+          'GlobalGuard (AppModule), registered with app.useGuard(), is not visible from the root:\n' +
+            '  - add GlobalGuard to AppModule `exports`',
+        ),
+      )
+
+      @Module({ providers: [GlobalGuard], exports: [GlobalGuard] })
+      class ExportingModule {}
+
+      const app = new Miia({ logger: false }).register(ExportingModule).useGuard(GlobalGuard)
+      await app.init()
+      await app.destroy()
+    })
+
+    it('collects guard violations into the one report of init(), before any onInit()', async () => {
+      const events: string[] = []
+
+      @Injectable()
+      class Hidden {
+        onInit() {
+          events.push('Hidden.onInit')
+        }
+      }
+
+      @Module({ providers: [Hidden] })
+      class OtherModule {}
+
+      @Injectable()
+      class OrdersService {
+        hidden = inject(Hidden)
+      }
+
+      class PeekGuard {
+        hidden = inject(Hidden)
+        canActivate() {
+          return true
+        }
+      }
+
+      @Injectable()
+      class GlobalGuard {
+        canActivate() {
+          return true
+        }
+      }
+
+      @Module({
+        imports: [OtherModule],
+        controllers: [makeController('/', PeekGuard)],
+        providers: [OrdersService, GlobalGuard],
+      })
+      class AppModule {}
+
+      const error = await initError(new Miia({ logger: false }).register(AppModule).useGuard(GlobalGuard))
+      const advice = '  - add Hidden to OtherModule `exports`'
+      expect(error.message).toBe(
+        report(
+          `PeekGuard (guard of Ctrl in AppModule) injects Hidden (OtherModule):\n${advice}`,
+          `OrdersService (AppModule) injects Hidden (OtherModule):\n${advice}`,
+          'GlobalGuard (AppModule), registered with app.useGuard(), is not visible from the root:\n' +
+            '  - add GlobalGuard to AppModule `exports`',
+        ),
+      )
+      expect(events).toEqual([])
+    })
+  })
+
+  describe('R10: Resolver of the module', () => {
     @Injectable()
-    class Hidden {}
+    class ReportsService {}
 
-    @Module({ providers: [Hidden] })
-    class OtherModule {}
+    @Injectable()
+    class PublicReports {}
 
-    class PeekGuard {
-      hidden = inject(Hidden)
-      canActivate() {
-        return true
-      }
+    @Module({ providers: [ReportsService, PublicReports], exports: [PublicReports] })
+    class ReportsModule {}
+
+    @Injectable()
+    class PluginRegistry {
+      resolver = inject(Resolver)
     }
 
-    @Controller('/')
-    @UseGuard(PeekGuard)
-    class Ctrl {
-      @Get()
-      get() {
-        return { ok: true }
+    @Module({ imports: [ReportsModule], providers: [PluginRegistry] })
+    class PluginsModule {}
+
+    const hiddenReports =
+      'Resolver of PluginsModule resolved ReportsService (ReportsModule), which PluginsModule cannot see:\n' +
+      '  - add ReportsService to ReportsModule `exports`'
+
+    it('has() is true only for a registered token the module sees', async () => {
+      const app = new Miia({ logger: false }).register(PluginsModule)
+      await app.init()
+      const { resolver } = app.get(PluginRegistry)
+      expect(resolver.has(PublicReports)).toBe(true)
+      expect(resolver.has(PluginRegistry)).toBe(true)
+      expect(resolver.has(Router)).toBe(true)
+      expect(resolver.has(ReportsService)).toBe(false)
+      expect(resolver.has(createToken('Missing'))).toBe(false)
+      await app.destroy()
+    })
+
+    it('resolve() and resolveOptional() of a token the module cannot see throw at once after startup', async () => {
+      const app = new Miia({ logger: false }).register(PluginsModule)
+      await app.init()
+      const { resolver } = app.get(PluginRegistry)
+      expect(resolver.resolve(PublicReports)).toBe(app.get(PublicReports))
+      expect(thrownBy(() => resolver.resolve(ReportsService)).message).toBe(report(hiddenReports))
+      expect(thrownBy(() => resolver.resolveOptional(ReportsService)).message).toBe(report(hiddenReports))
+      expect(resolver.resolveOptional(createToken('Missing'))).toBeNull()
+      expect(app.get(PluginRegistry)).toBeInstanceOf(PluginRegistry)
+      await app.destroy()
+    })
+
+    it('one resolver per module, and resolving Resolver through it keeps the module', async () => {
+      @Injectable()
+      class OtherPlugin {
+        resolver = inject(Resolver)
       }
-    }
 
-    @Module({ imports: [OtherModule], controllers: [Ctrl] })
-    class AppModule {}
+      @Module({ imports: [PluginsModule], providers: [OtherPlugin] })
+      class AppModule {}
 
-    const app = new Miia({ logger: false }).register(AppModule)
-    await app.init()
-    expect((await request(app, '/')).status).toBe(200)
-    await app.destroy()
+      const app = new Miia({ logger: false }).register(AppModule)
+      await app.init()
+      const { resolver } = app.get(PluginRegistry)
+      expect(resolver.resolve(Resolver)).toBe(resolver)
+      expect(app.get(OtherPlugin).resolver).not.toBe(resolver)
+      expect(app.get(OtherPlugin).resolver.has(PluginRegistry)).toBe(false)
+      await app.destroy()
+    })
+
+    it('a resolve() during startup goes into the report', async () => {
+      @Injectable()
+      class Eager {
+        reports = inject(Resolver).resolve(ReportsService)
+      }
+
+      @Module({ imports: [ReportsModule], providers: [Eager] })
+      class EagerModule {}
+
+      const error = await initError(new Miia({ logger: false }).register(EagerModule))
+      expect(error.message).toBe(
+        report(
+          'Resolver of EagerModule resolved ReportsService (ReportsModule), which EagerModule cannot see:\n' +
+            '  - add ReportsService to ReportsModule `exports`',
+        ),
+      )
+    })
+
+    it('a factory gets the resolver of its module, which also sees what the host sees', async () => {
+      const { FactoryLikeModule, OPTIONS } = makeFactoryLike()
+
+      @Injectable()
+      class EnvConfig {
+        value = 'env'
+      }
+
+      @Module({
+        imports: [FactoryLikeModule.configure((resolve) => resolve(Resolver).resolve(EnvConfig).value)],
+        providers: [EnvConfig],
+      })
+      class AppModule {}
+
+      const app = new Miia({ logger: false }).register(AppModule)
+      await app.init()
+      expect(app.get(OPTIONS)).toBe('env')
+      await app.destroy()
+
+      @Injectable()
+      class Secret {}
+
+      @Module({ providers: [Secret] })
+      class SiblingModule {}
+
+      @Module({
+        imports: [SiblingModule, FactoryLikeModule.configure((resolve) => String(resolve(Resolver).resolve(Secret)))],
+      })
+      class OtherAppModule {}
+
+      const error = await initError(new Miia({ logger: false }).register(OtherAppModule))
+      expect(error.message).toBe(
+        report(
+          'Resolver of FactoryLikeModule in OtherAppModule resolved Secret (SiblingModule), ' +
+            'which FactoryLikeModule in OtherAppModule cannot see:\n' +
+            '  - add Secret to SiblingModule `exports`',
+        ),
+      )
+    })
+
+    it('app.get(Resolver) and the resolver of a guard no module declares are bound to the root', async () => {
+      @Injectable()
+      class Hidden {}
+
+      @Injectable()
+      class Shared {}
+
+      @Module({ providers: [Hidden, Shared], exports: [Shared] })
+      class UsersModule {}
+
+      class ProbeGuard {
+        resolver = inject(Resolver)
+        canActivate() {
+          return true
+        }
+      }
+
+      @Controller('/')
+      @UseGuard(ProbeGuard)
+      class Ctrl {
+        @Get()
+        get() {
+          return { ok: true }
+        }
+      }
+
+      @Module({ imports: [UsersModule], controllers: [Ctrl] })
+      class AppModule {}
+
+      const app = new Miia({ logger: false }).register(AppModule, UsersModule)
+      await app.init()
+      const root = app.get(Resolver)
+      expect(app.get(ProbeGuard).resolver).toBe(root)
+      expect(root.has(Shared)).toBe(true)
+      expect(root.has(Ctrl)).toBe(false)
+      expect(thrownBy(() => root.resolve(Hidden)).message).toBe(
+        report(
+          'Resolver of the root resolved Hidden (UsersModule), which the root cannot see:\n' +
+            '  - add Hidden to UsersModule `exports`',
+        ),
+      )
+      await app.destroy()
+    })
+
+    it('a request-scoped token throws, even while ctx.resolve() builds a request provider', async () => {
+      @Injectable({ scope: 'request' })
+      class RequestState {}
+
+      @Injectable({ scope: 'request' })
+      class Handler {
+        state = inject(Resolver).resolve(RequestState)
+      }
+
+      @Controller('/')
+      class Ctrl {
+        @Get()
+        get(ctx: RequestContext) {
+          try {
+            ctx.resolve(Handler)
+            return { error: null }
+          } catch (err) {
+            return { error: (err as Error).message }
+          }
+        }
+      }
+
+      @Module({ controllers: [Ctrl], providers: [RequestState, Handler] })
+      class AppModule {}
+
+      const app = new Miia({ logger: false }).register(AppModule)
+      await app.init()
+      expect(await (await request(app, '/')).json()).toEqual({
+        error:
+          '[Miia] Request-scoped RequestState cannot be resolved through Resolver - ' +
+          'use ctx.resolve(), or inject() it in a request-scoped provider',
+      })
+      await app.destroy()
+    })
+
+    it('an override of Resolver is one fake for every module', async () => {
+      const core = await import('@miiajs/core')
+      const { TestApp } = await import('@miiajs/testing')
+      const fake = { has: () => true }
+
+      @core.Injectable()
+      class Plugins {
+        resolver = core.inject(core.Resolver)
+      }
+
+      @core.Module({ providers: [Plugins] })
+      class AppModule {}
+
+      const app = await TestApp.create(AppModule).override(core.Resolver, fake).compile()
+      expect(app.resolve(Plugins).resolver as unknown).toBe(fake)
+      expect(app.resolve(core.Resolver) as unknown).toBe(fake)
+      await app.close()
+    })
   })
 
   describe('messages name the module', () => {

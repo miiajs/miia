@@ -6,15 +6,19 @@ import type { ModuleGraph, ModuleNode } from './module-graph.js'
 export const BOUNDARY_REPORT = Symbol('miia.boundaryReport')
 
 export interface BoundaryViolation {
+  /** A provider, a guard, the controller that uses a guard; `Resolver` for a Resolver bound to `from`. */
   requester: AnyToken
-  /** The module of the requester; null for one checked from the root. */
+  /** The module the requester is checked from; null for the root. */
   from: ModuleNode | null
   /** A requester without a module, registered with `app.provide()`. */
   provided: boolean
   token: AnyToken
   /** The module that declares `token`. */
   owner: ModuleNode
-  via: 'inject' | 'deps'
+  /** `uses`: a controller uses a guard; `useGuard`: a global guard; `resolve`: Resolver.resolve(). */
+  via: 'inject' | 'deps' | 'uses' | 'useGuard' | 'resolve'
+  /** For a guard no module declares: the controller whose module it is checked from. */
+  controller: AnyToken | null
 }
 
 interface Block {
@@ -22,7 +26,8 @@ interface Block {
   from: ModuleNode | null
   provided: boolean
   owner: ModuleNode
-  via: 'inject' | 'deps'
+  via: BoundaryViolation['via']
+  controller: AnyToken | null
   tokens: AnyToken[]
 }
 
@@ -64,13 +69,21 @@ function count(n: number): string {
   return `${n} module boundary violation${n === 1 ? '' : 's'}`
 }
 
-/** One block per requester and module of the tokens; identical blocks once. */
+/** One block per requester (and the module it is checked from) and module of the tokens; identical blocks once. */
 function describeBlocks(violations: BoundaryViolation[], graph: ModuleGraph): string[] {
   const blocks: Block[] = []
   for (const v of violations) {
-    let block = blocks.find((b) => b.requester === v.requester && b.owner === v.owner && b.via === v.via)
+    let block = blocks.find(
+      (b) =>
+        b.requester === v.requester &&
+        b.from === v.from &&
+        b.controller === v.controller &&
+        b.owner === v.owner &&
+        b.via === v.via,
+    )
     if (!block) {
-      block = { requester: v.requester, from: v.from, provided: v.provided, owner: v.owner, via: v.via, tokens: [] }
+      const { requester, from, provided, owner, via, controller } = v
+      block = { requester, from, provided, owner, via, controller, tokens: [] }
       blocks.push(block)
     }
     if (!block.tokens.includes(v.token)) block.tokens.push(v.token)
@@ -101,14 +114,47 @@ function describeBlock(block: Block, graph: ModuleGraph): string {
     if (!reaches(target, owner) && !(from !== null && reaches(from, owner))) path = pathAdvice(owner, target)
     lines.push(...path)
   }
-  const notGlobal = hidden.length === 0 && path.length > 0 && owner.configured && hasConfigure(owner)
+  // The heads of a global guard and of Resolver end in a clause of their own.
+  const notGlobal =
+    hidden.length === 0 &&
+    path.length > 0 &&
+    owner.configured &&
+    hasConfigure(owner) &&
+    block.via !== 'useGuard' &&
+    block.via !== 'resolve'
 
-  const requester = from
-    ? describe(block.requester, from)
-    : `${formatToken(block.requester)} (${block.provided ? 'registered with app.provide()' : 'global guard'}, checked from the root)`
   const tokens = `${block.tokens.map(formatToken).join(', ')} (${owner.where})`
-  const head = block.via === 'deps' ? `${requester} lists ${tokens} in deps` : `${requester} injects ${tokens}`
-  return [`${head}${notGlobal ? ', which is not global' : ''}:`, ...lines.map((line) => `  - ${line}`)].join('\n')
+  return [
+    `${heading(block, tokens)}${notGlobal ? ', which is not global' : ''}:`,
+    ...lines.map((line) => `  - ${line}`),
+  ].join('\n')
+}
+
+function heading(block: Block, tokens: string): string {
+  switch (block.via) {
+    case 'resolve': {
+      const view = block.from ? block.from.where : 'the root'
+      return `Resolver of ${view} resolved ${tokens}, which ${view} cannot see`
+    }
+    case 'useGuard':
+      return `${tokens}, registered with app.useGuard(), is not visible from the root`
+    case 'uses':
+      return `${requesterOf(block)} uses ${tokens}`
+    case 'deps':
+      return `${requesterOf(block)} lists ${tokens} in deps`
+    default:
+      return `${requesterOf(block)} injects ${tokens}`
+  }
+}
+
+function requesterOf(block: Block): string {
+  const { from, controller } = block
+  const name = formatToken(block.requester)
+  if (from === null) {
+    return `${name} (${block.provided ? 'registered with app.provide()' : 'global guard'}, checked from the root)`
+  }
+  if (controller !== null) return `${name} (guard of ${formatToken(controller)} in ${from.where})`
+  return describe(block.requester, from)
 }
 
 /** How `target` gets to the exports of `owner`. */

@@ -29,6 +29,6 @@ export class RoutesResolver {
 
     this.logger.log(`${controller.name} {/${joinPaths(this.router.globalPrefix, fullPrefix)}}`)
 
-    this.routerExplorer.explore(instance, controller, fullPrefix)
+    this.routerExplorer.explore(instance, controller, fullPrefix, node)
   }
 }

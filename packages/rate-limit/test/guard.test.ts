@@ -4,6 +4,7 @@ import { Controller, Get, GUARD_RESPONSES, Module, UseGuard } from '@miiajs/core
 import { TestApp } from '@miiajs/testing'
 import { RateLimit, RateLimitGuard, RateLimitModule, SkipRateLimit } from '../src/index.js'
 import { RATE_LIMIT_OPTIONS } from '../src/constants.js'
+import { buildGuardClass, RATE_LIMIT_CLASS_SCOPE, RATE_LIMIT_METHOD_SCOPE } from '../src/guard.js'
 
 describe('RateLimitGuard', () => {
   it('bare global guard (via module) limits and returns 429', async () => {
@@ -457,6 +458,64 @@ describe('RateLimitGuard', () => {
 
     expect((factoryGuard as any)[GUARD_RESPONSES]).toEqual([429])
     expect((RateLimitGuard as any)[GUARD_RESPONSES]).toEqual([429])
+  })
+
+  it('names the guard classes without printing the policy', () => {
+    const policy = { limit: 1, window: '1m' }
+    expect(RateLimitGuard.name).toBe('RateLimitGuard')
+    expect(buildGuardClass().name).toBe('RateLimitGuard')
+    expect(RateLimitGuard(policy).name).toBe('RateLimitGuard({...})')
+    expect(buildGuardClass(policy, RATE_LIMIT_CLASS_SCOPE).name).toBe('@RateLimit({...})')
+    expect(buildGuardClass(policy, RATE_LIMIT_METHOD_SCOPE).name).toBe('@RateLimit({...})')
+  })
+})
+
+describe('rate-limit guards and module boundaries', () => {
+  const docs = 'Docs: /docs/core-concepts/modules#boundaries'
+
+  @Controller('/f')
+  class FController {
+    @Get('/')
+    @RateLimit({ limit: 1, window: '1m' })
+    hit(_ctx: RequestContext) {
+      return { ok: true }
+    }
+  }
+
+  it('@RateLimit in a module that cannot see a RateLimitModule that is not global is a violation', async () => {
+    @Module({ controllers: [FController] })
+    class FeatureModule {}
+
+    @Module({ imports: [RateLimitModule.configure({ limit: 5, window: '1m' }), FeatureModule] })
+    class AppModule {}
+
+    const error = (await TestApp.create(AppModule)
+      .compile()
+      .catch((err: Error) => err)) as Error
+    expect(error.message).toBe(
+      '[Miia] 1 module boundary violation:\n\n' +
+        '@RateLimit({...}) (guard of FController in FeatureModule) injects RateLimitOptions (RateLimitModule in AppModule), which is not global:\n' +
+        '  - make it global: RateLimitModule.configure(options, { global: true })\n' +
+        '  - or add RateLimitModule to FeatureModule `imports`\n\n' +
+        docs,
+    )
+  })
+
+  it('a global RateLimitGuard is checked from the root', async () => {
+    @Module({ imports: [RateLimitModule.configure({ limit: 5, window: '1m' })], controllers: [FController] })
+    class AppModule {}
+
+    const error = (await TestApp.create(AppModule)
+      .useGuard(RateLimitGuard)
+      .compile()
+      .catch((err: Error) => err)) as Error
+    expect(error.message).toBe(
+      '[Miia] 1 module boundary violation:\n\n' +
+        'RateLimitGuard (global guard, checked from the root) injects RateLimitOptions (RateLimitModule in AppModule), which is not global:\n' +
+        '  - make it global: RateLimitModule.configure(options, { global: true })\n' +
+        '  - or pass RateLimitModule to app.register()\n\n' +
+        docs,
+    )
   })
 })
 

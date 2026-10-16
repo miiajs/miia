@@ -1,11 +1,17 @@
 import { getMeta, INJECTABLE } from './decorators/metadata.js'
 import type { InjectableMeta } from './decorators/metadata.js'
 import { formatToken } from './di-token-format.js'
-import type { AbstractConstructor, AnyToken, Constructor, Resolve, Scope, Token } from './types.js'
+import { createToken } from './di-token.js'
+import { Logger } from './logger.js'
+import type { AbstractConstructor, AnyToken, Constructor, RequestContext, Resolve, Scope, Token } from './types.js'
 import { isLazyProxy } from './utils/index.js'
+import { Resolver } from './resolver.js'
 import { boundaryReport, describe, startupReport, withViolations } from './app/boundary-report.js'
 import type { BoundaryViolation } from './app/boundary-report.js'
 import type { ModuleGraph, ModuleNode } from './app/module-graph.js'
+
+/** Where a check looks from: a module, or the root for what has none. */
+export type View = ModuleNode | 'root'
 
 interface ContainerEntry {
   factory: ((resolve: Resolve) => unknown) | (() => unknown)
@@ -14,9 +20,9 @@ interface ContainerEntry {
   deps?: readonly AnyToken[]
   /** The module that declares the provider; null for built-ins, `provide()` and guards no module declares. */
   owner: ModuleNode | null
-  /** A guard no module declares, built for the routes that use it. */
+  /** A guard no module declares, registered for the routes or app.useGuard(). */
   guard: boolean
-  /** What such a guard injected while it was constructed. */
+  /** What such a guard injected while it was constructed, checked from every module that uses it. */
   injected: Set<AnyToken> | null
 }
 
@@ -41,6 +47,25 @@ function hintOf(token: AnyToken): string | undefined {
   return typeof token === 'function' ? getMeta<InjectableMeta>(token, INJECTABLE)?.hint : token.hint
 }
 
+/** The context of the current request: inject() it in a request-scoped provider, or resolve() it in its factory. */
+export const REQUEST_CONTEXT: Token<RequestContext> = createToken<RequestContext>('RequestContext')
+
+/** The scope of a request whose pipeline has finished. @internal */
+export const CLOSED = Symbol('closed')
+
+/** What ctx.resolve() hands over: the scope is created on the first request-scoped resolve. @internal */
+export interface RequestScopeHolder {
+  _scope: Map<AnyToken, unknown> | typeof CLOSED | null
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value !== null &&
+    (typeof value === 'object' || typeof value === 'function') &&
+    typeof (value as { then?: unknown }).then === 'function'
+  )
+}
+
 const OUTSIDE_CONTEXT =
   '[Miia] inject() called outside of container context. ' +
   'Ensure inject() is used inside a class field initializer or factory function within the DI system.'
@@ -59,13 +84,21 @@ export class Container {
   provided: ReadonlySet<AnyToken> = new Set()
 
   private registry = new Map<AnyToken, ContainerEntry>()
-  private requestScope: Map<AnyToken, unknown> | null = null
+  private requestScope: RequestScopeHolder | null = null
+  /** Every constructed singleton: a request does not own one its factory returns. */
+  private singletons = new WeakSet<object>()
+  private requestLogger = new Logger('RequestScope')
   private stack: Frame[] = []
   /** Violations of the start-up window; null outside it, where a violation throws at once. */
   private violations: BoundaryViolation[] | null = null
   /** Requester -> dependency, between singletons, keyed by token: an override replaces the entry, not the token. */
   private edges = new Map<AnyToken, Set<AnyToken>>()
   private hookOrder: HookTarget[] | null = null
+  /** The built-in Resolver, bound to the root; while it is registered, inject(Resolver) gets one for its module. */
+  private resolverEntry: ContainerEntry | null = null
+  private resolvers = new Map<ModuleNode, Resolver>()
+  /** Guard -> the modules it is already checked from. */
+  private checkedGuards = new Map<AnyToken, Set<View>>()
 
   register<T>(
     token: Token<T> | AbstractConstructor<T>,
@@ -82,12 +115,22 @@ export class Container {
   }
 
   /**
-   * A guard no module declares, registered for the routes that use it: what it injects is not checked.
+   * A guard no module declares, registered for the routes or app.useGuard(): what it injects is recorded
+   * instead of checked, and checkGuard() checks it from every module that uses the guard.
    * @internal
    */
   registerGuard(cls: Constructor): void {
     this.registerClass(cls)
     this.registry.get(cls)!.guard = true
+  }
+
+  /**
+   * The built-in Resolver, bound to the root: app.get(Resolver) and requesters without a module get it.
+   * @internal
+   */
+  registerResolver(): void {
+    this.register(Resolver, () => new Resolver(this, 'root'))
+    this.resolverEntry = this.registry.get(Resolver)!
   }
 
   /** Top-level resolution (app.get(), ctx.resolve(), the framework itself): not checked against boundaries. */
@@ -114,6 +157,71 @@ export class Container {
   }
 
   /**
+   * Resolver.has(): registered and visible from `view`.
+   * @internal
+   */
+  visible(view: View, token: AnyToken): boolean {
+    const entry = this.registry.get(token)
+    if (!entry) return false
+    return this.graph === null || entry.owner === null || this.sees(view, token)
+  }
+
+  /**
+   * Resolver.resolve() / resolveOptional(): checked from `view`. A request-scoped token throws even inside a
+   * request - Resolver has no request to keep the instance on.
+   * @internal
+   */
+  resolveFrom(view: View, token: AnyToken, optional: boolean): unknown {
+    const entry = this.registry.get(token)
+    if (!entry) {
+      if (optional) return null
+      throw new Error(this.noProviderMessage(token))
+    }
+    if (entry.scope === 'request') {
+      throw new Error(
+        `[Miia] Request-scoped ${formatToken(token)} cannot be resolved through Resolver - ` +
+          'use ctx.resolve(), or inject() it in a request-scoped provider',
+      )
+    }
+    if (entry === this.resolverEntry && view !== 'root') return this.resolverOf(view)
+    const owner = entry.owner
+    if (this.graph !== null && owner !== null && !this.sees(view, token)) {
+      const from = view === 'root' ? null : view
+      this.violate({ requester: Resolver, from, provided: false, token, owner, via: 'resolve', controller: null })
+    }
+    return this.instantiate(token, entry, this.stack.at(-1))
+  }
+
+  /**
+   * A guard checked from the module of `controller`, which uses it, or from the root for app.useGuard(); once per
+   * pair. A guard a module declares must be visible from there; what a guard no module declares injected is checked
+   * from there. A guard registered with app.provide() is visible to every module.
+   * @internal
+   */
+  checkGuard(guard: AnyToken, consumer: View, controller: AnyToken | null = null): void {
+    const entry = this.registry.get(guard)
+    if (this.graph === null || !entry) return
+    let consumers = this.checkedGuards.get(guard)
+    if (!consumers) this.checkedGuards.set(guard, (consumers = new Set()))
+    if (consumers.has(consumer)) return
+    consumers.add(consumer)
+
+    const from = consumer === 'root' ? null : consumer
+    if (entry.owner !== null) {
+      if (this.sees(consumer, guard)) return
+      const requester = controller ?? guard
+      const via = controller === null ? 'useGuard' : 'uses'
+      this.violate({ requester, from, provided: false, token: guard, owner: entry.owner, via, controller: null })
+      return
+    }
+    for (const token of entry.injected ?? []) {
+      const owner = this.registry.get(token)?.owner
+      if (!owner || this.sees(consumer, token)) continue
+      this.violate({ requester: guard, from, provided: false, token, owner, via: 'inject', controller })
+    }
+  }
+
+  /**
    * Runs `fn` as the start-up window: a boundary violation is collected instead of thrown, and resolution
    * goes on to find the rest. At the end the violations make one report, or are appended to the error that
    * escapes; both carry BOUNDARY_REPORT. A nested call joins the outer window.
@@ -137,14 +245,35 @@ export class Container {
   }
 
   /** @internal */
-  resolveInRequest<T>(token: Token<T> | AbstractConstructor<T>, scope: Map<AnyToken, unknown>): T {
+  resolveInRequest<T>(token: Token<T> | AbstractConstructor<T>, holder: RequestScopeHolder): T {
     const prev = this.requestScope
-    this.requestScope = scope
+    this.requestScope = holder
     try {
       return this.resolve<T>(token)
     } finally {
       this.requestScope = prev
     }
+  }
+
+  /**
+   * The end of a request: onDestroy() on the instances it owns, newest first, in a microtask after the caller has
+   * returned. Not the context itself, a singleton a request factory returned, or a lazy proxy. Nothing to destroy,
+   * nothing scheduled.
+   * @internal
+   */
+  destroyRequestScope(scope: Map<AnyToken, unknown>, ctx: object): void {
+    let targets: HookTarget[] | null = null
+    for (const [token, instance] of scope) {
+      if (instance === ctx || instance === null || (typeof instance !== 'object' && typeof instance !== 'function')) {
+        continue
+      }
+      if (this.singletons.has(instance) || isLazyProxy(instance)) continue
+      if (typeof (instance as { onDestroy?: unknown }).onDestroy !== 'function') continue
+      if (targets === null) targets = []
+      else if (targets.some((target) => target.instance === instance)) continue
+      targets.push({ token, instance })
+    }
+    if (targets !== null) queueMicrotask(() => this.runRequestDestroy(targets, targets.length - 1))
   }
 
   has(token: AnyToken): boolean {
@@ -247,6 +376,41 @@ export class Container {
     return failures
   }
 
+  /** Hooks from `targets[from]` down to the oldest; after a hook that returns a thenable the rest wait for it. */
+  private runRequestDestroy(targets: HookTarget[], from: number): void {
+    for (let i = from; i >= 0; i--) {
+      const target = targets[i]!
+      try {
+        const result = (target.instance as { onDestroy: () => unknown }).onDestroy()
+        if (isThenable(result)) {
+          this.awaitRequestDestroy(result, targets, i).catch(() => {})
+          return
+        }
+      } catch (error) {
+        this.requestDestroyFailed(target.token, error)
+      }
+    }
+  }
+
+  private async awaitRequestDestroy(pending: PromiseLike<unknown>, targets: HookTarget[], at: number): Promise<void> {
+    try {
+      await pending
+    } catch (error) {
+      this.requestDestroyFailed(targets[at]!.token, error)
+    }
+    this.runRequestDestroy(targets, at - 1)
+  }
+
+  /** A logger that throws must not escape the microtask. */
+  private requestDestroyFailed(token: AnyToken, error: unknown): void {
+    try {
+      this.requestLogger.error(
+        `${formatToken(token)}.onDestroy() failed at the end of a request`,
+        error instanceof Error ? (error.stack ?? error.message) : String(error),
+      )
+    } catch {}
+  }
+
   /**
    * Singletons with an instance, each after the singletons it depends on (construction edges and `deps`),
    * otherwise in registration order; one entry per instance. `strict` turns a cycle into an error.
@@ -345,27 +509,39 @@ export class Container {
       if (optional) return null
       throw new Error(this.noProviderMessage(token, describe(frame.token, frame.entry.owner)))
     }
-    if (this.graph !== null && entry.owner !== null && !frame.entry.guard) {
-      this.checkVisible(frame, token, entry.owner, 'inject')
+    // The built-in Resolver comes bound to the module of the requester; one without a module gets the root one.
+    if (entry === this.resolverEntry && frame.entry.owner !== null) return this.resolverOf(frame.entry.owner)
+    if (this.graph !== null && entry.owner !== null) {
+      if (frame.entry.guard) (frame.entry.injected ??= new Set()).add(token)
+      else this.checkVisible(frame, token, entry.owner, 'inject')
     }
     return this.instantiate(token, entry, frame)
   }
 
-  /**
-   * `token`, declared by `owner`, must be visible from the module of `frame`: the root for an entry without one,
-   * plus the host for a configured module. Collected in the start-up window, thrown outside it.
-   */
+  private resolverOf(node: ModuleNode): Resolver {
+    let resolver = this.resolvers.get(node)
+    if (!resolver) this.resolvers.set(node, (resolver = new Resolver(this, node)))
+    return resolver
+  }
+
+  /** `token`, declared by `owner`, must be visible from the module of `frame`, or the root for an entry without one. */
   private checkVisible(frame: Frame, token: AnyToken, owner: ModuleNode, via: 'inject' | 'deps'): void {
-    const graph = this.graph!
     const from = frame.entry.owner
-    const visible =
-      from === null
-        ? graph.sees(graph.root, token)
-        : graph.sees(from, token) || (from.host !== null && graph.sees(from.host, token))
-    if (visible) return
+    if (this.sees(from ?? 'root', token)) return
     const provided = this.provided.has(frame.token)
-    const violation: BoundaryViolation = { requester: frame.token, from, provided, token, owner, via }
-    if (this.violations === null) throw boundaryReport([violation], graph)
+    this.violate({ requester: frame.token, from, provided, token, owner, via, controller: null })
+  }
+
+  /** A configured module also sees what its host sees. */
+  private sees(view: View, token: AnyToken): boolean {
+    const graph = this.graph!
+    if (view === 'root') return graph.sees(graph.root, token)
+    return graph.sees(view, token) || (view.host !== null && graph.sees(view.host, token))
+  }
+
+  /** Collected in the start-up window, thrown outside it. */
+  private violate(violation: BoundaryViolation): void {
+    if (this.violations === null) throw boundaryReport([violation], this.graph!)
     this.violations.push(violation)
   }
 
@@ -393,6 +569,9 @@ export class Container {
     if (entry.scope === 'singleton') {
       const instance = this.callFactory(token, entry)
       entry.instance = instance
+      if ((typeof instance === 'object' && instance !== null) || typeof instance === 'function') {
+        this.singletons.add(instance)
+      }
       if (this.stack.length > 0) this.recordEdge(token)
       return instance
     }
@@ -405,12 +584,20 @@ export class Container {
             `resolve it with ctx.resolve() in the handler, or make ${name} request-scoped`,
         )
       }
-      const scope = this.requestScope
-      if (scope === null) {
+      const holder = this.requestScope
+      if (holder === null) {
         throw new Error(
           `[Miia] Request-scoped ${formatToken(token)} can only be resolved inside a request (ctx.resolve)`,
         )
       }
+      let scope = holder._scope
+      if (scope === CLOSED) {
+        throw new Error(
+          `[Miia] Request-scoped ${formatToken(token)} was resolved after its request finished ` +
+            '(e.g. from a streaming response) - resolve it in the handler before returning',
+        )
+      }
+      if (scope === null) scope = holder._scope = new Map<AnyToken, unknown>().set(REQUEST_CONTEXT, holder)
       const cached = scope.get(token)
       if (cached !== undefined) return cached
       const instance = this.callFactory(token, entry)

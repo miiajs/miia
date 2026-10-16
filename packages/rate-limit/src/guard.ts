@@ -78,6 +78,9 @@ export function buildGuardClass(overrides?: Partial<RateLimitModuleOptions>, mar
   }
 
   ;(ScopedRateLimitGuard as any)[GUARD_FACTORY] = marker
+  // Named for DI messages; the policy holds a store and a key generator, so it is never printed.
+  const name = marker !== RateLimitGuard ? '@RateLimit({...})' : overrides ? 'RateLimitGuard({...})' : 'RateLimitGuard'
+  Object.defineProperty(ScopedRateLimitGuard, 'name', { value: name })
   return ScopedRateLimitGuard
 }
 

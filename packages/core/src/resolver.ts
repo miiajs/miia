@@ -1,4 +1,4 @@
-import type { Container } from './di-container.js'
+import type { Container, View } from './di-container.js'
 import type { AbstractConstructor, AnyToken, Token } from './types.js'
 
 /**
@@ -12,6 +12,13 @@ import type { AbstractConstructor, AnyToken, Token } from './types.js'
  * lifecycle hooks and keeps deps explicit at the class level. Reach for
  * `Resolver` only for runtime inspection: plugin systems, conditional
  * resolution, or when the token is not known until runtime.
+ *
+ * `inject(Resolver)` returns a resolver bound to the module of the provider
+ * that injects it, and it sees what that module sees: `has()` is `false` for a
+ * token the module cannot see, `resolve()` and `resolveOptional()` of one are a
+ * module boundary violation (`resolveOptional()` returns `null` only for a
+ * token nothing registers). A provider without a module, a guard no module
+ * declares and `app.get(Resolver)` get the resolver of the root.
  *
  * `resolve()` of a request-scoped token throws - there is no request to keep the
  * instance on. Use `ctx.resolve()` in a handler, middleware or guard instead.
@@ -36,17 +43,21 @@ import type { AbstractConstructor, AnyToken, Token } from './types.js'
  * ```
  */
 export class Resolver {
-  constructor(private container: Container) {}
+  /** @internal */
+  constructor(
+    private container: Container,
+    private view: View,
+  ) {}
 
   has(token: AnyToken): boolean {
-    return this.container.has(token)
+    return this.container.visible(this.view, token)
   }
 
   resolve<T>(token: Token<T> | AbstractConstructor<T>): T {
-    return this.container.resolve<T>(token)
+    return this.container.resolveFrom(this.view, token, false) as T
   }
 
   resolveOptional<T>(token: Token<T> | AbstractConstructor<T>): T | null {
-    return this.container.resolveOptional<T>(token)
+    return this.container.resolveFrom(this.view, token, true) as T | null
   }
 }

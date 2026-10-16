@@ -21,6 +21,7 @@ import type { Router } from '../router.js'
 import type { BodyReader, Constructor, Guard, Middleware, RequestContext, RouteDefinition, ZodLike } from '../types.js'
 import { joinPaths } from '../utils/index.js'
 import { createValidationMiddleware, jsonBodyReader } from '../validation.js'
+import type { ModuleNode } from './module-graph.js'
 
 export class RouterExplorer {
   private logger = new Logger(RouterExplorer.name)
@@ -30,7 +31,7 @@ export class RouterExplorer {
     private container: Container,
   ) {}
 
-  explore(instance: any, controller: Constructor, controllerPrefix: string): void {
+  explore(instance: any, controller: Constructor, controllerPrefix: string, node: ModuleNode): void {
     const ctrlMws = getMeta<Middleware[]>(controller, CLASS_MW) ?? []
     const ctrlGuards = getMeta<Guard[]>(controller, CLASS_GUARDS) ?? []
     const routes = getMeta<RouteDefinition[]>(controller, ROUTES) ?? []
@@ -55,8 +56,8 @@ export class RouterExplorer {
       const bodyLimit = bodyLimitMap?.get(route.handlerName) ?? bodyLimitMap?.get('*')
 
       const skipSet = getSkipSet(controller, route.handlerName)
-      const ctrlGuardMws = this.resolveGuards(filterGuards(ctrlGuards, skipSet))
-      const methodGuardMws = this.resolveGuards(filterGuards(methodGuards, skipSet))
+      const ctrlGuardMws = this.resolveGuards(filterGuards(ctrlGuards, skipSet), controller, node)
+      const methodGuardMws = this.resolveGuards(filterGuards(methodGuards, skipSet), controller, node)
 
       const validation = createValidationMiddleware(
         {
@@ -88,10 +89,12 @@ export class RouterExplorer {
     }
   }
 
-  private resolveGuards(guards: Guard[]): Middleware[] {
+  /** Checked from the module of the controller: the guard itself if a module declares it, else what it injects. */
+  private resolveGuards(guards: Guard[], controller: Constructor, consumer: ModuleNode): Middleware[] {
     return guards.map((guardCtor) => {
       if (!this.container.has(guardCtor)) this.container.registerGuard(guardCtor)
       const instance = this.container.resolve<any>(guardCtor)
+      this.container.checkGuard(guardCtor, consumer, controller)
       return guardToMiddleware((ctx) => instance.canActivate(ctx))
     })
   }

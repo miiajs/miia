@@ -17,6 +17,7 @@ import {
   Use,
   UseGuard,
 } from '../src/index.js'
+import { ModuleNode } from '../src/app/module-graph.js'
 import { RouterExplorer } from '../src/app/router-explorer.js'
 import { Container } from '../src/di-container.js'
 
@@ -291,7 +292,7 @@ describe('route schemas', () => {
       }
 
       const router = new Router()
-      new RouterExplorer(router, new Container()).explore(new Ctrl(), Ctrl, '')
+      new RouterExplorer(router, new Container()).explore(new Ctrl(), Ctrl, '', new ModuleNode('AppModule'))
       router.compileAll([])
 
       expect(router.match('GET', '/plain')).not.toBeNull()

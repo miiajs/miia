@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'bun:test'
 import type { CanActivate, Guard, RequestContext } from '@miiajs/core'
-import { ForbiddenException, GUARD_RESPONSES, Injectable, Miia, UnauthorizedException } from '@miiajs/core'
+import {
+  Controller,
+  ForbiddenException,
+  Get,
+  GUARD_RESPONSES,
+  Injectable,
+  Miia,
+  Module,
+  UnauthorizedException,
+  UseGuard,
+} from '@miiajs/core'
 import { AuthGuard } from '../src/index.js'
 import type { AuthProvider } from '../src/provider.js'
 
@@ -157,5 +167,53 @@ describe('AuthGuard', () => {
     const GuardCtor = AuthGuard(SuccessProvider)
 
     expect((GuardCtor as any)[GUARD_RESPONSES]).toEqual([401])
+  })
+
+  it('is named after its providers', () => {
+    expect(AuthGuard(SuccessProvider).name).toBe('AuthGuard(SuccessProvider)')
+    expect(AuthGuard(SuccessProvider, OtherSuccessProvider).name).toBe(
+      'AuthGuard(SuccessProvider, OtherSuccessProvider)',
+    )
+  })
+})
+
+describe('AuthGuard and module boundaries', () => {
+  @Controller('/users')
+  @UseGuard(AuthGuard(SuccessProvider))
+  class UsersController {
+    @Get('/me')
+    me(ctx: RequestContext) {
+      return ctx.user
+    }
+  }
+
+  @Module({ controllers: [UsersController] })
+  class UsersModule {}
+
+  it('reports a provider the module of the controller cannot see under the name of the guard', async () => {
+    @Module({ providers: [SuccessProvider] })
+    class AuthModule {}
+
+    const error = await new Miia({ logger: false })
+      .register(AuthModule, UsersModule)
+      .init()
+      .catch((err: Error) => err)
+    expect((error as Error).message).toBe(
+      '[Miia] 1 module boundary violation:\n\n' +
+        'AuthGuard(SuccessProvider) (guard of UsersController in UsersModule) injects SuccessProvider (AuthModule):\n' +
+        '  - add SuccessProvider to AuthModule `exports`\n' +
+        '  - add AuthModule to UsersModule `imports`\n\n' +
+        'Docs: /docs/core-concepts/modules#boundaries',
+    )
+  })
+
+  it('a global AuthModule that exports the provider serves every controller', async () => {
+    @Module({ global: true, providers: [SuccessProvider], exports: [SuccessProvider] })
+    class AuthModule {}
+
+    const app = new Miia({ logger: false }).register(AuthModule, UsersModule)
+    const res = await app.fetch(new Request('http://localhost/users/me'))
+    expect(await res.json()).toEqual({ id: 1, name: 'alice' })
+    await app.destroy()
   })
 })

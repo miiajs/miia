@@ -1,10 +1,9 @@
 import { applyBodyCeiling, DEFAULT_BODY_LIMIT } from '../body-limit.js'
-import { Container, type ShutdownFailure } from '../di-container.js'
+import { CLOSED, Container, REQUEST_CONTEXT, type ShutdownFailure } from '../di-container.js'
 import { DiscoveryService } from '../discovery/index.js'
 import { type AddRouteOptions, type GlobalGuardBinding, type MatchResult, Router } from '../router.js'
 import { compose, guardToMiddleware } from '../middleware.js'
 import { ResponseBuilder } from '../response.js'
-import { Resolver } from '../resolver.js'
 import {
   BadRequestException,
   HttpException,
@@ -214,7 +213,17 @@ export class Miia {
 
     // Public DI introspection API. Read-only wrapper over Container so user
     // code can inspect provider registration without exposing register/destroy.
-    this.container.register(Resolver, () => new Resolver(this.container), 'singleton')
+    // This one is bound to the root; inject(Resolver) gets one for its module.
+    this.container.registerResolver()
+
+    // Seeded into the scope of every request, so the factory never runs.
+    this.container.register(
+      REQUEST_CONTEXT,
+      () => {
+        throw new Error('[Miia] REQUEST_CONTEXT is seeded by the request')
+      },
+      'request',
+    )
   }
 
   use(...middlewares: Middleware[]): this {
@@ -318,22 +327,31 @@ export class Miia {
       if (result instanceof Promise) {
         return result
           .then((value) => {
-            if (value != null && !(value instanceof Response) && !ctx.res._modified && req.method !== 'HEAD') {
-              return new Response(JSON.stringify(value), JSON_RESPONSE_INIT)
-            }
-            return this.finalizeResponse(value, ctx, req)
+            const response =
+              value != null && !(value instanceof Response) && !ctx.res._modified && req.method !== 'HEAD'
+                ? new Response(JSON.stringify(value), JSON_RESPONSE_INIT)
+                : this.finalizeResponse(value, ctx, req)
+            ctx._endScope()
+            return response
           })
-          .catch((error) => this.handleError(error, req, ctx))
+          .catch((error) => {
+            const response = this.handleError(error, req, ctx)
+            ctx._endScope()
+            return response
+          })
       }
 
       // Inline JSON fast path
-      if (result != null && !(result instanceof Response) && !ctx.res._modified && req.method !== 'HEAD') {
-        return new Response(JSON.stringify(result), JSON_RESPONSE_INIT)
-      }
-
-      return this.finalizeResponse(result, ctx, req)
+      const response =
+        result != null && !(result instanceof Response) && !ctx.res._modified && req.method !== 'HEAD'
+          ? new Response(JSON.stringify(result), JSON_RESPONSE_INIT)
+          : this.finalizeResponse(result, ctx, req)
+      ctx._endScope()
+      return response
     } catch (error) {
-      return this.handleError(error, req, ctx)
+      const response = this.handleError(error, req, ctx)
+      ctx._endScope()
+      return response
     }
   }
 
@@ -355,6 +373,7 @@ export class Miia {
       this.processGraph()
       this.registerGlobalGuards()
       this.container.constructAll()
+      this.checkGlobalGuards()
     })
     await this.container.initAll()
     this.compilePipelines()
@@ -593,7 +612,7 @@ export class Miia {
     return ctx.res.build()
   }
 
-  private async handleWithPipeline(matched: MatchResult, ctx: RequestContext, req: Request): Promise<Response> {
+  private async handleWithPipeline(matched: MatchResult, ctx: Context, req: Request): Promise<Response> {
     try {
       let rawResult: unknown = undefined
 
@@ -605,13 +624,15 @@ export class Miia {
       return this.finalizePipelineResult(rawResult, ctx, req)
     } catch (error) {
       return this.handleError(error, req, ctx)
+    } finally {
+      ctx._endScope()
     }
   }
 
   private async handleWithGlobalPipeline(
     globalPipeline: Middleware,
     pathname: string,
-    ctx: RequestContext,
+    ctx: Context,
     req: Request,
   ): Promise<Response> {
     let rawResult: unknown = undefined
@@ -642,11 +663,12 @@ export class Miia {
       return this.finalizePipelineResult(rawResult, ctx, req)
     } catch (error) {
       return this.handleError(error, req, ctx)
+    } finally {
+      ctx._endScope()
     }
   }
 
   // Shared tail for both handleWithPipeline and handleWithGlobalPipeline.
-  // Does not touch the container - request-scoped instances live on ctx and need no cleanup.
   private finalizePipelineResult(rawResult: unknown, ctx: RequestContext, req: Request): Response {
     // Response returned directly by handler
     if (rawResult instanceof Response) {
@@ -678,8 +700,13 @@ export class Miia {
   /** Global guards not declared in a module are built with every other singleton, before any onInit(). */
   private registerGlobalGuards(): void {
     for (const guardCtor of this.globalGuards) {
-      if (!this.container.has(guardCtor)) this.container.register(guardCtor, () => new guardCtor(), 'singleton')
+      if (!this.container.has(guardCtor)) this.container.registerGuard(guardCtor)
     }
+  }
+
+  /** From the root: a declared guard must be exported to it, what an undeclared one injected must be visible. */
+  private checkGlobalGuards(): void {
+    for (const guardCtor of this.globalGuards) this.container.checkGuard(guardCtor, 'root')
   }
 
   private compilePipelines(): void {
@@ -774,7 +801,8 @@ class Context implements RequestContext {
   private _connInfo: ConnInfo | null = null
   private _cookieJar: CookieJar | null = null
   private _container: Container
-  private _scope: Map<AnyToken, unknown> | null = null
+  /** @internal */
+  _scope: Map<AnyToken, unknown> | typeof CLOSED | null = null
 
   constructor(req: Request, search: string, env: unknown, trustProxy: string[] | false, container: Container) {
     this.req = req
@@ -849,7 +877,14 @@ class Context implements RequestContext {
   }
 
   resolve<T>(token: Token<T> | AbstractConstructor<T>): T {
-    return this._container.resolveInRequest(token, (this._scope ??= new Map()))
+    return this._container.resolveInRequest(token, this)
+  }
+
+  /** The pipeline has finished and the response is built: closes the scope, its instances get onDestroy(). @internal */
+  _endScope(): void {
+    const scope = this._scope
+    this._scope = CLOSED
+    if (scope instanceof Map) this._container.destroyRequestScope(scope, this)
   }
 }
 

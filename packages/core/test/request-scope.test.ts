@@ -1,10 +1,38 @@
 import { describe, expect, it } from 'bun:test'
-import type { RequestContext } from '../src/index.js'
-import { Controller, Get, inject, Injectable, Miia, Module } from '../src/index.js'
+import type { Middleware, RequestContext } from '../src/index.js'
+import {
+  BadRequestException,
+  Controller,
+  createLazyProxy,
+  createToken,
+  Get,
+  inject,
+  Injectable,
+  Miia,
+  Module,
+  provider,
+  REQUEST_CONTEXT,
+  Use,
+} from '../src/index.js'
 import { Container } from '../src/di-container.js'
 
 function get(app: Miia, path: string): Promise<Response> {
   return Promise.resolve(app.fetch(new Request(`http://localhost${path}`)))
+}
+
+/** Lets the onDestroy() hooks a finished request started run to the end. */
+function settle(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+function capturingLogger(errors: string[]) {
+  return {
+    log() {},
+    error(message: string) {
+      errors.push(message)
+    },
+    warn() {},
+  }
 }
 
 describe('request scope', () => {
@@ -125,7 +153,7 @@ describe('request scope', () => {
     c.registerClass(RequestState, 'request')
     c.registerClass(Draft, 'transient')
 
-    expect(() => c.resolveInRequest(Draft, new Map())).toThrow(/Draft \(transient\) injects request-scoped/)
+    expect(() => c.resolveInRequest(Draft, { _scope: null })).toThrow(/Draft \(transient\) injects request-scoped/)
   })
 
   it('rejects app.get() of a request-scoped provider', () => {
@@ -139,5 +167,604 @@ describe('request scope', () => {
     expect(() => app.get(RequestState)).toThrow(
       '[Miia] Request-scoped RequestState can only be resolved inside a request (ctx.resolve)',
     )
+  })
+})
+
+describe('REQUEST_CONTEXT', () => {
+  it('is the context of the request in a request-scoped class and factory', async () => {
+    @Injectable({ scope: 'request' })
+    class RequestInfo {
+      ctx = inject(REQUEST_CONTEXT)
+    }
+
+    const FROM_FACTORY = createToken<{ ctx: RequestContext }>('FromFactory')
+
+    @Controller('/info')
+    class InfoController {
+      @Get('/')
+      read(ctx: RequestContext) {
+        return {
+          injected: ctx.resolve(RequestInfo).ctx === ctx,
+          factory: ctx.resolve(FROM_FACTORY).ctx === ctx,
+          direct: ctx.resolve(REQUEST_CONTEXT) === ctx,
+        }
+      }
+    }
+
+    @Module({
+      controllers: [InfoController],
+      providers: [
+        RequestInfo,
+        provider(FROM_FACTORY, (resolve) => ({ ctx: resolve(REQUEST_CONTEXT) }), { scope: 'request' }),
+      ],
+    })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    expect(await (await get(app, '/info/')).json()).toEqual({ injected: true, factory: true, direct: true })
+  })
+
+  it('rejects a singleton that injects it at init', async () => {
+    @Injectable()
+    class Reporter {
+      ctx = inject(REQUEST_CONTEXT)
+    }
+
+    @Module({ providers: [Reporter] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    await expect(app.init()).rejects.toThrow(
+      '[Miia] Reporter (singleton) injects request-scoped RequestContext - resolve it with ctx.resolve() in the handler, or make Reporter request-scoped',
+    )
+  })
+
+  it('rejects app.get()', () => {
+    const app = new Miia({ logger: false })
+    expect(() => app.get(REQUEST_CONTEXT)).toThrow(
+      '[Miia] Request-scoped RequestContext can only be resolved inside a request (ctx.resolve)',
+    )
+  })
+})
+
+describe('the end of a request', () => {
+  function trackingApp(events: string[]): Miia {
+    @Injectable({ scope: 'request' })
+    class Tracked {
+      onDestroy() {
+        events.push('destroyed')
+      }
+    }
+
+    const touch: Middleware = async (ctx, next) => {
+      ctx.resolve(Tracked)
+      await next()
+    }
+
+    @Controller('/')
+    class PathsController {
+      @Get('sync')
+      sync(ctx: RequestContext) {
+        ctx.resolve(Tracked)
+        return { ok: true }
+      }
+
+      @Get('built')
+      built(ctx: RequestContext) {
+        ctx.resolve(Tracked)
+        ctx.res.header('X-Built', '1')
+        return { ok: true }
+      }
+
+      @Get('async')
+      async async(ctx: RequestContext) {
+        await null
+        ctx.resolve(Tracked)
+        return { ok: true }
+      }
+
+      @Get('throws')
+      throws(ctx: RequestContext) {
+        ctx.resolve(Tracked)
+        throw new BadRequestException('no')
+      }
+
+      @Get('rejects')
+      async rejects(ctx: RequestContext) {
+        ctx.resolve(Tracked)
+        throw new BadRequestException('no')
+      }
+
+      @Get('middleware')
+      @Use(touch)
+      middleware() {
+        return { ok: true }
+      }
+
+      @Get('middleware-throws')
+      @Use(touch)
+      middlewareThrows() {
+        throw new BadRequestException('no')
+      }
+    }
+
+    @Module({ controllers: [PathsController], providers: [Tracked] })
+    class AppModule {}
+
+    return new Miia({ logger: false }).register(AppModule)
+  }
+
+  const paths = [
+    ['sync', 200],
+    ['built', 200],
+    ['async', 200],
+    ['throws', 400],
+    ['rejects', 400],
+    ['middleware', 200],
+    ['middleware-throws', 400],
+  ] as const
+
+  for (const [path, status] of paths) {
+    it(`destroys request-scoped instances after the response: /${path}`, async () => {
+      const events: string[] = []
+      const app = trackingApp(events)
+      const res = await get(app, `/${path}`)
+      expect(res.status).toBe(status)
+      await settle()
+      expect(events).toEqual(['destroyed'])
+    })
+  }
+
+  it('destroys them behind global middleware, also when it stops early', async () => {
+    const events: string[] = []
+
+    @Injectable({ scope: 'request' })
+    class Tracked {
+      onDestroy() {
+        events.push('destroyed')
+      }
+    }
+
+    @Controller('/')
+    class PingController {
+      @Get('ping')
+      ping(ctx: RequestContext) {
+        ctx.resolve(Tracked)
+        return { ok: true }
+      }
+
+      @Get('fails')
+      fails(ctx: RequestContext) {
+        ctx.resolve(Tracked)
+        throw new BadRequestException('no')
+      }
+    }
+
+    @Module({ controllers: [PingController], providers: [Tracked] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false })
+      .use((ctx, next) => {
+        if (ctx.req.headers.get('x-stop') === null) return next()
+        ctx.resolve(Tracked)
+        ctx.res.status(204)
+      })
+      .register(AppModule)
+
+    expect((await get(app, '/ping')).status).toBe(200)
+    expect((await get(app, '/fails')).status).toBe(400)
+    const stopped = await app.fetch(new Request('http://localhost/ping', { headers: { 'x-stop': '1' } }))
+    expect(stopped.status).toBe(204)
+    await settle()
+    expect(events).toEqual(['destroyed', 'destroyed', 'destroyed'])
+  })
+
+  it('runs the hooks after fetch() returns, not inside it', async () => {
+    const events: string[] = []
+    const app = trackingApp(events)
+    await app.init()
+    const res = app.fetch(new Request('http://localhost/sync'))
+    expect(res).toBeInstanceOf(Response)
+    expect(events).toEqual([])
+    await settle()
+    expect(events).toEqual(['destroyed'])
+  })
+
+  it('does not change data the handler returned', async () => {
+    @Injectable({ scope: 'request' })
+    class State {
+      data = { status: 'fresh' }
+
+      onDestroy() {
+        this.data.status = 'destroyed'
+      }
+    }
+
+    @Controller('/')
+    class StateController {
+      @Get('sync')
+      sync(ctx: RequestContext) {
+        return ctx.resolve(State).data
+      }
+
+      @Get('built')
+      built(ctx: RequestContext) {
+        ctx.res.header('X-Built', '1')
+        return ctx.resolve(State).data
+      }
+
+      @Get('async')
+      async async(ctx: RequestContext) {
+        await null
+        return ctx.resolve(State).data
+      }
+
+      @Get('middleware')
+      @Use((_ctx, next) => next())
+      middleware(ctx: RequestContext) {
+        return ctx.resolve(State).data
+      }
+    }
+
+    @Module({ controllers: [StateController], providers: [State] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    for (const path of ['sync', 'built', 'async', 'middleware']) {
+      expect(await (await get(app, `/${path}`)).json()).toEqual({ status: 'fresh' })
+    }
+  })
+
+  it('destroys the dependent before its dependency, an instance under two tokens once', async () => {
+    const events: string[] = []
+
+    @Injectable({ scope: 'request' })
+    class Session {
+      onDestroy() {
+        events.push('Session')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class Audit {
+      session = inject(Session)
+
+      onDestroy() {
+        events.push('Audit')
+      }
+    }
+
+    const CURRENT_AUDIT = createToken<Audit>('CurrentAudit')
+
+    @Controller('/')
+    class AuditController {
+      @Get('audit')
+      read(ctx: RequestContext) {
+        return { same: ctx.resolve(CURRENT_AUDIT) === ctx.resolve(Audit) }
+      }
+    }
+
+    @Module({
+      controllers: [AuditController],
+      providers: [Session, Audit, provider(CURRENT_AUDIT, (resolve) => resolve(Audit), { scope: 'request' })],
+    })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    expect(await (await get(app, '/audit')).json()).toEqual({ same: true })
+    await settle()
+    expect(events).toEqual(['Audit', 'Session'])
+  })
+
+  it('logs a hook that throws and runs the rest, the response stays', async () => {
+    const events: string[] = []
+    const errors: string[] = []
+
+    @Injectable({ scope: 'request' })
+    class First {
+      onDestroy() {
+        events.push('First')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class Broken {
+      async onDestroy() {
+        throw new Error('cannot close')
+      }
+    }
+
+    @Controller('/')
+    class BrokenController {
+      @Get('broken')
+      read(ctx: RequestContext) {
+        ctx.resolve(First)
+        ctx.resolve(Broken)
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [BrokenController], providers: [First, Broken] })
+    class AppModule {}
+
+    const app = new Miia({ logger: capturingLogger(errors) }).register(AppModule)
+    const res = await get(app, '/broken')
+    expect(res.status).toBe(200)
+    expect(await res.json()).toEqual({ ok: true })
+    await settle()
+    expect(events).toEqual(['First'])
+    expect(errors).toEqual(['Broken.onDestroy() failed at the end of a request'])
+  })
+
+  it('runs sync hooks in one microtask, newest first, past one that throws', async () => {
+    const events: string[] = []
+    const errors: string[] = []
+
+    @Injectable({ scope: 'request' })
+    class First {
+      onDestroy() {
+        events.push('First')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class Throws {
+      onDestroy() {
+        throw new Error('cannot close')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class Last {
+      onDestroy() {
+        events.push('Last')
+      }
+    }
+
+    @Controller('/')
+    class SyncController {
+      @Get('sync')
+      read(ctx: RequestContext) {
+        ctx.resolve(First)
+        ctx.resolve(Throws)
+        ctx.resolve(Last)
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [SyncController], providers: [First, Throws, Last] })
+    class AppModule {}
+
+    const app = new Miia({ logger: capturingLogger(errors) }).register(AppModule)
+    await app.init()
+    const res = app.fetch(new Request('http://localhost/sync'))
+    expect(res).toBeInstanceOf(Response)
+    expect(events).toEqual([])
+    await null
+    expect(events).toEqual(['Last', 'First'])
+    expect(errors).toEqual(['Throws.onDestroy() failed at the end of a request'])
+  })
+
+  it('waits for an async hook before the next one, past one that rejects', async () => {
+    const events: string[] = []
+    const errors: string[] = []
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    @Injectable({ scope: 'request' })
+    class First {
+      onDestroy() {
+        events.push('First')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class Rejects {
+      async onDestroy() {
+        events.push('Rejects')
+        throw new Error('cannot close')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class Slow {
+      async onDestroy() {
+        events.push('Slow:start')
+        await gate
+        events.push('Slow:end')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class Last {
+      onDestroy() {
+        events.push('Last')
+      }
+    }
+
+    @Controller('/')
+    class MixedController {
+      @Get('mixed')
+      read(ctx: RequestContext) {
+        ctx.resolve(First)
+        ctx.resolve(Rejects)
+        ctx.resolve(Slow)
+        ctx.resolve(Last)
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [MixedController], providers: [First, Rejects, Slow, Last] })
+    class AppModule {}
+
+    const app = new Miia({ logger: capturingLogger(errors) }).register(AppModule)
+    expect((await get(app, '/mixed')).status).toBe(200)
+    await settle()
+    expect(events).toEqual(['Last', 'Slow:start'])
+    release()
+    await settle()
+    expect(events).toEqual(['Last', 'Slow:start', 'Slow:end', 'Rejects', 'First'])
+    expect(errors).toEqual(['Rejects.onDestroy() failed at the end of a request'])
+  })
+
+  it('keeps going when the logger itself throws', async () => {
+    const events: string[] = []
+
+    @Injectable({ scope: 'request' })
+    class First {
+      onDestroy() {
+        events.push('First')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class Throws {
+      onDestroy() {
+        throw new Error('cannot close')
+      }
+    }
+
+    @Controller('/')
+    class LoggerController {
+      @Get('logger')
+      read(ctx: RequestContext) {
+        ctx.resolve(First)
+        ctx.resolve(Throws)
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [LoggerController], providers: [First, Throws] })
+    class AppModule {}
+
+    const logger = {
+      log() {},
+      error(): never {
+        throw new Error('logger is down')
+      },
+      warn() {},
+    }
+    const app = new Miia({ logger }).register(AppModule)
+    expect((await get(app, '/logger')).status).toBe(200)
+    await settle()
+    expect(events).toEqual(['First'])
+  })
+
+  it('does not destroy a singleton a request factory returns, a lazy proxy or the context itself', async () => {
+    const events: string[] = []
+
+    @Injectable()
+    class UserRepo {
+      onDestroy() {
+        events.push('UserRepo')
+      }
+    }
+
+    class Connection {
+      ping() {
+        return 'pong'
+      }
+
+      onDestroy() {
+        events.push('Connection')
+      }
+    }
+
+    const CURRENT_REPO = createToken<UserRepo>('CurrentRepo')
+    const LAZY_CONNECTION = createToken<Connection>('LazyConnection')
+    const CONTEXT_ALIAS = createToken<RequestContext>('ContextAlias')
+
+    @Controller('/')
+    class OwnedController {
+      @Get('owned')
+      read(ctx: RequestContext) {
+        Object.assign(ctx, { onDestroy: () => events.push('context') })
+        return {
+          repo: ctx.resolve(CURRENT_REPO) instanceof UserRepo,
+          ping: ctx.resolve(LAZY_CONNECTION).ping(),
+          alias: ctx.resolve(CONTEXT_ALIAS) === ctx,
+        }
+      }
+    }
+
+    @Module({
+      controllers: [OwnedController],
+      providers: [
+        UserRepo,
+        provider(CURRENT_REPO, (resolve) => resolve(UserRepo), { scope: 'request' }),
+        provider(LAZY_CONNECTION, () => createLazyProxy(() => new Connection()), { scope: 'request' }),
+        provider(CONTEXT_ALIAS, (resolve) => resolve(REQUEST_CONTEXT), { scope: 'request' }),
+      ],
+    })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    expect(await (await get(app, '/owned')).json()).toEqual({ repo: true, ping: 'pong', alias: true })
+    await settle()
+    expect(events).toEqual([])
+    await app.destroy()
+    expect(events).toEqual(['UserRepo'])
+  })
+
+  it('rejects a request-scoped resolve on a finished request, singletons still resolve', async () => {
+    @Injectable({ scope: 'request' })
+    class RequestState {}
+
+    @Injectable()
+    class Clock {}
+
+    let captured: RequestContext | undefined
+
+    @Controller('/')
+    class CaptureController {
+      @Get('capture')
+      read(ctx: RequestContext) {
+        captured = ctx
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [CaptureController], providers: [RequestState, Clock] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    expect((await get(app, '/capture')).status).toBe(200)
+    expect(() => captured!.resolve(RequestState)).toThrow(
+      '[Miia] Request-scoped RequestState was resolved after its request finished (e.g. from a streaming response) - resolve it in the handler before returning',
+    )
+    expect(captured!.resolve(Clock)).toBe(app.get(Clock))
+  })
+
+  it('creates no scope for singletons and transients', async () => {
+    @Injectable()
+    class Clock {}
+
+    @Injectable({ scope: 'transient' })
+    class Draft {}
+
+    let during: unknown = 'unset'
+    let captured: RequestContext | undefined
+
+    @Controller('/')
+    class ScopeController {
+      @Get('scope')
+      read(ctx: RequestContext) {
+        ctx.resolve(Clock)
+        ctx.resolve(Draft)
+        during = (ctx as unknown as { _scope: unknown })._scope
+        captured = ctx
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [ScopeController], providers: [Clock, Draft] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    expect((await get(app, '/scope')).status).toBe(200)
+    expect(during).toBeNull()
+    expect(typeof (captured as unknown as { _scope: unknown })._scope).toBe('symbol')
   })
 })

@@ -47,5 +47,9 @@ export function AuthGuard(first: Constructor<AuthProvider>, ...rest: Constructor
   }
 
   ;(AuthenticationGuard as any)[GUARD_FACTORY] = AuthGuard
+  // Named for DI messages: AuthGuard(JwtAuth, JwtCookieAuth)
+  Object.defineProperty(AuthenticationGuard, 'name', {
+    value: `AuthGuard(${providerCtors.map((P) => P.name).join(', ')})`,
+  })
   return AuthenticationGuard
 }

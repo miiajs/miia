@@ -8,14 +8,14 @@ describe('Resolver', () => {
     const c = new Container()
     const GREETING = createToken<string>('greeting')
     c.register(GREETING, () => 'hello')
-    const resolver = new Resolver(c)
+    const resolver = new Resolver(c, 'root')
 
     expect(resolver.has(GREETING)).toBe(true)
   })
 
   it('has() returns false for unregistered tokens', () => {
     const c = new Container()
-    const resolver = new Resolver(c)
+    const resolver = new Resolver(c, 'root')
 
     expect(resolver.has(createToken('missing'))).toBe(false)
   })
@@ -24,21 +24,21 @@ describe('Resolver', () => {
     const c = new Container()
     const VAL = createToken<{ x: number }>('val')
     c.register(VAL, () => ({ x: 1 }))
-    const resolver = new Resolver(c)
+    const resolver = new Resolver(c, 'root')
 
     expect(resolver.resolve(VAL)).toEqual({ x: 1 })
   })
 
   it('resolve() throws on unknown token', () => {
     const c = new Container()
-    const resolver = new Resolver(c)
+    const resolver = new Resolver(c, 'root')
 
     expect(() => resolver.resolve(createToken('unknown'))).toThrow(/No provider found/)
   })
 
   it('resolveOptional() returns null on unknown token', () => {
     const c = new Container()
-    const resolver = new Resolver(c)
+    const resolver = new Resolver(c, 'root')
 
     expect(resolver.resolveOptional(createToken('unknown'))).toBeNull()
   })
@@ -47,7 +47,7 @@ describe('Resolver', () => {
     const c = new Container()
     const VAL = createToken<number>('val')
     c.register(VAL, () => 42)
-    const resolver = new Resolver(c)
+    const resolver = new Resolver(c, 'root')
 
     expect(resolver.resolveOptional(VAL)).toBe(42)
   })

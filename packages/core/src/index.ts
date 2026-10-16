@@ -12,7 +12,7 @@ export { LogLevel, Logger, ConsoleLogger } from './logger.js'
 export type { LoggerService, LoggerConfig } from './logger.js'
 
 // DI Container
-export { inject, injectOptional } from './di-container.js'
+export { inject, injectOptional, REQUEST_CONTEXT } from './di-container.js'
 export { createToken, provider } from './di-token.js'
 export { Resolver } from './resolver.js'
 

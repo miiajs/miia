@@ -77,11 +77,11 @@ describe('Container', () => {
     it('request: should cache per request scope', () => {
       let count = 0
       c.register(COUNTER, () => ++count, 'request')
-      const first = new Map()
+      const first = { _scope: null }
       expect(c.resolveInRequest(COUNTER, first)).toBe(1)
       expect(c.resolveInRequest(COUNTER, first)).toBe(1)
 
-      const second = new Map()
+      const second = { _scope: null }
       expect(c.resolveInRequest(COUNTER, second)).toBe(2)
       expect(c.resolveInRequest(COUNTER, second)).toBe(2)
       expect(c.resolveInRequest(COUNTER, first)).toBe(1)
