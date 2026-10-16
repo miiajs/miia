@@ -116,6 +116,12 @@ describe('MongooseModule.configure (default)', () => {
     expect(tokens).toContain(mongooseConnection())
   })
 
+  it('exports mongooseConnection() and the internal tokens, and leaves global unset by default', () => {
+    const configured = MongooseModule.configure({ uri: 'mongodb://localhost/test' })
+    expect(configured.exports).toEqual([mongooseConnection(), getInternalServiceToken(), getRegistryToken()])
+    expect(configured.global).toBeUndefined()
+  })
+
   it('builds a MongooseService from the service-token factory', () => {
     const app = createApp(MongooseModule.configure({ uri: 'mongodb://localhost/test' }))
     expect(app.get(getInternalServiceToken())).toBeInstanceOf(MongooseService)
@@ -138,6 +144,19 @@ describe('MongooseModule.configure (named)', () => {
     const result = MongooseModule.configure({ uri: 'mongodb://localhost/analytics' }, { name: 'analytics' })
     expect(result.module).toBe(MongooseModule)
     expect(result.name).toBe('analytics')
+  })
+
+  it('exports the named tokens and passes { global: true } through', () => {
+    const configured = MongooseModule.configure(
+      { uri: 'mongodb://localhost/analytics' },
+      { name: 'analytics', global: true },
+    )
+    expect(configured.exports).toEqual([
+      mongooseConnection('analytics'),
+      getInternalServiceToken('analytics'),
+      getRegistryToken('analytics'),
+    ])
+    expect(configured.global).toBe(true)
   })
 
   it('uses the named internal tokens and the named mongooseConnection token', () => {
@@ -180,6 +199,37 @@ describe('MongooseModule.register', () => {
     const tokens = (result.providers as FactoryProvider[]).map((p) => p.token)
     expect(tokens).toContain(User)
     expect(tokens).toContain(Post)
+  })
+
+  it('exports its models', () => {
+    const User = defineModel('User', userSchema())
+    const Post = defineModel('Post', new Schema({ title: String }))
+    expect(MongooseModule.register([User, Post]).exports).toEqual([User, Post])
+  })
+
+  it('names the feature module after its models and connection', () => {
+    const User = defineModel('User', userSchema())
+    const Post = defineModel('Post', new Schema({ title: String }))
+    const Event = defineModel('Event', new Schema({ type: String }))
+    expect(MongooseModule.register([User, Post]).module.name).toBe('MongooseModule.register([User, Post])')
+    expect(MongooseModule.register([Event], { name: 'analytics' }).module.name).toBe(
+      "MongooseModule.register([Event], { name: 'analytics' })",
+    )
+  })
+
+  it('names the feature modules and their hosts when two of them provide one model', () => {
+    const User = defineModel('User', userSchema())
+
+    @Module({ imports: [MongooseModule.register([User])] })
+    class UsersModule {}
+
+    @Module({ imports: [MongooseModule.register([User])] })
+    class OrdersModule {}
+
+    expect(() => createApp(UsersModule, OrdersModule).get(User)).toThrow(
+      'MongooseModel(User) is provided by both MongooseModule.register([User]) in UsersModule and ' +
+        'MongooseModule.register([User]) in OrdersModule',
+    )
   })
 
   it('populates the registry on resolve and returns a lazy Model proxy', () => {
@@ -303,6 +353,36 @@ describe('MongooseModule.register', () => {
   })
 })
 
+describe('without global', () => {
+  it('serves register() in a feature module that imports MongooseModule bare', async () => {
+    const onInit = spyOn(MongooseService.prototype, 'onInit').mockImplementation(async () => {})
+    const onDestroy = spyOn(MongooseService.prototype, 'onDestroy').mockImplementation(async () => {})
+    try {
+      const User = defineModel('User', userSchema())
+
+      @Injectable()
+      class UsersService {
+        users = inject(User)
+      }
+
+      @Module({ imports: [MongooseModule, MongooseModule.register([User])], providers: [UsersService] })
+      class UsersModule {}
+
+      @Module({ imports: [MongooseModule.configure({ uri: 'mongodb://localhost/test' }), UsersModule] })
+      class Root {}
+
+      const app = createApp(Root)
+      await app.init()
+      expect(typeof app.get(UsersService).users).toBe('function')
+      expect(app.get(getRegistryToken()).has(User)).toBe(true)
+      await app.destroy()
+    } finally {
+      onInit.mockRestore()
+      onDestroy.mockRestore()
+    }
+  })
+})
+
 describe('hook order', () => {
   it('runs the hooks of a provider injecting mongooseConnection() inside the connection window', async () => {
     const events: string[] = []
@@ -330,7 +410,9 @@ describe('hook order', () => {
       class UsersModule {}
 
       // Imported before configure(), so without deps the consumer's hooks would come first
-      @Module({ imports: [UsersModule, MongooseModule.configure({ uri: 'mongodb://localhost/test' })] })
+      @Module({
+        imports: [UsersModule, MongooseModule.configure({ uri: 'mongodb://localhost/test' }, { global: true })],
+      })
       class Root {}
 
       const app = createApp(Root)

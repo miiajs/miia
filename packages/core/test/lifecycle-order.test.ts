@@ -45,7 +45,7 @@ describe('hook order', () => {
       users = inject(UsersService)
     }
 
-    @Module({ providers: [UsersService] })
+    @Module({ global: true, providers: [UsersService], exports: [UsersService] })
     class UsersModule {}
 
     @Module({ providers: [OrdersService] })
@@ -267,7 +267,7 @@ describe('deps', () => {
       provider(LAZY, () => hooks(events, 'Lazy'), { deps: [MISSING] }),
     )
     const error = await initError(app)
-    expect(error.message.split('\n')[0]).toBe('[Miia] No provider found for token: Missing, required by Lazy (deps)')
+    expect(error.message.split('\n')[0]).toBe('[Miia] No provider found for token: Missing, required by deps of Lazy')
     expect(events).toEqual([])
   })
 
@@ -285,7 +285,7 @@ describe('deps', () => {
     )
     const error = await initError(app)
     expect(error.message.split('\n')[0]).toBe(
-      '[Miia] No provider found for token: Missing, required by Transient (deps)',
+      '[Miia] No provider found for token: Missing, required by deps of Transient',
     )
     expect(events).toEqual([])
   })
@@ -358,7 +358,7 @@ describe('global guards', () => {
       }
     }
 
-    @Module({ providers: [GlobalGuard] })
+    @Module({ providers: [GlobalGuard], exports: [GlobalGuard] })
     class AppModule {}
 
     const app = new Miia({ logger: false }).register(AppModule).useGuard(GlobalGuard)

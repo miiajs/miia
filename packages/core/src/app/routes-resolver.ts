@@ -5,6 +5,7 @@ import type { Router } from '../router.js'
 import type { Constructor } from '../types.js'
 import { joinPaths } from '../utils/index.js'
 import { RouterExplorer } from './router-explorer.js'
+import type { ModuleNode } from './module-graph.js'
 
 export class RoutesResolver {
   private logger = new Logger(RoutesResolver.name)
@@ -17,9 +18,9 @@ export class RoutesResolver {
     this.routerExplorer = new RouterExplorer(router, container)
   }
 
-  resolve(controller: Constructor, modulePrefix: string): void {
+  resolve(controller: Constructor, modulePrefix: string, node: ModuleNode): void {
     if (!this.container.has(controller)) {
-      this.container.register(controller, () => new controller(), 'singleton')
+      this.container.register(controller, () => new controller(), 'singleton', undefined, node)
     }
 
     const instance = this.container.resolve(controller)

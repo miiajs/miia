@@ -33,7 +33,7 @@ const CONFIG = createToken<string>('CONFIG')
 function makeConfigLike() {
   class ConfigLikeModule {
     static configure(value: string): ConfiguredModule {
-      return { module: ConfigLikeModule, providers: [{ token: CONFIG, factory: () => value }] }
+      return { module: ConfigLikeModule, providers: [{ token: CONFIG, factory: () => value }], exports: [CONFIG] }
     }
   }
   return ConfigLikeModule
@@ -173,7 +173,7 @@ describe('override descriptors', () => {
       overrideProvider(SharedService, () => ({})),
     )
 
-    expect(() => app.get(SharedService)).toThrow('[Miia] Duplicate provider: SharedService')
+    expect(() => app.get(SharedService)).toThrow('[Miia] SharedService is provided by both ModuleA and ModuleB')
   })
 
   it('reject a provider override no loaded module uses', () => {

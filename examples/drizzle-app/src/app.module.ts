@@ -7,15 +7,18 @@ import { UserModule } from './user/user.module'
 
 @Module({
   imports: [
-    ConfigModule.configure({ schema: envSchema }),
-    DrizzleModule.configure((resolve) => {
-      const config = resolve(ConfigService)
-      return {
-        dialect: 'postgres',
-        connection: { url: config.getOrThrow('DATABASE_URL') },
-        schema,
-      }
-    }),
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    DrizzleModule.configure(
+      (resolve) => {
+        const config = resolve(ConfigService)
+        return {
+          dialect: 'postgres',
+          connection: { url: config.getOrThrow('DATABASE_URL') },
+          schema,
+        }
+      },
+      { global: true },
+    ),
     UserModule,
   ],
 })

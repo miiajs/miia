@@ -6,11 +6,14 @@ import { UserModule } from './user/user.module'
 
 @Module({
   imports: [
-    ConfigModule.configure({ schema: envSchema }),
-    PaprModule.configure((resolve) => {
-      const config = resolve(ConfigService)
-      return { connection: { url: config.getOrThrow('MONGODB_URL') } }
-    }),
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    PaprModule.configure(
+      (resolve) => {
+        const config = resolve(ConfigService)
+        return { connection: { url: config.getOrThrow('MONGODB_URL') } }
+      },
+      { global: true },
+    ),
     UserModule,
   ],
 })

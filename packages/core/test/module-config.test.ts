@@ -22,9 +22,11 @@ const NAMED = { MAIN: createToken<string>('MAIN'), LOGS: createToken<string>('LO
 function makeConfigLike() {
   class ConfigLikeModule {
     static configure(value: string, name?: keyof typeof NAMED): ConfiguredModule {
+      const token = name ? NAMED[name] : CONFIG
       return {
         module: ConfigLikeModule,
-        providers: [{ token: name ? NAMED[name] : CONFIG, factory: () => value }],
+        providers: [{ token, factory: () => value }],
+        exports: [token],
         name,
       }
     }
@@ -124,7 +126,7 @@ describe('configured modules', () => {
     expect(() => app.get(NAMED.MAIN)).toThrow("[Miia] ConfigLikeModule (name 'MAIN') is configured twice")
   })
 
-  it('treats one configured object imported by two modules as one module', () => {
+  it('rejects one configured object imported by two modules (R8)', () => {
     const ConfigLikeModule = makeConfigLike()
     const shared = ConfigLikeModule.configure('shared')
 
@@ -136,7 +138,12 @@ describe('configured modules', () => {
 
     const app = new Miia({ logger: false }).register(ModuleA, ModuleB)
 
-    expect(app.get(CONFIG)).toBe('shared')
+    const err = thrownBy(() => app.get(CONFIG))
+    expect(err.message).toBe(
+      '[Miia] The same configured module ConfigLikeModule is imported by ModuleA and ModuleB - ' +
+        'import it once and re-export it from that module, or make it global',
+    )
+    expect(err.constructor).toBe(Error)
   })
 
   it('treats a bare import and its configuration as one module', () => {

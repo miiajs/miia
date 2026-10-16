@@ -15,18 +15,24 @@ import { RateLimitModule } from '@miiajs/rate-limit'
 
 @Module({
   imports: [
-    ConfigModule.configure({ schema: envSchema }),
-    JwtModule.configure((resolve) => ({
-      secret: resolve<ConfigService<Env>>(ConfigService).getOrThrow('JWT_SECRET'),
-      expiresIn: '1h',
-    })),
-    DrizzleModule.configure((resolve) => ({
-      dialect: 'postgres',
-      connection: {
-        url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('DATABASE_URL'),
-      },
-      schema,
-    })),
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    JwtModule.configure(
+      (resolve) => ({
+        secret: resolve<ConfigService<Env>>(ConfigService).getOrThrow('JWT_SECRET'),
+        expiresIn: '1h',
+      }),
+      { global: true },
+    ),
+    DrizzleModule.configure(
+      (resolve) => ({
+        dialect: 'postgres',
+        connection: {
+          url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('DATABASE_URL'),
+        },
+        schema,
+      }),
+      { global: true },
+    ),
     SwaggerModule.configure((resolve) => ({
       title: 'Full App',
       version: '1.0.0',
@@ -53,10 +59,7 @@ import { RateLimitModule } from '@miiajs/rate-limit'
     LimitsModule,
     CookiesModule,
     UploadsModule,
-    RateLimitModule.configure({
-      limit: 5,
-      window: '20s',
-    }),
+    RateLimitModule.configure({ limit: 5, window: '20s' }, { global: true }),
   ],
 })
 export class AppModule {}

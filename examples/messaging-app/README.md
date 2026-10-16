@@ -153,7 +153,7 @@ src/
   main.ts                              - Miia bootstrap, reads PORT/HOST from ConfigService
   env.schema.ts                        - Zod env schema (NODE_ENV, HOST, PORT, REDIS_URL)
   app/
-    app.module.ts                      - root module: ConfigModule + 2× MessagingModule + OrdersModule
+    app.module.ts                      - root module: ConfigModule + 2× MessagingModule (all { global: true }) + OrdersModule
     app.controller.ts                  - GET / hello sanity check
     app.service.ts
   orders/

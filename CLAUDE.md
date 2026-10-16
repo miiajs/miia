@@ -9,7 +9,7 @@ Lightweight, decorator-driven HTTP framework for TypeScript. Inspired by Angular
 - **ESM-only** - ES2025 target, `nodenext` module resolution, `verbatimModuleSyntax`
 - **Runtime-agnostic** - Bun, Deno natively; Node.js/uWebSockets via server packages
 - **Minimal abstractions** - Koa-style middleware replaces interceptors/pipes/filters. One concept, full power
-- **Flat DI** - per-app container, no module scoping by default. Simple beats "correct"
+- **Module boundaries over one container** - per-app container; `imports` / `exports` / `global` checked at startup, nothing global by default
 - **Lightweight schemas** - use Drizzle/Papr/Mongoose schemas directly, no decorator-based ORM layer
 
 ## Monorepo structure
@@ -59,7 +59,7 @@ Benchmarks live in a separate repo: [github.com/miiajs/benchmarks](https://githu
 
 ### DI: per-app container with inject()
 
-Each `Miia` instance owns its own `Container` - internal to core, not exported (core tests import it from `../src/di-container.js`). Use `inject(Token)` in a field initializer to resolve dependencies from the active container during class instantiation.
+Each `Miia` instance owns its own `Container` - internal to core, not exported (core tests import it from `../src/di-container.js`). Use `inject(Token)` in a field initializer to resolve dependencies from the active container during class instantiation. Modules draw boundaries over that one container (see Module system below): what a provider may inject depends on its module's `imports` and the `exports` of those.
 
 Tokens are classes (abstract ones included) or typed objects from `createToken<T>(name, { hint? })` - the value type flows from the token into `inject()` / `app.get()` / `ctx.resolve()` / `TestApp.override()`, `provider(token, factory, { scope?, deps? })` checks a factory provider against it, and `hint` (also `@Injectable({ hint })`) tells a "No provider" error which module provides the token and, when another token with the same name and hint is registered, says it is either defined twice on purpose (register this one too) or a duplicated package.
 
@@ -81,9 +81,11 @@ External packages use decorator creators for custom decorators:
 
 ### Module system: @Module and dynamic modules
 
-`@Module({ imports, controllers, providers, prefix })` groups related functionality. Modules can import other modules recursively; a cycle in the module graph is fine for the loader, but circular imports between files still hit the TDZ (an `undefined` in `imports`) - `forwardRef` comes with module boundaries. `prefix` composes with controller prefixes via `joinPaths()`.
+`@Module({ imports, controllers, providers, exports, global, prefix })` groups related functionality. Modules can import other modules recursively; a cycle in the module graph is fine for the loader, but circular imports between files hit the TDZ, so the edge of such a cycle is written `forwardRef(() => X)` on both sides (in `imports` and `exports`; the loader calls it once and expects a module class or a `configure()` result). An `undefined` in `imports` / `exports` throws `[Miia] X imports undefined (index N)` with that advice. `prefix` composes with controller prefixes via `joinPaths()`.
 
 `app.register()` only collects modules: the graph is processed once, on the first `init()` / `app.get()` / `fetch()`, so the order of `register()` calls does not matter. After that point `register()` / `provide()` throw; `use()` / `useGuard()` / `addRoute()` throw once `init()` has started. A graph that failed to process rethrows its first error on every later `init()` / `app.get()`.
+
+**Boundaries.** A token is visible from a module that declares it, imports a module that exports it (re-exports followed - `exports` may list imported modules), or when a `global: true` module exports it; built-ins and `app.provide()` tokens are visible to all. Requesters are checked from their module: every `inject()` / `injectOptional()` during construction, a factory's `resolve` (bound to its entry for life - a late call from a lazy proxy is checked from that entry, S4 too) and `deps` tokens. No module (`app.provide()`, a global guard no module declares) means the virtual root, which imports what `register()` got; a configured module's factories also see what its host sees. `injectOptional()` of a registered but invisible token is a violation, not `null`. During startup (`init()`: graph + `constructAll()`; `app.get()` before `init()`) violations go into one report (`[Miia] N module boundary violations:`, `Docs: /docs/core-concepts/modules#boundaries`) thrown before the first `onInit()`, or appended to whatever error ends startup (`Also found N ... so far`); either one leaves the app dead (every later `init()` / `get()` / `fetch()` rethrows it). After startup a violation throws at once. Not checked: `app.get()`, `TestApp.resolve()`, `ctx.resolve()` themselves (what they build is), Discovery, and route guards no module declares (registered `guard: true`).
 
 Dynamic module pattern for runtime configuration:
 ```ts
@@ -92,9 +94,9 @@ DrizzleModule.configure((resolve) => {
   return { dialect: 'postgres', connection: { url: config.getOrThrow('DATABASE_URL') } }
 })
 ```
-`configure()` returns a `ConfiguredModule` - a module class with extra providers. `register()` adds schemas/models to an existing module's registry.
+`configure()` returns a `ConfiguredModule` - a module class with extra providers, `exports` (without them it exports nothing) and `global`, merged with the class's own `@Module`. Packages take `{ global: true }` in the second argument of `configure()`; a feature module reaches a non-global unnamed configuration with a bare `imports: [XModule]`. `register()` adds schemas/models to an existing module's registry.
 
-A configured module's identity is the pair (class, `name`): the loader collects every configuration in a pre-pass before registering providers, so a bare `imports: [XModule]` anywhere resolves to the unnamed configured one regardless of order, and two configurations of one pair throw `[Miia] X is configured twice (A, B)`. One `configure()` result imported by several modules is one module. The DB packages set `name` on their named variants (`DrizzleModule.configure(opts, { name: 'analytics' })` is `{ module: DrizzleModule, name: 'analytics' }`), so a second configuration of that name throws too and `overrideModule()` can replace it; papr/mongoose `register()` still returns a new anonymous module per call.
+A configured module's identity is the pair (class, `name`): the loader collects every configuration in a pre-pass before registering providers, so a bare `imports: [XModule]` anywhere resolves to the unnamed configured one regardless of order, and two configurations of one pair throw `[Miia] X is configured twice (A, B)`. One `configure()` result has one host - the module whose `imports` hold it, or `register()`: the same object imported by two modules throws `[Miia] The same configured module X is imported by A and B` (import it once and re-export it, or make it global). The DB packages set `name` on their named variants (`DrizzleModule.configure(opts, { name: 'analytics' })` is `{ module: DrizzleModule, name: 'analytics' }`), so a second configuration of that name throws too and `overrideModule()` can replace it; papr/mongoose `register()` still returns a new anonymous module per call.
 
 ### Routing: trie-based router
 
@@ -142,7 +144,7 @@ Returns `false` â†’ `ForbiddenException` (403). Execution order: class guards â†
 
 Fixed-window rate limiting on one core (`RateLimiter` with Upstash-style `limit(key) => { success, limit, remaining, resetMs }`). Two layers with distinct roles:
 
-- **Guard flow (primary):** `RateLimitModule.configure({ limit, window, store?, keyGenerator?, headers? })` + `app.useGuard(RateLimitGuard)` for app-wide enforcement, `@RateLimit(policy)` for per-route/per-controller policies, `@SkipRateLimit()` to disable on a route. This is the recommended path for business rate policies.
+- **Guard flow (primary):** `RateLimitModule.configure({ limit, window, store?, keyGenerator?, headers? }, { global: true })` + `app.useGuard(RateLimitGuard)` for app-wide enforcement, `@RateLimit(policy)` for per-route/per-controller policies, `@SkipRateLimit()` to disable on a route. This is the recommended path for business rate policies.
 - **Perimeter middleware:** `app.use(rateLimit({ limit, window }))` - standalone (no DI required) and the only form that covers 404s/unmatched scans (global guards never run on unmatched routes). Do NOT combine a global `rateLimit()` middleware with the decorators - the two layers know nothing about each other (`@SkipRateLimit` and replacement do not apply to middleware).
 
 `window` accepts ms or `'500ms'`/`'10s'`/`'1m'`/`'1h'`/`'1d'` strings. On exceed both layers throw `TooManyRequestsException` (429) with `details.retryAfter`. Headers default to draft-6 `RateLimit-*` + `Retry-After`; `'legacy'` emits `X-RateLimit-*`; `false` disables (and restores the response fast path - any set header opts out of inline-JSON/LightResponse optimizations). Default key is `ctx.ip ?? 'unknown'` - behind a proxy set `trustProxy` on the app. Storage is pluggable via `RateLimitStore` (`increment()` returns hit count AND block decision atomically - contract is ready for a Redis Lua store); `MemoryStore` ships in the box, no timers, lazy expiry.
@@ -151,7 +153,7 @@ Semantics to remember:
 - **Replacement, like `@BodyLimit`:** the most specific policy wins. `@RateLimit` on a method replaces the class-level policy AND the global guard for that route; on a class it replaces the global guard for all routes of the controller. A decorated route does not consume the global quota. Buckets: method = per route, class = shared by the controller's routes, global = one bucket for all matched routes; explicit `prefix` shares a bucket deliberately.
 - **Skip beats specificity (unlike the `@BodyLimit` analogy):** `@SkipRateLimit()` disables rate limiting entirely on its scope - including a `@RateLimit` on the same method, and a class-level skip disables method-level `@RateLimit`s too. Use `@SkipRateLimit()`, not `@SkipGuard(RateLimitGuard)` - the latter only catches the bare global guard and explicit factory guards, not decorator-applied policies (their `GUARD_FACTORY` markers are internal scope sentinels).
 - **Stacking is middleware-only:** an explicit `@UseGuard(RateLimitGuard(policy))` still stacks with the global guard, but any `@RateLimit`/`@SkipRateLimit` on that route disables it; for guaranteed stacked limits use the `rateLimit()` middleware via `@Use`.
-- **Eager construction:** `app.useGuard(RateLimitGuard)` constructs the bare guard at startup, before any `onInit()`, even if every route replaces it - without `RateLimitModule.configure()` the app fails at startup by design.
+- **Eager construction:** `app.useGuard(RateLimitGuard)` constructs the bare guard at startup, before any `onInit()`, even if every route replaces it - the guard is checked from the root, so without `RateLimitModule.configure(opts, { global: true })` (options visible from the root) the app fails at startup by design.
 - **`blockDuration`:** once exceeded, the key is blocked for that duration (the triggering request already gets `Retry-After` = blockDuration); after the block expires the client gets a fresh window. Optional geometric backoff (`blockBackoff` > 1 with a required `maxBlockDuration` ceiling, and `strikeReset` grace measured from the end of the block) grows the ban per repeat offence and resets strikes after a quiet period.
 
 ### Validation: route schemas `{ body, query, params }`
@@ -261,8 +263,8 @@ Also exported: token extractors `fromHeader(header = 'authorization', scheme = '
 ### Database: configure/register pattern
 
 All DB packages (`drizzle`, `papr`, `mongoose`) follow the same pattern:
-- `Module.configure(optionsOrFactory, { name? })` - connection setup with retry logic; returns `{ module: XModule, name }`
-- `Module.register(models, { name? })` - register models in feature modules (papr/mongoose only; drizzle is schema-first, all tables go into `configure({ schema })`)
+- `Module.configure(optionsOrFactory, { name?, global? })` - connection setup with retry logic; returns `{ module: XModule, name, global, exports }`. Exports the db / connection token; papr/mongoose also export their internal service and registry tokens, which the `register()` model factories reach through the module that imports the `register()` result
+- `Module.register(models, { name? })` - register models in feature modules (papr/mongoose only; drizzle is schema-first, all tables go into `configure({ schema })`); exports the models, and its anonymous module is named `PaprModule.register([users])` / `MongooseModule.register([User])` in messages
 - Models / databases become DI tokens via `defineModel(...)` (papr/mongoose) or `drizzleDb<TDb>(name?)` (drizzle). Use standard `inject(User)` / `inject(paprDb())` / `inject(mongooseConnection())` / `inject(db)`. All of them are `Token` objects (`createToken`), not classes: `drizzleDb()` / `paprDb()` / `mongooseConnection()` are memoized by connection name (`''` is the default), `defineModel` returns a fresh frozen token per call carrying `collectionName` / `modelName` and `schema`. The internal service and registry tokens are private (`src/tokens.ts`, not exported from the index)
 - Optional `{ name }` for multi-connection support
 - Lifecycle: `onInit()` connects with retry, `onDestroy()` closes connection; the db / connection token declares `deps` on the service, so a provider injecting it gets its hooks inside that window

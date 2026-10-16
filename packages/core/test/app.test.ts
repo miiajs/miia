@@ -1159,7 +1159,10 @@ describe('Miia Application', () => {
       class ModuleB {}
 
       const app = new Miia({ logger: false }).register(ModuleA, ModuleB)
-      expect(() => app.get(SharedService)).toThrow('[Miia] Duplicate provider: SharedService is already registered')
+      expect(() => app.get(SharedService)).toThrow(
+        '[Miia] SharedService is provided by both ModuleA and ModuleB - ' +
+          "keep it in one module, add it to that module's exports, and import that module in the other",
+      )
     })
   })
 

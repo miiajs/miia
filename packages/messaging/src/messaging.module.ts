@@ -87,13 +87,15 @@ export interface MessagingModuleOptions {
 export class MessagingModule {
   static configure(
     optionsOrFactory: OptionsOrFactory<MessagingModuleOptions>,
-    options?: { name?: string },
+    options?: { name?: string; global?: boolean },
   ): ConfiguredModule {
     const name = options?.name || undefined
 
     return {
       module: MessagingModule,
       name,
+      global: options?.global,
+      exports: [busToken(name)],
       providers: [
         provider(transportToken(name), (resolve) => resolveOptions(optionsOrFactory, { resolve }).transport),
         // Always registered so MessageBus's optional read resolves cleanly.

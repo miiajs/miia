@@ -3,6 +3,7 @@ import type { RequestContext } from '@miiajs/core'
 import { Controller, Get, GUARD_RESPONSES, Module, UseGuard } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { RateLimit, RateLimitGuard, RateLimitModule, SkipRateLimit } from '../src/index.js'
+import { RATE_LIMIT_OPTIONS } from '../src/constants.js'
 
 describe('RateLimitGuard', () => {
   it('bare global guard (via module) limits and returns 429', async () => {
@@ -15,7 +16,7 @@ describe('RateLimitGuard', () => {
     }
 
     @Module({
-      imports: [RateLimitModule.configure({ limit: 2, window: '1m' })],
+      imports: [RateLimitModule.configure({ limit: 2, window: '1m' }, { global: true })],
       controllers: [GController],
     })
     class AppModule {}
@@ -84,7 +85,7 @@ describe('RateLimitGuard', () => {
     }
 
     @Module({
-      imports: [RateLimitModule.configure({ limit: 1, window: '1m' })],
+      imports: [RateLimitModule.configure({ limit: 1, window: '1m' }, { global: true })],
       controllers: [SController],
     })
     class AppModule {}
@@ -146,7 +147,7 @@ describe('RateLimitGuard', () => {
     }
 
     @Module({
-      imports: [RateLimitModule.configure({ limit: 2, window: '1m' })],
+      imports: [RateLimitModule.configure({ limit: 2, window: '1m' }, { global: true })],
       controllers: [MController],
     })
     class AppModule {}
@@ -186,7 +187,7 @@ describe('RateLimitGuard', () => {
     }
 
     @Module({
-      imports: [RateLimitModule.configure({ limit: 100, window: '1m' })],
+      imports: [RateLimitModule.configure({ limit: 100, window: '1m' }, { global: true })],
       controllers: [CController],
     })
     class AppModule {}
@@ -263,7 +264,7 @@ describe('RateLimitGuard', () => {
     }
 
     @Module({
-      imports: [RateLimitModule.configure({ limit: 1, window: '1m' })],
+      imports: [RateLimitModule.configure({ limit: 1, window: '1m' }, { global: true })],
       controllers: [SkController],
     })
     class AppModule {}
@@ -289,7 +290,7 @@ describe('RateLimitGuard', () => {
     }
 
     @Module({
-      imports: [RateLimitModule.configure({ limit: 1, window: '1m' })],
+      imports: [RateLimitModule.configure({ limit: 1, window: '1m' }, { global: true })],
       controllers: [OrdController],
     })
     class AppModule {}
@@ -350,7 +351,7 @@ describe('RateLimitGuard', () => {
     }
 
     @Module({
-      imports: [RateLimitModule.configure({ limit: 1, window: '1m' })],
+      imports: [RateLimitModule.configure({ limit: 1, window: '1m' }, { global: true })],
       controllers: [CskController],
     })
     class AppModule {}
@@ -379,7 +380,7 @@ describe('RateLimitGuard', () => {
     }
 
     @Module({
-      imports: [RateLimitModule.configure({ limit: 2, window: '1m' })],
+      imports: [RateLimitModule.configure({ limit: 2, window: '1m' }, { global: true })],
       controllers: [StkController],
     })
     class AppModule {}
@@ -407,7 +408,7 @@ describe('RateLimitGuard', () => {
     }
 
     @Module({
-      imports: [RateLimitModule.configure({ limit: 2, window: '1m' })],
+      imports: [RateLimitModule.configure({ limit: 2, window: '1m' }, { global: true })],
       controllers: [HdrController],
     })
     class AppModule {}
@@ -456,5 +457,17 @@ describe('RateLimitGuard', () => {
 
     expect((factoryGuard as any)[GUARD_RESPONSES]).toEqual([429])
     expect((RateLimitGuard as any)[GUARD_RESPONSES]).toEqual([429])
+  })
+})
+
+describe('RateLimitModule.configure', () => {
+  it('exports the options the guards read and leaves global unset by default', () => {
+    const configured = RateLimitModule.configure({ limit: 1, window: '1m' })
+    expect(configured.exports).toEqual([RATE_LIMIT_OPTIONS])
+    expect(configured.global).toBeUndefined()
+  })
+
+  it('passes { global: true } through', () => {
+    expect(RateLimitModule.configure({ limit: 1, window: '1m' }, { global: true }).global).toBe(true)
   })
 })

@@ -4,7 +4,7 @@
 import './polyfill.js'
 
 // Application
-export { Miia, OVERRIDE_KIND, overrideProvider, overrideModule, isOverride } from './app/index.js'
+export { Miia, OVERRIDE_KIND, overrideProvider, overrideModule, isOverride, forwardRef } from './app/index.js'
 export type { MiiaOptions, OverrideDescriptor } from './app/index.js'
 
 // Logger
@@ -113,6 +113,7 @@ export type {
   ProviderDefinition,
   ModuleOptions,
   ConfiguredModule,
+  ForwardRef,
   ZodLike,
   ZodLikeIssue,
   RouteOptions,

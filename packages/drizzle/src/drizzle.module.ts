@@ -15,7 +15,7 @@ function configureMissingError(name: string | undefined, suffix: string): Error 
 export class DrizzleModule {
   static configure(
     optionsOrFactory: OptionsOrFactory<DrizzleModuleOptions>,
-    options?: { name?: string },
+    options?: { name?: string; global?: boolean },
   ): ConfiguredModule {
     const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
@@ -24,6 +24,8 @@ export class DrizzleModule {
     return {
       module: DrizzleModule,
       name,
+      global: options?.global,
+      exports: [dbToken],
       providers: [
         {
           token: serviceToken,

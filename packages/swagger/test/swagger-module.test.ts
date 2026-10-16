@@ -3,7 +3,7 @@ import { z } from 'zod'
 import type { CanActivate, RequestContext } from '@miiajs/core'
 import { Controller, Get, Module, Post, Status } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
-import { ApiOperation, ApiTag, SwaggerModule } from '../src/index.js'
+import { ApiOperation, ApiTag, SwaggerModule, SwaggerService } from '../src/index.js'
 
 const CreateUserSchema = z.object({
   name: z.string().min(1),
@@ -39,6 +39,13 @@ class UserController {
 class AppModule {}
 
 describe('SwaggerModule', () => {
+  it('exports SwaggerService and leaves global unset by default', () => {
+    const configured = SwaggerModule.configure({ title: 'Test API', version: '1.0.0' })
+    expect(configured.exports).toEqual([SwaggerService])
+    expect(configured.global).toBeUndefined()
+    expect(SwaggerModule.configure({ title: 'Test API', version: '1.0.0' }, { global: true }).global).toBe(true)
+  })
+
   it('serves the OpenAPI spec at /docs/json', async () => {
     const app = await TestApp.create(AppModule).compile()
 

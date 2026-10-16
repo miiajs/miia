@@ -5,9 +5,11 @@ import { JwtService } from './jwt.service.js'
 import { JWT_OPTIONS } from './constants.js'
 
 export class JwtModule {
-  static configure(optionsOrFactory: OptionsOrFactory<JwtOptions>): ConfiguredModule {
+  static configure(optionsOrFactory: OptionsOrFactory<JwtOptions>, options?: { global?: boolean }): ConfiguredModule {
     return {
       module: JwtModule,
+      global: options?.global,
+      exports: [JwtService],
       providers: [
         provider(JWT_OPTIONS, (resolve) => resolveOptions(optionsOrFactory, { resolve })),
         {

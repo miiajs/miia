@@ -9,13 +9,16 @@ import { AppService } from './app.service.js'
 
 @Module({
   imports: [
-    ConfigModule.configure({ schema: envSchema }),
-    MessagingModule.configure({
-      transport: inMemoryTransport({
-        retry: { maxAttempts: 3, backoffMs: 100, backoffMultiplier: 2 },
-      }),
-      idempotency: memoryIdempotencyStore({ maxSize: 1000 }),
-    }),
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    MessagingModule.configure(
+      {
+        transport: inMemoryTransport({
+          retry: { maxAttempts: 3, backoffMs: 100, backoffMultiplier: 2 },
+        }),
+        idempotency: memoryIdempotencyStore({ maxSize: 1000 }),
+      },
+      { global: true },
+    ),
     MessagingModule.configure(
       (resolve) => {
         const config = resolve(ConfigService<Env>)
@@ -32,7 +35,7 @@ import { AppService } from './app.service.js'
           appName: 'messaging-app',
         }
       },
-      { name: 'redis' },
+      { name: 'redis', global: true },
     ),
     OrdersModule,
   ],

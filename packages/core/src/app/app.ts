@@ -16,6 +16,7 @@ import type { LoggerConfig, LoggerService } from '../logger.js'
 import { ConsoleLogger, Logger } from '../logger.js'
 import { CookieJar } from '../cookies.js'
 import { ModuleLoader } from './module-loader.js'
+import { isBoundaryReport } from './boundary-report.js'
 import type { OverrideDescriptor } from './overrides.js'
 import type {
   AbstractConstructor,
@@ -239,8 +240,10 @@ export class Miia {
     for (const provider of providers) {
       if (typeof provider === 'function') {
         this.container.register(provider, () => new provider(), 'singleton')
+        this.moduleLoader.provided.add(provider)
       } else {
         this.container.register(provider.token, provider.factory, provider.scope, provider.deps)
+        this.moduleLoader.provided.add(provider.token)
       }
     }
     return this
@@ -258,6 +261,12 @@ export class Miia {
   }
 
   get<T>(token: Token<T> | AbstractConstructor<T>): T {
+    if (this.initPromise === undefined) {
+      return this.startup(() => {
+        this.processGraph()
+        return this.container.resolve<T>(token)
+      })
+    }
     this.processGraph()
     return this.container.resolve<T>(token)
   }
@@ -341,8 +350,12 @@ export class Miia {
   }
 
   private async doInit(): Promise<void> {
-    this.processGraph()
-    this.registerGlobalGuards()
+    // One report for the graph, every singleton and the global guards, before the first onInit()
+    this.startup(() => {
+      this.processGraph()
+      this.registerGlobalGuards()
+      this.container.constructAll()
+    })
     await this.container.initAll()
     this.compilePipelines()
     await this.container.bootstrapAll()
@@ -519,6 +532,19 @@ export class Miia {
       throw error
     }
     this.pendingModules = []
+  }
+
+  /**
+   * The start-up window: boundary violations are collected into one report. The report, or an error that
+   * escaped with violations appended, leaves the app dead - every later init() / get() / fetch() rethrows it.
+   */
+  private startup<T>(fn: () => T): T {
+    try {
+      return this.container.collect(fn)
+    } catch (error) {
+      if (isBoundaryReport(error)) this.graphState = { error }
+      throw error
+    }
   }
 
   private assertGraphPending(method: string): void {

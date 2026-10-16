@@ -138,7 +138,11 @@ describe('typed tokens', () => {
       }
     }
 
-    @Module({ controllers: [MailController], providers: [provider(MAILER, () => new SmtpMailer()), Notifications] })
+    @Module({
+      controllers: [MailController],
+      providers: [provider(MAILER, () => new SmtpMailer()), Notifications],
+      exports: [MAILER],
+    })
     class AppModule {}
 
     it('inject()', () => {

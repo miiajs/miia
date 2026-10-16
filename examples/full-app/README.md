@@ -100,11 +100,11 @@ The seed is a no-op when `NODE_ENV=production`.
 
 ```
 src/
-├── app.module.ts           - root module, wires ConfigModule/JwtModule/DrizzleModule/SwaggerModule
+├── app.module.ts           - root module, wires ConfigModule/JwtModule/DrizzleModule/RateLimitModule ({ global: true }) and SwaggerModule
 ├── main.ts                 - bootstrap, global prefix, global middleware, static files, redirect
 ├── env.schema.ts           - Zod env contract
 ├── auth/
-│   ├── auth.module.ts
+│   ├── auth.module.ts      - global, exports JwtAuth for AuthGuard(JwtAuth) everywhere, imports UsersModule
 │   ├── auth.controller.ts  - register / login / me
 │   ├── auth.service.ts     - argon2 hash + JWT issue
 │   ├── guards/

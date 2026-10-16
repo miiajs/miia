@@ -39,7 +39,7 @@ function configureMissingError(name: string | undefined, suffix: string): Error 
 export class PaprModule {
   static configure(
     optionsOrFactory: OptionsOrFactory<PaprModuleOptions>,
-    options?: { name?: string },
+    options?: { name?: string; global?: boolean },
   ): ConfiguredModule {
     const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
@@ -49,6 +49,9 @@ export class PaprModule {
     return {
       module: PaprModule,
       name,
+      global: options?.global,
+      // The internal tokens too: the model factories of register() reach them through the module that imports it
+      exports: [dbToken, serviceToken, registryToken],
       providers: [
         {
           token: registryToken,
@@ -84,6 +87,11 @@ export class PaprModule {
     checkCrossConnectionCollision(models, conn)
 
     const FeatureModule = class PaprFeatureModule {} as Constructor
+    // How errors and the start-up log name this module
+    const listed = models.map((token) => token.collectionName).join(', ')
+    Object.defineProperty(FeatureModule, 'name', {
+      value: `PaprModule.register([${listed}]${name ? `, { name: '${name}' }` : ''})`,
+    })
 
     const providers: FactoryProvider[] = models.map((token) => ({
       token,
@@ -103,6 +111,7 @@ export class PaprModule {
 
     return {
       module: FeatureModule,
+      exports: [...models],
       providers,
     }
   }

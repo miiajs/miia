@@ -77,6 +77,12 @@ describe('DrizzleModule.configure (default)', () => {
     expect(tokens).toContain(drizzleDb())
   })
 
+  it('exports drizzleDb() and leaves global unset by default', () => {
+    const configured = DrizzleModule.configure(pg('postgres://localhost/test'))
+    expect(configured.exports).toEqual([drizzleDb()])
+    expect(configured.global).toBeUndefined()
+  })
+
   it('builds a DrizzleService from the service-token factory', () => {
     const app = createApp(DrizzleModule.configure(pg('postgres://localhost/test')))
     expect(app.get(getInternalServiceToken())).toBeInstanceOf(DrizzleService)
@@ -110,6 +116,15 @@ describe('DrizzleModule.configure (named)', () => {
     const tokens = (configured.providers as FactoryProvider[]).map((p) => p.token)
     expect(tokens).toContain(getInternalServiceToken())
     expect(tokens).toContain(drizzleDb())
+  })
+
+  it('exports the named drizzleDb token and passes { global: true } through', () => {
+    const configured = DrizzleModule.configure(pg('postgres://localhost/analytics'), {
+      name: 'analytics',
+      global: true,
+    })
+    expect(configured.exports).toEqual([drizzleDb('analytics')])
+    expect(configured.global).toBe(true)
   })
 
   it('uses the named internal service token and the named drizzleDb token', () => {
@@ -193,7 +208,9 @@ describe('hook order', () => {
       class UsersModule {}
 
       // Imported before configure(), so without deps the consumer's hooks would come first
-      @Module({ imports: [UsersModule, DrizzleModule.configure(pg('postgres://localhost/test'), { name })] })
+      @Module({
+        imports: [UsersModule, DrizzleModule.configure(pg('postgres://localhost/test'), { name, global: true })],
+      })
       class Root {}
 
       const app = createApp(Root)

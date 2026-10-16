@@ -191,6 +191,16 @@ describe('MessagingModule.configure', () => {
     expect(messageBus('kafka')).toBe(messageBus('kafka'))
     expect(() => messageBus('')).toThrow(TypeError)
   })
+
+  it('exports the bus and leaves global unset by default', () => {
+    const configured = MessagingModule.configure({ transport: inMemoryTransport() })
+    expect(configured.exports).toEqual([MessageBus])
+    expect(configured.global).toBeUndefined()
+
+    const named = MessagingModule.configure({ transport: inMemoryTransport() }, { name: 'kafka', global: true })
+    expect(named.exports).toEqual([messageBus('kafka')])
+    expect(named.global).toBe(true)
+  })
 })
 
 describe('MessagingModule shutdown', () => {

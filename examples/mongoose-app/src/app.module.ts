@@ -6,11 +6,14 @@ import { UserModule } from './user/user.module'
 
 @Module({
   imports: [
-    ConfigModule.configure({ schema: envSchema }),
-    MongooseModule.configure((resolve) => {
-      const config = resolve(ConfigService)
-      return { uri: config.getOrThrow('MONGODB_URL') }
-    }),
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    MongooseModule.configure(
+      (resolve) => {
+        const config = resolve(ConfigService)
+        return { uri: config.getOrThrow('MONGODB_URL') }
+      },
+      { global: true },
+    ),
     UserModule,
   ],
 })

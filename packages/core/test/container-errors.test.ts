@@ -125,7 +125,7 @@ describe('DI errors', () => {
 
       const app = new Miia({ logger: false }).register(ModuleA, ModuleB)
       const message = errorOf(() => app.get(Config))
-      expect(message).toContain('[Miia] Duplicate provider: Config is already registered')
+      expect(message).toStartWith('[Miia] Config is provided by both ModuleA and ModuleB')
       expect(message).not.toContain('class ')
     })
   })

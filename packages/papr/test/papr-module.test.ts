@@ -113,6 +113,12 @@ describe('PaprModule.configure (default)', () => {
     expect(tokens).toContain(paprDb())
   })
 
+  it('exports paprDb() and the internal tokens, and leaves global unset by default', () => {
+    const configured = PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } })
+    expect(configured.exports).toEqual([paprDb(), getInternalServiceToken(), getRegistryToken()])
+    expect(configured.global).toBeUndefined()
+  })
+
   it('builds a PaprService from the service-token factory', () => {
     const app = createApp(PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } }))
     expect(app.get(getInternalServiceToken())).toBeInstanceOf(PaprService)
@@ -134,6 +140,19 @@ describe('PaprModule.configure (named)', () => {
     )
     expect(configured.module).toBe(PaprModule)
     expect(configured.name).toBe('analytics')
+  })
+
+  it('exports the named tokens and passes { global: true } through', () => {
+    const configured = PaprModule.configure(
+      { connection: { url: 'mongodb://localhost/analytics' } },
+      { name: 'analytics', global: true },
+    )
+    expect(configured.exports).toEqual([
+      paprDb('analytics'),
+      getInternalServiceToken('analytics'),
+      getRegistryToken('analytics'),
+    ])
+    expect(configured.global).toBe(true)
   })
 
   it('uses the named internal tokens and the named paprDb token', () => {
@@ -179,6 +198,37 @@ describe('PaprModule.register', () => {
     const tokens = (result.providers as FactoryProvider[]).map((p) => p.token)
     expect(tokens).toContain(User)
     expect(tokens).toContain(Post)
+  })
+
+  it('exports its models', () => {
+    const User = defineModel('users', fakeSchema)
+    const Post = defineModel('posts', fakeSchema)
+    expect(PaprModule.register([User, Post]).exports).toEqual([User, Post])
+  })
+
+  it('names the feature module after its collections and connection', () => {
+    const User = defineModel('users', fakeSchema)
+    const Post = defineModel('posts', fakeSchema)
+    const Event = defineModel('events', fakeSchema)
+    expect(PaprModule.register([User, Post]).module.name).toBe('PaprModule.register([users, posts])')
+    expect(PaprModule.register([Event], { name: 'analytics' }).module.name).toBe(
+      "PaprModule.register([events], { name: 'analytics' })",
+    )
+  })
+
+  it('names the feature modules and their hosts when two of them provide one model', () => {
+    const User = defineModel('users', fakeSchema)
+
+    @Module({ imports: [PaprModule.register([User])] })
+    class UsersModule {}
+
+    @Module({ imports: [PaprModule.register([User])] })
+    class OrdersModule {}
+
+    expect(() => createApp(UsersModule, OrdersModule).get(User)).toThrow(
+      'PaprModel(users) is provided by both PaprModule.register([users]) in UsersModule and ' +
+        'PaprModule.register([users]) in OrdersModule',
+    )
   })
 
   it('populates the registry on resolve and returns a lazy Model proxy', () => {
@@ -259,6 +309,36 @@ describe('PaprModule.register', () => {
   })
 })
 
+describe('without global', () => {
+  it('serves register() in a feature module that imports PaprModule bare', async () => {
+    const onInit = spyOn(PaprService.prototype, 'onInit').mockImplementation(async () => {})
+    const onDestroy = spyOn(PaprService.prototype, 'onDestroy').mockImplementation(async () => {})
+    try {
+      const User = defineModel('users', fakeSchema)
+
+      @Injectable()
+      class UsersService {
+        users = inject(User)
+      }
+
+      @Module({ imports: [PaprModule, PaprModule.register([User])], providers: [UsersService] })
+      class UsersModule {}
+
+      @Module({ imports: [PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } }), UsersModule] })
+      class Root {}
+
+      const app = createApp(Root)
+      await app.init()
+      expect(typeof app.get(UsersService).users).toBe('object')
+      expect(app.get(getRegistryToken()).has(User)).toBe(true)
+      await app.destroy()
+    } finally {
+      onInit.mockRestore()
+      onDestroy.mockRestore()
+    }
+  })
+})
+
 describe('hook order', () => {
   it('runs the hooks of a provider injecting paprDb() inside the connection window', async () => {
     const events: string[] = []
@@ -286,7 +366,12 @@ describe('hook order', () => {
       class UsersModule {}
 
       // Imported before configure(), so without deps the consumer's hooks would come first
-      @Module({ imports: [UsersModule, PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } })] })
+      @Module({
+        imports: [
+          UsersModule,
+          PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } }, { global: true }),
+        ],
+      })
       class Root {}
 
       const app = createApp(Root)

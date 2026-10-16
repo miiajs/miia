@@ -29,7 +29,7 @@ function makeFeature() {
     }
   }
 
-  @Module({ providers: [GreetingService] })
+  @Module({ global: true, providers: [GreetingService], exports: [GreetingService] })
   class OtherModule {}
 
   @Controller('/greet')
@@ -109,7 +109,7 @@ describe('module graph', () => {
     const app = new Miia({ logger: false }).register(ModuleA, ModuleB)
 
     const first = thrownBy(() => app.get(SharedService))
-    expect(first.message).toStartWith('[Miia] Duplicate provider: SharedService')
+    expect(first.message).toStartWith('[Miia] SharedService is provided by both ModuleA and ModuleB')
 
     expect(thrownBy(() => app.get(SharedService))).toBe(first)
     await expect(app.init()).rejects.toBe(first)

@@ -195,7 +195,7 @@ describe('TestApp', () => {
     function makeConfigLike() {
       class ConfigLikeModule {
         static configure(value: string): ConfiguredModule {
-          return { module: ConfigLikeModule, providers: [{ token: CONFIG, factory: () => value }] }
+          return { module: ConfigLikeModule, providers: [{ token: CONFIG, factory: () => value }], exports: [CONFIG] }
         }
       }
 

@@ -35,7 +35,7 @@ function configureMissingError(name: string | undefined, suffix: string): Error 
 export class MongooseModule {
   static configure(
     optionsOrFactory: OptionsOrFactory<MongooseModuleOptions>,
-    options?: { name?: string },
+    options?: { name?: string; global?: boolean },
   ): ConfiguredModule {
     const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
@@ -45,6 +45,9 @@ export class MongooseModule {
     return {
       module: MongooseModule,
       name,
+      global: options?.global,
+      // The internal tokens too: the model factories of register() reach them through the module that imports it
+      exports: [connToken, serviceToken, registryToken],
       providers: [
         {
           token: registryToken,
@@ -80,6 +83,11 @@ export class MongooseModule {
     checkCrossConnectionCollision(models, conn)
 
     const FeatureModule = class MongooseFeatureModule {} as Constructor
+    // How errors and the start-up log name this module
+    const listed = models.map((token) => token.modelName).join(', ')
+    Object.defineProperty(FeatureModule, 'name', {
+      value: `MongooseModule.register([${listed}]${name ? `, { name: '${name}' }` : ''})`,
+    })
 
     const providers: FactoryProvider[] = models.map((token) => ({
       token,
@@ -100,6 +108,7 @@ export class MongooseModule {
 
     return {
       module: FeatureModule,
+      exports: [...models],
       providers,
     }
   }

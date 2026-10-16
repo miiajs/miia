@@ -1,6 +1,7 @@
 import type { CookieJar } from './cookies.js'
 import type { ResponseBuilder } from './response.js'
 import type { LoggerService } from './logger.js'
+import type { FORWARD_REF } from './app/forward-ref.js'
 
 // ─── Utility Types ───────────────────────────────────────────────
 
@@ -112,16 +113,34 @@ export type ProviderDefinition = Constructor | FactoryProvider
 
 // ─── Module System ───────────────────────────────────────────────
 
+/** A module reference resolved when the graph loads, from `forwardRef(() => X)`. */
+export interface ForwardRef<T> {
+  readonly [FORWARD_REF]: () => T
+}
+
+export type ModuleRef = Constructor | ConfiguredModule | ForwardRef<Constructor | ConfiguredModule>
+
 export interface ModuleOptions {
-  imports?: (Constructor | ConfiguredModule)[]
+  imports?: ModuleRef[]
   controllers?: Constructor[]
   providers?: ProviderDefinition[]
+  /** What importers of this module see: its own providers, and modules it imports (re-export). */
+  exports?: (AnyToken | ConfiguredModule | ForwardRef<Constructor | ConfiguredModule>)[]
+  /** The exports of a global module are seen by every module, without an import. */
+  global?: boolean
   prefix?: string
 }
 
 export interface ConfiguredModule {
   module: Constructor
   providers?: ProviderDefinition[]
+  /**
+   * The providers importers see. Without `exports` the module exports nothing. Merged with
+   * `@Module({ exports })` of `module` as a union.
+   */
+  exports?: AnyToken[]
+  /** Merged with `@Module({ global })` of `module`: global when either says so. */
+  global?: boolean
   /**
    * The identity of a configured module is the pair (`module`, `name`); two `configure()`
    * calls with the same pair are an error. A bare import of `module` resolves to the

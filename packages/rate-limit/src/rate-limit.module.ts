@@ -5,9 +5,15 @@ import type { RateLimitModuleOptions } from './guard.js'
 import { MemoryStore } from './memory-store.js'
 
 export class RateLimitModule {
-  static configure(optionsOrFactory: OptionsOrFactory<RateLimitModuleOptions>): ConfiguredModule {
+  static configure(
+    optionsOrFactory: OptionsOrFactory<RateLimitModuleOptions>,
+    options?: { global?: boolean },
+  ): ConfiguredModule {
     return {
       module: RateLimitModule,
+      global: options?.global,
+      // Private, but the guards resolve it
+      exports: [RATE_LIMIT_OPTIONS],
       providers: [
         {
           token: RATE_LIMIT_OPTIONS,

@@ -90,9 +90,7 @@ export class RouterExplorer {
 
   private resolveGuards(guards: Guard[]): Middleware[] {
     return guards.map((guardCtor) => {
-      if (!this.container.has(guardCtor)) {
-        this.container.register(guardCtor, () => new guardCtor(), 'singleton')
-      }
+      if (!this.container.has(guardCtor)) this.container.registerGuard(guardCtor)
       const instance = this.container.resolve<any>(guardCtor)
       return guardToMiddleware((ctx) => instance.canActivate(ctx))
     })

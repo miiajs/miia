@@ -10,7 +10,7 @@ Build structured, type-safe APIs with decorators, dependency injection, and midd
 - **Web Standards** - built on the `Request`/`Response` API, no proprietary abstractions
 - **Multi-Runtime** - runs on Bun, Deno, Node.js, Cloudflare Workers, AWS Lambda
 - **Koa-style Middleware** - clean onion model replaces interceptors, pipes, and filters
-- **Flat DI** - per-app container with `inject()` function, no global singletons
+- **Module boundaries over one container** - per-app container with `inject()`, `imports` / `exports` / `global` checked at startup
 - **ESM-only** - ES2025 target, `nodenext` module resolution
 
 ## Performance

@@ -3,17 +3,32 @@ import type { InjectableMeta } from './decorators/metadata.js'
 import { formatToken } from './di-token-format.js'
 import type { AbstractConstructor, AnyToken, Constructor, Resolve, Scope, Token } from './types.js'
 import { isLazyProxy } from './utils/index.js'
+import { boundaryReport, describe, startupReport, withViolations } from './app/boundary-report.js'
+import type { BoundaryViolation } from './app/boundary-report.js'
+import type { ModuleGraph, ModuleNode } from './app/module-graph.js'
 
 interface ContainerEntry {
   factory: ((resolve: Resolve) => unknown) | (() => unknown)
   scope: Scope
   instance?: unknown
   deps?: readonly AnyToken[]
+  /** The module that declares the provider; null for built-ins, `provide()` and guards no module declares. */
+  owner: ModuleNode | null
+  /** A guard no module declares, built for the routes that use it. */
+  guard: boolean
+  /** What such a guard injected while it was constructed. */
+  injected: Set<AnyToken> | null
 }
 
 interface HookTarget {
   token: AnyToken
   instance: object
+}
+
+/** An entry being constructed, or the entry a factory's `resolve` is bound to. */
+interface Frame {
+  token: AnyToken
+  entry: ContainerEntry
 }
 
 /** A shutdown step that threw: `source` names it (`X.onDestroy()`, `closeServer()`). */
@@ -26,13 +41,28 @@ function hintOf(token: AnyToken): string | undefined {
   return typeof token === 'function' ? getMeta<InjectableMeta>(token, INJECTABLE)?.hint : token.hint
 }
 
+const OUTSIDE_CONTEXT =
+  '[Miia] inject() called outside of container context. ' +
+  'Ensure inject() is used inside a class field initializer or factory function within the DI system.'
+
 export class Container {
   /** @internal */
   static activeContainer: Container | null = null
 
+  /**
+   * Set by the module loader once every module is registered: from then on what an entry injects, resolves
+   * and lists in `deps` is checked against module boundaries. Null in a container without modules.
+   * @internal
+   */
+  graph: ModuleGraph | null = null
+  /** Tokens registered with `app.provide()`, named so in the report. @internal */
+  provided: ReadonlySet<AnyToken> = new Set()
+
   private registry = new Map<AnyToken, ContainerEntry>()
   private requestScope: Map<AnyToken, unknown> | null = null
-  private stack: Array<{ token: AnyToken; entry: ContainerEntry }> = []
+  private stack: Frame[] = []
+  /** Violations of the start-up window; null outside it, where a violation throws at once. */
+  private violations: BoundaryViolation[] | null = null
   /** Requester -> dependency, between singletons, keyed by token: an override replaces the entry, not the token. */
   private edges = new Map<AnyToken, Set<AnyToken>>()
   private hookOrder: HookTarget[] | null = null
@@ -42,27 +72,68 @@ export class Container {
     factory: ((resolve: Resolve) => T) | (() => T),
     scope: Scope = 'singleton',
     deps?: readonly AnyToken[],
+    owner: ModuleNode | null = null,
   ): void {
-    this.registry.set(token, { factory, scope, deps })
+    this.registry.set(token, { factory, scope, deps, owner, guard: false, injected: null })
   }
 
   registerClass<T>(cls: Constructor<T>, scope: Scope = 'singleton'): void {
-    this.registry.set(cls, {
-      factory: () => new cls(),
-      scope,
-    })
+    this.register(cls, () => new cls(), scope)
   }
 
+  /**
+   * A guard no module declares, registered for the routes that use it: what it injects is not checked.
+   * @internal
+   */
+  registerGuard(cls: Constructor): void {
+    this.registerClass(cls)
+    this.registry.get(cls)!.guard = true
+  }
+
+  /** Top-level resolution (app.get(), ctx.resolve(), the framework itself): not checked against boundaries. */
   resolve<T>(token: Token<T> | AbstractConstructor<T>): T {
     const entry = this.registry.get(token)
     if (!entry) throw new Error(this.noProviderMessage(token))
-    return this.instantiate(token, entry) as T
+    return this.instantiate(token, entry, this.stack.at(-1)) as T
   }
 
   resolveOptional<T>(token: Token<T> | AbstractConstructor<T>): T | null {
     const entry = this.registry.get(token)
     if (!entry) return null
-    return this.instantiate(token, entry) as T
+    return this.instantiate(token, entry, this.stack.at(-1)) as T
+  }
+
+  /**
+   * inject() / injectOptional(): checked from the entry being constructed.
+   * @internal
+   */
+  resolveFromStack(token: AnyToken, optional: boolean): unknown {
+    const frame = this.stack.at(-1)
+    if (!frame) throw new Error(OUTSIDE_CONTEXT)
+    return this.resolveFor(frame, token, optional)
+  }
+
+  /**
+   * Runs `fn` as the start-up window: a boundary violation is collected instead of thrown, and resolution
+   * goes on to find the rest. At the end the violations make one report, or are appended to the error that
+   * escapes; both carry BOUNDARY_REPORT. A nested call joins the outer window.
+   * @internal
+   */
+  collect<T>(fn: () => T): T {
+    if (this.violations !== null) return fn()
+    const violations: BoundaryViolation[] = []
+    this.violations = violations
+    let result: T
+    try {
+      result = fn()
+    } catch (error) {
+      if (violations.length === 0) throw error
+      throw withViolations(error, violations, this.graph!)
+    } finally {
+      this.violations = null
+    }
+    if (violations.length > 0) throw startupReport(violations, this.graph!)
+    return result
   }
 
   /** @internal */
@@ -81,26 +152,35 @@ export class Container {
   }
 
   /**
-   * Every singleton is constructed: set by initAll(), cleared at the end of destroyAll().
+   * Every singleton is constructed: set by constructAll(), cleared at the end of destroyAll().
    * @internal
    */
   get allConstructed(): boolean {
     return this.hookOrder !== null
   }
 
-  async initAll(): Promise<void> {
+  /** Phase 1 of init: checks `deps`, instantiates every singleton (runs all factories) and fixes the hook order. */
+  constructAll(): void {
     for (const [token, entry] of this.registry) {
-      for (const dep of entry.deps ?? []) {
-        if (!this.registry.has(dep)) throw new Error(this.noProviderMessage(dep, `${formatToken(token)} (deps)`))
+      if (entry.deps === undefined) continue
+      for (const dep of entry.deps) {
+        const depEntry = this.registry.get(dep)
+        if (!depEntry) throw new Error(this.noProviderMessage(dep, `deps of ${describe(token, entry.owner)}`))
+        if (this.graph !== null && depEntry.owner !== null && !entry.guard) {
+          this.checkVisible({ token, entry }, dep, depEntry.owner, 'deps')
+        }
       }
     }
-    // Phase 1: instantiate all singletons (runs all factories)
     for (const [token, entry] of this.registry) {
-      if (entry.scope === 'singleton') this.instantiate(token, entry)
+      if (entry.scope === 'singleton') this.instantiate(token, entry, undefined)
     }
-    // Phase 2: lifecycle hooks, dependencies first
     this.hookOrder = this.lifecycleOrder(true)
-    for (const { instance } of this.hookOrder) {
+  }
+
+  /** Phase 2 of init: onInit() on every singleton, dependencies first; runs constructAll() if nothing has. */
+  async initAll(): Promise<void> {
+    if (this.hookOrder === null) this.constructAll()
+    for (const { instance } of this.hookOrder!) {
       const onInit = (instance as { onInit?: () => unknown }).onInit
       if (typeof onInit === 'function') {
         await onInit.call(instance)
@@ -145,7 +225,7 @@ export class Container {
   /**
    * Shutdown: onShutdown() on every singleton, then onDestroy() on every singleton, both in reverse
    * dependency order. A hook that throws does not stop the rest - its error is returned, not thrown.
-   * Without initAll() (only app.get(), or a failed init()) the order comes from what was built so far.
+   * Without constructAll() (only app.get(), or a failed init()) the order comes from what was built so far.
    */
   async destroyAll(): Promise<ShutdownFailure[]> {
     const order = (this.hookOrder ?? this.lifecycleOrder(false)).toReversed()
@@ -208,7 +288,7 @@ export class Container {
 
   /** `cycle` starts and ends with the same token; `viaDeps` tells how each step was reached from the previous one. */
   private hookCycleMessage(cycle: Array<{ token: AnyToken; viaDeps: boolean }>): string {
-    const names = cycle.map((step) => formatToken(step.token))
+    const names = cycle.map((step) => describe(step.token, this.registry.get(step.token)?.owner ?? null))
     const lines = [`[Miia] Circular dependency detected: ${names.join(' -> ')}`]
     const at = cycle.findIndex((step, i) => i > 0 && step.viaDeps)
     if (at !== -1) {
@@ -237,7 +317,8 @@ export class Container {
 
   private noProviderMessage(token: AnyToken, requiredBy?: string): string {
     const name = formatToken(token)
-    const requester = requiredBy ?? (this.stack.length > 0 ? formatToken(this.stack.at(-1)!.token) : undefined)
+    const top = this.stack.at(-1)
+    const requester = requiredBy ?? (top ? describe(top.token, top.entry.owner) : undefined)
     const lines = [`[Miia] No provider found for token: ${name}${requester ? `, required by ${requester}` : ''}`]
     const hint = hintOf(token)
     if (hint) {
@@ -257,7 +338,39 @@ export class Container {
     return lines.join('\n')
   }
 
-  private instantiate(token: AnyToken, entry: ContainerEntry): unknown {
+  /** Checks `frame` against module boundaries, then instantiates; S4 is checked from `frame` too. */
+  private resolveFor(frame: Frame, token: AnyToken, optional: boolean): unknown {
+    const entry = this.registry.get(token)
+    if (!entry) {
+      if (optional) return null
+      throw new Error(this.noProviderMessage(token, describe(frame.token, frame.entry.owner)))
+    }
+    if (this.graph !== null && entry.owner !== null && !frame.entry.guard) {
+      this.checkVisible(frame, token, entry.owner, 'inject')
+    }
+    return this.instantiate(token, entry, frame)
+  }
+
+  /**
+   * `token`, declared by `owner`, must be visible from the module of `frame`: the root for an entry without one,
+   * plus the host for a configured module. Collected in the start-up window, thrown outside it.
+   */
+  private checkVisible(frame: Frame, token: AnyToken, owner: ModuleNode, via: 'inject' | 'deps'): void {
+    const graph = this.graph!
+    const from = frame.entry.owner
+    const visible =
+      from === null
+        ? graph.sees(graph.root, token)
+        : graph.sees(from, token) || (from.host !== null && graph.sees(from.host, token))
+    if (visible) return
+    const provided = this.provided.has(frame.token)
+    const violation: BoundaryViolation = { requester: frame.token, from, provided, token, owner, via }
+    if (this.violations === null) throw boundaryReport([violation], graph)
+    this.violations.push(violation)
+  }
+
+  /** `requester` is who asks for `token`: S4 is checked from it. */
+  private instantiate(token: AnyToken, entry: ContainerEntry, requester: Frame | undefined): unknown {
     if (entry.scope === 'singleton' && entry.instance !== undefined) {
       if (this.stack.length > 0) this.recordEdge(token)
       return entry.instance
@@ -265,7 +378,10 @@ export class Container {
 
     const cycleStart = this.stack.findIndex((frame) => frame.token === token)
     if (cycleStart !== -1) {
-      const chain = [...this.stack.slice(cycleStart).map((frame) => formatToken(frame.token)), formatToken(token)]
+      const chain = [
+        ...this.stack.slice(cycleStart).map((frame) => describe(frame.token, frame.entry.owner)),
+        describe(token, entry.owner),
+      ]
       throw new Error(
         `[Miia] Circular dependency detected: ${chain.join(' -> ')}\n` +
           '  - move the shared logic into a separate provider both can inject\n' +
@@ -282,7 +398,6 @@ export class Container {
     }
 
     if (entry.scope === 'request') {
-      const requester = this.stack.at(-1)
       if (requester && requester.entry.scope !== 'request') {
         const name = formatToken(requester.token)
         throw new Error(
@@ -310,11 +425,13 @@ export class Container {
   private callFactory(token: AnyToken, entry: ContainerEntry): unknown {
     const prev = Container.activeContainer
     Container.activeContainer = this
-    this.stack.push({ token, entry })
+    const frame: Frame = { token, entry }
+    this.stack.push(frame)
     try {
       const fn = entry.factory
       if (fn.length === 0) return (fn as () => unknown)()
-      const resolve: Resolve = <X>(t: Token<X> | AbstractConstructor<X>) => this.resolve<X>(t)
+      // Bound to this entry for life: a late call, e.g. from a lazy proxy, is checked from it, not from the stack.
+      const resolve: Resolve = <X>(t: Token<X> | AbstractConstructor<X>) => this.resolveFor(frame, t, false) as X
       return (fn as (r: Resolve) => unknown)(resolve)
     } finally {
       this.stack.pop()
@@ -326,19 +443,15 @@ export class Container {
 // ─── inject / injectOptional ─────────────────────────────────────
 
 function getActiveContainer(): Container {
-  if (!Container.activeContainer) {
-    throw new Error(
-      '[Miia] inject() called outside of container context. ' +
-        'Ensure inject() is used inside a class field initializer or factory function within the DI system.',
-    )
-  }
+  if (!Container.activeContainer) throw new Error(OUTSIDE_CONTEXT)
   return Container.activeContainer
 }
 
 export function inject<T>(token: Token<T> | AbstractConstructor<T>): T {
-  return getActiveContainer().resolve<T>(token)
+  return getActiveContainer().resolveFromStack(token, false) as T
 }
 
+/** `null` for a token nothing registers; a registered token the requester's module cannot see is a violation. */
 export function injectOptional<T>(token: Token<T> | AbstractConstructor<T>): T | null {
-  return getActiveContainer().resolveOptional<T>(token)
+  return getActiveContainer().resolveFromStack(token, true) as T | null
 }

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { type Constructor, DiscoveryService, getMeta, Injectable, inject, Logger, Resolver } from '@miiajs/core'
+import { type Constructor, DiscoveryService, getMeta, INJECTABLE, Injectable, inject, Logger } from '@miiajs/core'
 import { IDEMPOTENT, type IdempotentMeta, ON, type OnMeta } from './decorators.js'
 import { deriveGroupName } from './group-name.js'
 import type { IdempotencyStore } from './idempotency.js'
-import { busToken, configureCall } from './tokens.js'
+import { configureCall } from './tokens.js'
 import {
   type DispatchMode,
   type HandlerResult,
@@ -82,7 +82,6 @@ const VALID_INITIAL_POSITIONS = "'latest', 'earliest' or { since: ms } with a po
 export class MessageBus {
   // Field-init for shared globals (idiomatic MiiaJS pattern).
   private discovery = inject(DiscoveryService)
-  private resolver = inject(Resolver)
   // Logger init in constructor body because it depends on busName.
   private logger: Logger
   private subscriptions: Subscription[] = []
@@ -96,15 +95,25 @@ export class MessageBus {
     this.logger = new Logger(busName ? `MessageBus:${busName}` : 'MessageBus')
   }
 
+  /** @internal The name this bus is configured under, null for the default bus. */
+  get name(): string | null {
+    return this.busName
+  }
+
   async onReady(): Promise<void> {
     const allHandlers = this.discovery.getMethodsWithMeta<OnMeta>(ON)
+
+    // Every bus of the app, wherever its module sits: a subclass inherits the @Injectable metadata.
+    const busNames = new Set<string | null>()
+    for (const { instance } of this.discovery.getClassesWithMeta(INJECTABLE)) {
+      if (instance instanceof MessageBus) busNames.add(instance.name)
+    }
 
     // Validation: every referenced bus name must point to a registered bus.
     // Each bus instance runs this check; first onReady to fail throws.
     for (const h of allHandlers) {
       const refBus = h.metadata.bus ?? null
-      const token = busToken(refBus ?? undefined)
-      if (!this.resolver.has(token)) {
+      if (!busNames.has(refBus || null)) {
         throw new Error(
           `[messaging] @On on ${h.ctor.name}.${h.methodName} references bus '${refBus ?? '<default>'}', ` +
             `but no ${configureCall(refBus ?? undefined)} is registered.`,

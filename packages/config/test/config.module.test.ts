@@ -138,6 +138,18 @@ describe('ConfigModule', () => {
     })
   })
 
+  describe('exports and global', () => {
+    it('exports ConfigService and leaves global unset by default', () => {
+      const configured = ConfigModule.configure()
+      expect(configured.exports).toEqual([ConfigService])
+      expect(configured.global).toBeUndefined()
+    })
+
+    it('passes { global: true } through', () => {
+      expect(ConfigModule.configure({}, { global: true }).global).toBe(true)
+    })
+  })
+
   describe('without ConfigModule.configure()', () => {
     it('names ConfigModule.configure() when ConfigService is not provided', () => {
       expect(() => new Miia({ logger: false }).get(ConfigService)).toThrow(

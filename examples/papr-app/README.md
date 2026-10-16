@@ -32,7 +32,7 @@ curl http://localhost:3000/users
 
 | File | Description |
 | --- | --- |
-| `src/app.module.ts` | Root module - configures Papr and imports feature modules |
+| `src/app.module.ts` | Root module - configures Config and Papr with `{ global: true }`, so feature modules and their `register()` models see them without an import, and imports feature modules |
 | `src/user/user.schema.ts` | Papr schema and model definition via `defineModel()` |
 | `src/user/user.module.ts` | Feature module - registers model via `PaprModule.register()` |
 | `src/user/user.service.ts` | Service - uses `inject(User)` and `inject(paprDb())` for typed model and raw db access |

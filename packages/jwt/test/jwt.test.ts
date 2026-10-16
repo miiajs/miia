@@ -79,6 +79,18 @@ describe('JwtService - standalone construction', () => {
   })
 })
 
+describe('JwtModule.configure - exports and global', () => {
+  it('exports JwtService and leaves global unset by default', () => {
+    const configured = JwtModule.configure({ secret })
+    expect(configured.exports).toEqual([JwtService])
+    expect(configured.global).toBeUndefined()
+  })
+
+  it('passes { global: true } through', () => {
+    expect(JwtModule.configure({ secret }, { global: true }).global).toBe(true)
+  })
+})
+
 describe('JwtService - without JwtModule.configure()', () => {
   it('names JwtModule.configure() when JwtService is not provided', () => {
     expect(() => new Miia({ logger: false }).get(JwtService)).toThrow('JwtService is provided by JwtModule.configure()')

@@ -575,6 +575,46 @@ describe('MessageBus', () => {
       )
     })
 
+    it('accepts an @On that targets a bus configured in another module', async () => {
+      @Injectable()
+      class AuditHandlers {
+        received: unknown[] = []
+        @On('order.placed', { bus: 'audit' })
+        async run(payload: unknown) {
+          this.received.push(payload)
+        }
+      }
+
+      // Neither configuration is global: the default bus and the handler live in OrdersModule only
+      @Module({
+        imports: [
+          MessagingModule.configure({ transport: inMemoryTransport({ retry: { backoffMs: 5 }, drainTimeoutMs: 50 }) }),
+        ],
+        providers: [AuditHandlers],
+      })
+      class OrdersModule {}
+
+      @Module({
+        imports: [
+          MessagingModule.configure(
+            { transport: inMemoryTransport({ retry: { backoffMs: 5 }, drainTimeoutMs: 50 }) },
+            { name: 'audit' },
+          ),
+        ],
+      })
+      class AuditModule {}
+
+      @Module({ imports: [OrdersModule, AuditModule] })
+      class AppModule {}
+
+      const app = await TestApp.create(AppModule).compile()
+      cleanup.push(() => app.close())
+
+      await app.resolve(messageBus('audit')).publish('order.placed', { id: '1' })
+      await wait(20)
+      expect(app.resolve(AuditHandlers).received).toEqual([{ id: '1' }])
+    })
+
     it('per-bus idempotency stores are isolated', async () => {
       @Injectable()
       class DefaultH {

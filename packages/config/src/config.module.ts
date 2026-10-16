@@ -9,9 +9,14 @@ export interface ConfigModuleOptions {
 }
 
 export class ConfigModule {
-  static configure(optionsOrFactory: OptionsOrFactory<ConfigModuleOptions> = {}): ConfiguredModule {
+  static configure(
+    optionsOrFactory: OptionsOrFactory<ConfigModuleOptions> = {},
+    options?: { global?: boolean },
+  ): ConfiguredModule {
     return {
       module: ConfigModule,
+      global: options?.global,
+      exports: [ConfigService],
       providers: [
         {
           token: CONFIG_VALUES,

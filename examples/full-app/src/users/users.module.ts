@@ -6,5 +6,6 @@ import { UsersPolicy } from './users.policy.js'
 @Module({
   controllers: [UsersController],
   providers: [UsersService, UsersPolicy],
+  exports: [UsersService],
 })
 export class UsersModule {}

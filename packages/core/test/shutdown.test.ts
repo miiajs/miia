@@ -71,7 +71,7 @@ describe('shutdown order', () => {
       users = inject(UsersService)
     }
 
-    @Module({ providers: [UsersService] })
+    @Module({ global: true, providers: [UsersService], exports: [UsersService] })
     class UsersModule {}
 
     @Module({ providers: [OrdersService] })
@@ -319,7 +319,7 @@ describe('shutdown without a complete init()', () => {
       users = inject(UsersService)
     }
 
-    @Module({ providers: [UsersService] })
+    @Module({ global: true, providers: [UsersService], exports: [UsersService] })
     class UsersModule {}
 
     @Module({ providers: [OrdersService] })
@@ -350,7 +350,9 @@ describe('shutdown without a complete init()', () => {
     class AppModule {}
 
     const app = new Miia({ logger: false }).register(AppModule)
-    expect((await initError(app)).message).toStartWith('[Miia] Circular dependency detected: A -> B -> A')
+    expect((await initError(app)).message).toStartWith(
+      '[Miia] Circular dependency detected: A (AppModule) -> B (AppModule) -> A (AppModule)',
+    )
     await app.destroy()
     expect(events.toSorted()).toEqual([
       'A.onDestroy',
@@ -384,7 +386,7 @@ describe('shutdown without a complete init()', () => {
 
     const app = new Miia({ logger: false }).register(AppModule)
     expect((await initError(app)).message.split('\n')[0]).toBe(
-      '[Miia] No provider found for token: Missing, required by Lazy (deps)',
+      '[Miia] No provider found for token: Missing, required by deps of Lazy (AppModule)',
     )
     await app.destroy()
     expect(events).toEqual([

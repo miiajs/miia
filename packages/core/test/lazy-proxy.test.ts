@@ -38,7 +38,9 @@ const USER = createToken<UserModel>('User')
 function dbModule(): ConfiguredModule {
   return {
     module: class DbModule {},
+    global: true,
     providers: [{ token: MODEL_SERVICE, factory: () => new ModelService() }],
+    exports: [MODEL_SERVICE],
   }
 }
 
@@ -57,6 +59,7 @@ function featureModule(counter: { resolves: number }): ConfiguredModule {
         },
       },
     ],
+    exports: [USER],
   }
 }
 
