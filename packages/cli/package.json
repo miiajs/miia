@@ -51,11 +51,13 @@
     "@clack/prompts": "^1.2.0",
     "citty": "^0.2.2",
     "consola": "^3.4.2",
-    "execa": "^9.5.3",
-    "magicast": "^0.5.2"
+    "execa": "^9.5.3"
+  },
+  "peerDependencies": {
+    "typescript": "^6.0.0"
   },
   "devDependencies": {
-    "@babel/types": "^7.29.0"
+    "typescript": "^6.0.2"
   },
   "scripts": {
     "build": "tsc --build",

@@ -1,34 +1,26 @@
+import { colors } from 'consola/utils'
 import type { ResultPromise } from 'execa'
 
-const TSC_TIMESTAMP = /\[?[\d:]+\s*[AP]M\]?\s*-\s*/
+// `7:08:25 AM - `, `19:08:25 - `, `[7:08:25 pm] - ` (en-AU, en-IN)
+const TSC_TIMESTAMP = /^\[?\d{1,2}:\d{2}:\d{2}(?:\s?[AP]M)?\]?\s+-\s+/i
 const TSC_ERROR_LINE = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.+)$/
 
-const cyan = (s: string) => `\x1b[36m${s}\x1b[0m`
-const green = (s: string) => `\x1b[32m${s}\x1b[0m`
-const red = (s: string) => `\x1b[31m${s}\x1b[0m`
-const blue = (s: string) => `\x1b[34m${s}\x1b[0m`
+export function formatTscLine(line: string): string | null {
+  const clean = line.replace(/\r/g, '').replace(TSC_TIMESTAMP, '')
+  if (!clean.trim()) return null
 
-function formatLine(line: string): string {
-  if (/Starting compilation in watch mode/.test(line)) {
-    return cyan('Type-checking in progress...')
-  }
-  if (/File change detected/.test(line)) {
-    return cyan('File changed, rechecking...')
-  }
-  if (/Found 0 errors/.test(line)) {
-    return green('No errors found.')
-  }
-  if (/Found \d+ error/.test(line)) {
-    return red(line)
-  }
+  if (/Starting compilation in watch mode/.test(clean)) return colors.cyan('Type-checking in progress...')
+  if (/File change detected/.test(clean)) return colors.cyan('File changed, rechecking...')
+  if (/Found 0 errors/.test(clean)) return colors.green('No errors found.')
+  if (/Found \d+ errors?/.test(clean)) return colors.red(clean)
 
-  const match = TSC_ERROR_LINE.exec(line)
+  const match = TSC_ERROR_LINE.exec(clean)
   if (match) {
     const [, file, ln, col, code, msg] = match
-    return `${red('ERROR')} in ${blue(`${file}:${ln}:${col}`)}\n${code}: ${msg}`
+    return `${colors.red('ERROR')} in ${colors.blue(`${file}:${ln}:${col}`)}\n${code}: ${msg}`
   }
 
-  return line
+  return clean
 }
 
 export function pipeTsc(proc: ResultPromise): void {
@@ -38,9 +30,8 @@ export function pipeTsc(proc: ResultPromise): void {
     const lines = buffer.split('\n')
     buffer = lines.pop() ?? ''
     for (const line of lines) {
-      if (!line.trim()) continue
-      const clean = line.replace(TSC_TIMESTAMP, '')
-      process.stdout.write(formatLine(clean) + '\n')
+      const formatted = formatTscLine(line)
+      if (formatted !== null) process.stdout.write(`${formatted}\n`)
     }
   })
 

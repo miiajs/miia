@@ -1,8 +1,9 @@
 import { defineCommand } from 'citty'
-import { tryResolveRuntime } from '../runtime/detect.js'
 import { startDev } from '../dev/orchestrator.js'
-import { preflight } from '../utils/preflight.js'
+import { resolveRuntime } from '../runtime/detect.js'
+import { action } from '../utils/errors.js'
 import { logger } from '../utils/logger.js'
+import { requireRuntime, requireTsx, requireTypeScript } from '../utils/preflight.js'
 
 export default defineCommand({
   meta: {
@@ -25,20 +26,21 @@ export default defineCommand({
       description: 'Path to .env file',
     },
   },
-  run({ args }) {
+  run: action(async ({ args }) => {
     const cwd = process.cwd()
-    const { runtime, source } = tryResolveRuntime(cwd, args.runtime)
+    const { runtime, source } = resolveRuntime(cwd, args.runtime)
     logger.info(`Detected runtime: ${runtime} (${source})`)
 
-    if (!preflight(runtime, 'dev')) {
-      process.exit(1)
-    }
+    requireRuntime(runtime)
+    const tsc = requireTypeScript(cwd)
+    if (runtime === 'node') requireTsx(cwd)
 
-    return startDev({
+    process.exitCode = await startDev({
       runtime,
       cwd,
       entry: args.entry,
       envFile: args['env-file'],
+      tsc,
     })
-  },
+  }),
 })

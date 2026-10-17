@@ -1,8 +1,10 @@
-import { defineCommand } from 'citty'
+import { defineCommand, runMain } from 'citty'
+import { cliVersion } from './utils/package-info.js'
 
 export const main = defineCommand({
   meta: {
     name: 'miia',
+    version: cliVersion(),
     description: 'MiiaJS CLI - build, develop, and scaffold MiiaJS applications',
   },
   subCommands: {
@@ -15,3 +17,8 @@ export const main = defineCommand({
     g: () => import('./commands/generate.js').then((m) => m.default),
   },
 })
+
+/** Runs the CLI with the given arguments (without the `node bin` prefix). */
+export function run(argv: string[]): Promise<void> {
+  return runMain(main, { rawArgs: argv })
+}

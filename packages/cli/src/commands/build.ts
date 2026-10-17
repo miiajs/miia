@@ -1,9 +1,10 @@
 import { defineCommand } from 'citty'
 import { execa } from 'execa'
-import { tryResolveRuntime } from '../runtime/detect.js'
 import { getBuildCommand } from '../runtime/commands.js'
-import { preflight } from '../utils/preflight.js'
+import { resolveRuntime } from '../runtime/detect.js'
+import { action, CliError } from '../utils/errors.js'
 import { logger } from '../utils/logger.js'
+import { requireTypeScript } from '../utils/preflight.js'
 
 export default defineCommand({
   meta: {
@@ -17,28 +18,17 @@ export default defineCommand({
       alias: 'r',
     },
   },
-  async run({ args }) {
-    const { runtime, source } = tryResolveRuntime(process.cwd(), args.runtime)
+  run: action(async ({ args }) => {
+    const cwd = process.cwd()
+    const { runtime, source } = resolveRuntime(cwd, args.runtime)
     logger.info(`Runtime: ${runtime} (${source})`)
 
-    if (!preflight(runtime, 'build')) {
-      process.exit(1)
-    }
-
-    const cmd = getBuildCommand(runtime)
+    const cmd = getBuildCommand(runtime, cwd, requireTypeScript(cwd))
     logger.info(runtime === 'node' ? 'Compiling TypeScript...' : 'Type-checking...')
 
-    const result = await execa(cmd.command, cmd.args, {
-      cwd: process.cwd(),
-      stdio: 'inherit',
-      reject: false,
-    })
-
-    if (result.exitCode !== 0) {
-      logger.error('Build failed')
-      process.exit(1)
-    }
+    const result = await execa(cmd.command, cmd.args, { cwd, stdio: 'inherit', reject: false })
+    if (result.exitCode !== 0) throw new CliError('Build failed')
 
     logger.success('Build complete')
-  },
+  }),
 })

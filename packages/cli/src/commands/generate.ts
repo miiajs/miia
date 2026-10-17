@@ -1,6 +1,7 @@
 import { defineCommand } from 'citty'
 import * as p from '@clack/prompts'
 import { runGenerate } from '../generate/runner.js'
+import { action } from '../utils/errors.js'
 
 export default defineCommand({
   meta: {
@@ -33,7 +34,7 @@ export default defineCommand({
       default: false,
     },
   },
-  async run({ args }) {
+  run: action(async ({ args }) => {
     let schematic = args.schematic as string | undefined
     let name = args.name as string | undefined
 
@@ -64,5 +65,5 @@ export default defineCommand({
       flat: args.flat as boolean,
       dryRun: args['dry-run'] as boolean,
     })
-  },
+  }),
 })

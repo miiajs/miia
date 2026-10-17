@@ -1,8 +1,7 @@
 import * as p from '@clack/prompts'
 import type { Runtime } from '../runtime/types.js'
+import type { PackageManager } from '../runtime/package-manager.js'
 import type { FeatureId } from './types.js'
-
-export type PackageManager = 'bun' | 'pnpm' | 'npm' | 'yarn'
 
 export interface ScaffoldAnswers {
   name: string

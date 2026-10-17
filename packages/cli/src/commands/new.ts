@@ -1,7 +1,7 @@
 import { defineCommand } from 'citty'
 import { runScaffoldPrompts } from '../scaffold/prompts.js'
 import { scaffoldProject } from '../scaffold/scaffold.js'
-import { logger } from '../utils/logger.js'
+import { action } from '../utils/errors.js'
 
 export default defineCommand({
   meta: {
@@ -25,7 +25,7 @@ export default defineCommand({
       default: false,
     },
   },
-  async run({ args }) {
+  run: action(async ({ args }) => {
     const answers = await runScaffoldPrompts(args.name as string | undefined)
 
     if (!answers) {
@@ -42,5 +42,5 @@ export default defineCommand({
       dryRun: args['dry-run'] as boolean,
       skipInstall: args['skip-install'] as boolean,
     })
-  },
+  }),
 })

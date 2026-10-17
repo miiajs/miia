@@ -1,31 +1,22 @@
 import { defineCommand } from 'citty'
 import { execa } from 'execa'
-import { preflight } from '../utils/preflight.js'
+import { action, CliError } from '../utils/errors.js'
 import { logger } from '../utils/logger.js'
+import { requireTypeScript } from '../utils/preflight.js'
 
 export default defineCommand({
   meta: {
     name: 'check',
     description: 'Type-check the project (tsc --noEmit)',
   },
-  async run() {
-    if (!preflight('node', 'check')) {
-      process.exit(1)
-    }
-
+  run: action(async () => {
+    const cwd = process.cwd()
+    const tsc = requireTypeScript(cwd)
     logger.info('Type-checking...')
 
-    const result = await execa('tsc', ['--noEmit'], {
-      cwd: process.cwd(),
-      stdio: 'inherit',
-      reject: false,
-    })
-
-    if (result.exitCode !== 0) {
-      logger.error('Type-check failed')
-      process.exit(1)
-    }
+    const result = await execa(tsc, ['--noEmit'], { cwd, stdio: 'inherit', reject: false })
+    if (result.exitCode !== 0) throw new CliError('Type-check failed')
 
     logger.success('No type errors found')
-  },
+  }),
 })

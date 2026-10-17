@@ -1,17 +1,20 @@
 import { existsSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { execaSync } from 'execa'
-import { logger } from '../utils/logger.js'
+import { dirname, join, relative } from 'node:path'
+import { CliError } from '../utils/errors.js'
+import { findExecutable } from '../utils/which.js'
 import type { Runtime } from './types.js'
 
-interface DetectionResult {
+export interface DetectionResult {
   runtime: Runtime
   source: string
 }
 
-const VALID_RUNTIMES = ['bun', 'deno', 'node'] as const satisfies readonly Runtime[]
+export const RUNTIMES: readonly Runtime[] = ['bun', 'deno', 'node']
 
-const LOCKFILE_MAP: [string, Runtime][] = [
+// Checked per directory level, deno.json before any lockfile: a Deno project installed with pnpm still runs on Deno
+const PROJECT_FILES: [string, Runtime][] = [
+  ['deno.json', 'deno'],
+  ['deno.jsonc', 'deno'],
   ['bun.lock', 'bun'],
   ['bun.lockb', 'bun'],
   ['deno.lock', 'deno'],
@@ -20,55 +23,39 @@ const LOCKFILE_MAP: [string, Runtime][] = [
   ['pnpm-lock.yaml', 'node'],
 ]
 
-function detectFromLockfile(cwd: string): DetectionResult | null {
-  for (const [file, runtime] of LOCKFILE_MAP) {
-    if (existsSync(resolve(cwd, file))) {
-      return { runtime, source: file }
-    }
+export function isRuntime(value: string): value is Runtime {
+  return (RUNTIMES as readonly string[]).includes(value)
+}
+
+export function resolveRuntime(
+  cwd: string,
+  flag?: string,
+  deps: { findExecutable?: typeof findExecutable; stopAt?: string } = {},
+): DetectionResult {
+  if (flag !== undefined) {
+    if (!isRuntime(flag)) throw new CliError(`Invalid runtime "${flag}". Valid: ${RUNTIMES.join(', ')}`)
+    return { runtime: flag, source: '--runtime flag' }
   }
-  return null
-}
 
-function hasExecutable(name: string): boolean {
-  try {
-    execaSync('which', [name])
-    return true
-  } catch {
-    return false
-  }
-}
+  const fromFiles = detectFromProjectFiles(cwd, deps.stopAt)
+  if (fromFiles) return fromFiles
 
-function detectFromExecutable(): DetectionResult | null {
-  if (hasExecutable('bun')) return { runtime: 'bun', source: 'bun in PATH' }
-  if (hasExecutable('deno')) return { runtime: 'deno', source: 'deno in PATH' }
-  return null
-}
-
-export function detectRuntime(cwd: string): DetectionResult {
-  const fromLockfile = detectFromLockfile(cwd)
-  if (fromLockfile) return fromLockfile
-
-  const fromExec = detectFromExecutable()
-  if (fromExec) return fromExec
+  const find = deps.findExecutable ?? findExecutable
+  if (find('bun')) return { runtime: 'bun', source: 'bun in PATH' }
+  if (find('deno')) return { runtime: 'deno', source: 'deno in PATH' }
 
   return { runtime: 'node', source: 'default' }
 }
 
-export function resolveRuntime(cwd: string, flag?: string): DetectionResult {
-  if (flag) {
-    if (!(VALID_RUNTIMES as readonly string[]).includes(flag)) {
-      throw new Error(`Invalid runtime "${flag}". Valid: ${VALID_RUNTIMES.join(', ')}`)
+function detectFromProjectFiles(cwd: string, stopAt?: string): DetectionResult | null {
+  let dir = cwd
+  while (true) {
+    for (const [file, runtime] of PROJECT_FILES) {
+      const path = join(dir, file)
+      if (existsSync(path)) return { runtime, source: dir === cwd ? file : relative(cwd, path) }
     }
-    return { runtime: flag as Runtime, source: '--runtime flag' }
-  }
-  return detectRuntime(cwd)
-}
-
-export function tryResolveRuntime(cwd: string, flag?: string): DetectionResult {
-  try {
-    return resolveRuntime(cwd, flag)
-  } catch (e) {
-    logger.error((e as Error).message)
-    process.exit(1)
+    const parent = dirname(dir)
+    if (dir === stopAt || parent === dir) return null
+    dir = parent
   }
 }

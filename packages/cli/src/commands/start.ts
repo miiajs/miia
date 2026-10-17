@@ -1,9 +1,11 @@
 import { defineCommand } from 'citty'
 import { execa } from 'execa'
-import { tryResolveRuntime } from '../runtime/detect.js'
-import { getStartCommand } from '../runtime/commands.js'
-import { preflight } from '../utils/preflight.js'
+import { createSignalPolicy, onTerminationSignals, signalExitCode } from '../dev/signals.js'
+import { getStartCommand, resolveCommandEnv } from '../runtime/commands.js'
+import { resolveRuntime } from '../runtime/detect.js'
+import { action, CliError } from '../utils/errors.js'
 import { logger } from '../utils/logger.js'
+import { requireRuntime } from '../utils/preflight.js'
 
 export default defineCommand({
   meta: {
@@ -31,22 +33,34 @@ export default defineCommand({
       description: 'Path to .env file',
     },
   },
-  async run({ args }) {
+  run: action(async ({ args }) => {
     const cwd = process.cwd()
-    const { runtime, source } = tryResolveRuntime(cwd, args.runtime)
+    const { runtime, source } = resolveRuntime(cwd, args.runtime)
     logger.info(`Runtime: ${runtime} (${source})`)
-
-    if (!preflight(runtime, 'start')) {
-      process.exit(1)
-    }
+    requireRuntime(runtime)
 
     const cmd = getStartCommand(runtime, args.entry, args.dist, cwd, args['env-file'])
     logger.info('Starting production server...')
 
-    await execa(cmd.command, cmd.args, {
+    // execa would SIGKILL 5s after kill() by default - long enough to cut a graceful shutdown short
+    const child = execa(cmd.command, cmd.args, {
       cwd,
       stdio: 'inherit',
-      env: { ...process.env, ...cmd.env },
+      env: resolveCommandEnv(cmd),
+      reject: false,
+      forceKillAfterDelay: false,
     })
-  },
+
+    const policy = createSignalPolicy()
+    const stopListening = onTerminationSignals((signal) => {
+      const decision = policy(signal)
+      if (decision === 'forward') child.kill('SIGTERM')
+      else if (decision === 'kill') child.kill('SIGKILL')
+    })
+
+    const result = await child.finally(stopListening)
+    if (result.failed && result.exitCode === undefined && !result.signal)
+      throw new CliError(result.shortMessage ?? `Failed to start ${cmd.command}`)
+    process.exitCode = result.signal ? signalExitCode(result.signal) : (result.exitCode ?? 1)
+  }),
 })

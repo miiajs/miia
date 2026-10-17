@@ -1,33 +1,32 @@
 import { existsSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import { resolveSchematic, isResourceSchematic, listSchematics } from './schematics.js'
-import { findParentModule, registerInModule } from './module-updater.js'
-import { toKebabCase, toPascalCase } from '../utils/naming.js'
-import { writeGeneratedFiles } from '../utils/writer.js'
+import { join, relative, resolve, sep } from 'node:path'
+import { ProjectTree } from '../codemod/tree.js'
+import { loadTypeScript } from '../codemod/typescript.js'
+import { CliError } from '../utils/errors.js'
 import { formatFiles } from '../utils/format.js'
 import { logger } from '../utils/logger.js'
-import { resourceModuleTemplate, resourceControllerTemplate, resourceServiceTemplate } from './templates/resource.js'
-import type { GenerateContext, GenerateOptions, GeneratedFile } from './types.js'
+import { toKebabCase, toPascalCase } from '../utils/naming.js'
+import { findParentModule } from './parent-module.js'
+import { registerInModule } from './register.js'
+import { isResourceSchematic, listSchematics, resolveSchematic } from './schematics.js'
+import { resourceControllerTemplate, resourceModuleTemplate, resourceServiceTemplate } from './templates/resource.js'
+import type { GenerateContext, GenerateOptions, GeneratedFile, RegistrationTarget } from './types.js'
 
 export async function runGenerate(options: GenerateOptions): Promise<void> {
   const { name, path, flat = false, dryRun = false } = options
+  const cwd = process.cwd()
 
   // Validate project structure
-  const srcDir = resolve(process.cwd(), 'src')
+  const srcDir = resolve(cwd, 'src')
   if (!existsSync(srcDir)) {
-    logger.error('Not a MiiaJS project (no src/ found). Run from project root.')
-    process.exit(1)
+    throw new CliError('Not a MiiaJS project (no src/ found). Run from project root.')
   }
 
   // Resolve schematic
   const schematic = resolveSchematic(options.schematic)
   if (!schematic) {
-    logger.error(`Unknown schematic "${options.schematic}". Available:`)
-    for (const s of listSchematics()) {
-      const aliases = s.aliases.length ? ` (${s.aliases.join(', ')})` : ''
-      logger.info(`  ${s.name}${aliases}`)
-    }
-    process.exit(1)
+    const available = listSchematics().map((s) => `  ${s.name}${s.aliases.length ? ` (${s.aliases.join(', ')})` : ''}`)
+    throw new CliError([`Unknown schematic "${options.schematic}". Available:`, ...available].join('\n'))
   }
 
   // Parse name (supports "auth/user" → path=auth, name=user)
@@ -43,17 +42,29 @@ export async function runGenerate(options: GenerateOptions): Promise<void> {
   if (path) targetDir = join(targetDir, path)
   if (extraPath) targetDir = join(targetDir, extraPath)
 
-  if (dryRun) {
-    logger.info('DRY RUN - no files will be written\n')
-  }
+  let files: GeneratedFile[]
+  let registration: { file: string; className: string; key: RegistrationTarget; searchFrom: string } | null
 
   if (isResourceSchematic(schematic)) {
-    await generateResource({ fileName, className, targetDir, dryRun, rawName: name })
+    const resourceDir = join(targetDir, fileName)
+    const ctx: GenerateContext = {
+      rawName: name,
+      className,
+      fileName,
+      targetDir: resourceDir,
+      schematic: 'resource',
+      dryRun,
+    }
+    files = [
+      { path: join(resourceDir, `${fileName}.module.ts`), content: resourceModuleTemplate(ctx) },
+      { path: join(resourceDir, `${fileName}.controller.ts`), content: resourceControllerTemplate(ctx) },
+      { path: join(resourceDir, `${fileName}.service.ts`), content: resourceServiceTemplate(ctx) },
+    ]
+    registration = { file: files[0].path, className: `${className}Module`, key: 'imports', searchFrom: targetDir }
   } else {
     // Slash in name implies the user chose the directory - don't nest further
     const useFlat = flat || extraPath.length > 0
     const fileDir = useFlat ? targetDir : join(targetDir, fileName)
-
     const ctx: GenerateContext = {
       rawName: name,
       className,
@@ -62,90 +73,51 @@ export async function runGenerate(options: GenerateOptions): Promise<void> {
       schematic: schematic.name,
       dryRun,
     }
-
     const filePath = join(fileDir, `${fileName}${schematic.fileSuffix}.ts`)
-    const content = schematic.template(ctx)
-
-    const result = await writeGeneratedFiles([{ path: filePath, content }], { dryRun })
-
-    if (result.skipped.length > 0) {
-      process.exit(1)
-    }
-
-    // Auto-register in parent module
-    let modifiedModule: string | null = null
-    if (schematic.registrationTarget && result.created.length > 0) {
-      const classWithSuffix = getClassNameWithSuffix(className, schematic.name)
-      const parentModule = findParentModule(fileDir, filePath)
-      if (parentModule) {
-        modifiedModule = await registerInModule(
-          parentModule,
-          classWithSuffix,
-          filePath,
-          schematic.registrationTarget,
-          dryRun,
-        )
-      } else {
-        logger.warn(`  No parent module found. Register ${classWithSuffix} manually.`)
-      }
-    }
-
-    // Format generated + modified files
-    if (!dryRun && result.created.length > 0) {
-      const toFormat = [...result.created, ...(modifiedModule ? [modifiedModule] : [])]
-      await formatFiles(toFormat, process.cwd())
-    }
-  }
-}
-
-async function generateResource(opts: {
-  fileName: string
-  className: string
-  targetDir: string
-  dryRun: boolean
-  rawName: string
-}): Promise<void> {
-  const { fileName, className, targetDir, dryRun, rawName } = opts
-  const resourceDir = join(targetDir, fileName)
-
-  const ctx: GenerateContext = {
-    rawName,
-    className,
-    fileName,
-    targetDir: resourceDir,
-    schematic: 'resource',
-    dryRun,
+    files = [{ path: filePath, content: schematic.template(ctx) }]
+    registration = schematic.registrationTarget
+      ? {
+          file: filePath,
+          className: getClassNameWithSuffix(className, schematic.name),
+          key: schematic.registrationTarget,
+          searchFrom: fileDir,
+        }
+      : null
   }
 
-  const files: GeneratedFile[] = [
-    { path: join(resourceDir, `${fileName}.module.ts`), content: resourceModuleTemplate(ctx) },
-    { path: join(resourceDir, `${fileName}.controller.ts`), content: resourceControllerTemplate(ctx) },
-    { path: join(resourceDir, `${fileName}.service.ts`), content: resourceServiceTemplate(ctx) },
-  ]
+  const ts = await loadTypeScript()
+  const tree = new ProjectTree(cwd)
+  const rel = (abs: string) => relative(cwd, abs).split(sep).join('/')
 
-  const result = await writeGeneratedFiles(files, { dryRun })
+  for (const file of files) tree.create(rel(file.path), file.content)
 
-  if (result.skipped.length > 0) {
-    process.exit(1)
-  }
-
-  // Register the resource module in parent module's imports
-  let modifiedModule: string | null = null
-  if (result.created.length > 0) {
-    const modulePath = files[0].path
-    const moduleClassName = `${className}Module`
-    const parentModule = findParentModule(targetDir, modulePath)
+  if (registration) {
+    const parentModule = findParentModule(registration.searchFrom, registration.file)
     if (parentModule) {
-      modifiedModule = await registerInModule(parentModule, moduleClassName, modulePath, 'imports', dryRun)
+      const modulePath = rel(parentModule)
+      const status = registerInModule(tree, ts, {
+        modulePath,
+        className: registration.className,
+        file: rel(registration.file),
+        key: registration.key,
+      })
+      if (status === 'unsupported' || status === 'conflict') {
+        logger.warn(`  Register ${registration.className} manually in ${modulePath}`)
+      }
     } else {
-      logger.warn(`  No parent module found. Register ${moduleClassName} manually.`)
+      logger.warn(`  No parent module found. Register ${registration.className} manually.`)
     }
   }
 
-  if (!dryRun && result.created.length > 0) {
-    const toFormat = [...result.created, ...(modifiedModule ? [modifiedModule] : [])]
-    await formatFiles(toFormat, process.cwd())
+  if (dryRun) {
+    logger.info('DRY RUN - no files will be written\n')
+    for (const line of tree.summary()) logger.info(`  ${line}`)
+    return
   }
+
+  const written = await tree.commit()
+  for (const line of tree.summary()) logger.success(`  ${line}`)
+  await formatFiles(written, cwd)
 }
 
 function getClassNameWithSuffix(className: string, schematic: string): string {

@@ -5,10 +5,11 @@ import { installDependencies } from './package-install.js'
 import { resolveFeatures } from './features/registry.js'
 import { buildPackageJson, buildTsconfig, buildGitignore, buildEnvFile } from './project-files.js'
 import { composeAppModule, composeMainTs, composeAppController, composeAppService } from './app-composer.js'
+import { CliError } from '../utils/errors.js'
 import { logger } from '../utils/logger.js'
 import type { Runtime } from '../runtime/types.js'
 import type { FeatureId, ScaffoldContext } from './types.js'
-import type { PackageManager } from './prompts.js'
+import type { PackageManager } from '../runtime/package-manager.js'
 import * as p from '@clack/prompts'
 
 export interface ScaffoldOptions {
@@ -26,15 +27,13 @@ export async function scaffoldProject(options: ScaffoldOptions): Promise<void> {
   const root = resolve(process.cwd(), targetDir)
 
   if (existsSync(root)) {
-    logger.error(`Directory "${targetDir}" already exists`)
-    process.exit(1)
+    throw new CliError(`Directory "${targetDir}" already exists`)
   }
 
   // Resolve features (auto-select requires, check conflicts)
   const { features, error } = resolveFeatures(featureIds)
   if (error) {
-    logger.error(error)
-    process.exit(1)
+    throw new CliError(error)
   }
 
   const ctx: ScaffoldContext = { name, runtime, features, dryRun }

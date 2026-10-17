@@ -1,6 +1,6 @@
 import { execa } from 'execa'
 import { logger } from '../utils/logger.js'
-import type { PackageManager } from './prompts.js'
+import type { PackageManager } from '../runtime/package-manager.js'
 
 export async function installDependencies(cwd: string, pm: PackageManager): Promise<void> {
   logger.info(`Installing dependencies with ${pm}...`)

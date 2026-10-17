@@ -1,35 +1,28 @@
 import { execaSync } from 'execa'
-import { logger } from './logger.js'
+import { addDevHint, detectPackageManager } from '../runtime/package-manager.js'
 import type { Runtime } from '../runtime/types.js'
+import { CliError } from './errors.js'
+import { findExecutable, findLocalBin } from './which.js'
 
-function hasCommand(cmd: string): boolean {
-  try {
-    execaSync('which', [cmd])
-    return true
-  } catch {
-    return false
-  }
+function installHint(cwd: string, pkg: string): string {
+  return addDevHint(detectPackageManager(cwd) ?? 'npm', pkg)
 }
 
-export function preflight(runtime: Runtime, command: 'dev' | 'build' | 'start' | 'check'): boolean {
-  if (command !== 'start' && !hasCommand('tsc')) {
-    logger.error('TypeScript compiler (tsc) not found. Install typescript:\n  npm install -D typescript')
-    return false
-  }
+export function requireTypeScript(cwd: string): string {
+  const tsc = findLocalBin(cwd, 'tsc') ?? findExecutable('tsc')
+  if (tsc) return tsc
+  throw new CliError(`TypeScript compiler (tsc) not found. Install typescript:\n  ${installHint(cwd, 'typescript')}`)
+}
 
-  if (runtime === 'node' && command === 'dev') {
-    try {
-      execaSync('node', ['--import', 'tsx', '-e', '""'])
-    } catch {
-      logger.error('tsx not found. Install it for Node.js dev mode:\n  npm install -D tsx')
-      return false
-    }
-  }
+// The CLI itself may run on Bun or Deno, so node is not guaranteed either
+export function requireRuntime(runtime: Runtime): void {
+  if (!findExecutable(runtime)) throw new CliError(`Runtime "${runtime}" not found in PATH`)
+}
 
-  if (runtime !== 'node' && !hasCommand(runtime)) {
-    logger.error(`Runtime "${runtime}" not found in PATH`)
-    return false
+export function requireTsx(cwd: string): void {
+  if (findLocalBin(cwd, 'tsx')) return
+  const result = execaSync('node', ['--import', 'tsx', '-e', ''], { cwd, reject: false })
+  if (result.exitCode !== 0) {
+    throw new CliError(`tsx not found. Install it for Node.js dev mode:\n  ${installHint(cwd, 'tsx')}`)
   }
-
-  return true
 }
