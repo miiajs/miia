@@ -5,7 +5,10 @@ import type { ApiHeaderMeta, ApiHeaderOptions } from '../types.js'
 export const ApiHeader = createDecorator<[name: string, options?: ApiHeaderOptions]>((context, name, options) => {
   const entry: ApiHeaderMeta = { name, ...options }
   const meta = context.metadata as Record<symbol, any>
-  const map: Map<string, ApiHeaderMeta[]> = meta[API_HEADERS] ?? new Map()
+  // A subclass reads its parent's map through the metadata prototype: copy it before the first write
+  const map: Map<string, ApiHeaderMeta[]> = Object.hasOwn(meta, API_HEADERS)
+    ? meta[API_HEADERS]
+    : new Map(meta[API_HEADERS])
   const key = context.kind === 'class' ? '*' : String(context.name)
   const existing = map.get(key) ?? []
   map.set(key, [...existing, entry])

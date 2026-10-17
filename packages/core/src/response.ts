@@ -33,14 +33,14 @@ export class ResponseBuilder {
 
   text(data: string): this {
     this._modified = true
-    this.ensureHeaders().set('Content-Type', 'text/plain')
+    this.ensureHeaders().set('Content-Type', 'text/plain; charset=utf-8')
     this._body = data
     return this
   }
 
   html(data: string): this {
     this._modified = true
-    this.ensureHeaders().set('Content-Type', 'text/html')
+    this.ensureHeaders().set('Content-Type', 'text/html; charset=utf-8')
     this._body = data
     return this
   }

@@ -3,7 +3,7 @@ import type { Stats } from 'node:fs'
 import { realpath, stat } from 'node:fs/promises'
 import { extname, join, normalize, resolve, sep } from 'node:path'
 import { Readable } from 'node:stream'
-import { NotFoundException } from '@miiajs/core'
+import { BadRequestException, NotFoundException } from '@miiajs/core'
 import type { Miia, RequestContext } from '@miiajs/core'
 import { generateETag, matchETag } from './etag.js'
 import { getMimeType as defaultGetMimeType, withCharset } from './mime-types.js'
@@ -31,6 +31,24 @@ export interface ServeStaticMountOptions extends ServeStaticOptions {
 
 function containsDotSegment(path: string): boolean {
   return path.split(/[/\\]/).some((seg) => seg.length > 0 && seg.startsWith('.'))
+}
+
+/** The wildcard arrives percent-encoded, file names on disk are not. Checks below run on the decoded path. */
+function decodePath(raw: string): string {
+  if (!raw.includes('%')) return raw
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(raw)
+  } catch {
+    throw new BadRequestException('Malformed URI')
+  }
+  if (decoded.includes('\0')) throw new BadRequestException('Malformed URI')
+  return decoded
+}
+
+/** Worded like the router's own 404: method and path, never the client's Host. */
+function notFound(ctx: RequestContext): NotFoundException {
+  return new NotFoundException(`Cannot ${ctx.req.method} ${new URL(ctx.req.url).pathname}`)
 }
 
 function shouldFallback(method: string, accept: string | null, relativePath: string): boolean {
@@ -65,7 +83,7 @@ export function createStaticHandler(
     throw new Error(`[serve-static] fallback '${fallback}' contains a dotfile segment but dotfiles are disabled`)
   }
 
-  async function resolveFile(relativePath: string): Promise<{ realPath: string; stats: Stats } | null> {
+  async function resolvePath(relativePath: string): Promise<{ realPath: string; stats: Stats } | null> {
     const filePath = normalize(join(resolvedRoot, relativePath))
 
     // Lexical traversal protection
@@ -85,24 +103,29 @@ export function createStaticHandler(
       return null
     }
 
-    if (!stats.isFile()) return null
-
     return { realPath, stats }
+  }
+
+  async function resolveFile(relativePath: string): Promise<{ realPath: string; stats: Stats } | null> {
+    const resolved = await resolvePath(relativePath)
+    return resolved?.stats.isFile() ? resolved : null
   }
 
   async function serveFile(ctx: RequestContext, relativePath: string): Promise<Response | null> {
     const resolved = await resolveFile(relativePath)
-    if (!resolved) return null
+    return resolved ? sendFile(ctx, resolved) : null
+  }
 
-    const { realPath, stats } = resolved
+  function sendFile(ctx: RequestContext, { realPath, stats }: { realPath: string; stats: Stats }): Response {
     const method = ctx.req.method
 
     const etag = generateETag(stats)
     const lastModified = new Date(stats.mtimeMs).toUTCString()
     const lastModifiedSec = Math.floor(stats.mtimeMs / 1000)
 
-    const ifNoneMatch = ctx.req.headers.get('if-none-match')
-    const ifModifiedSince = ctx.req.headers.get('if-modified-since')
+    // `etag: false` turns conditional GET off: no validators go out, none are honoured
+    const ifNoneMatch = etagEnabled ? ctx.req.headers.get('if-none-match') : null
+    const ifModifiedSince = etagEnabled ? ctx.req.headers.get('if-modified-since') : null
     let notModified = false
     if (ifNoneMatch) {
       if (matchETag(ifNoneMatch, etag)) notModified = true
@@ -114,11 +137,7 @@ export function createStaticHandler(
     }
 
     if (notModified) {
-      const headers304: Record<string, string> = {}
-      if (etagEnabled) {
-        headers304.ETag = etag
-        headers304['Last-Modified'] = lastModified
-      }
+      const headers304: Record<string, string> = { ETag: etag, 'Last-Modified': lastModified }
       if (maxAge > 0) headers304['Cache-Control'] = `public, max-age=${maxAge}`
       return new Response(null, { status: 304, headers: headers304 })
     }
@@ -175,11 +194,11 @@ export function createStaticHandler(
   }
 
   return async (ctx: RequestContext): Promise<Response> => {
-    let relativePath = ctx.params['*']
+    let relativePath = decodePath(ctx.params['*'] ?? '')
 
     if (!relativePath) {
       if (!index) {
-        throw new NotFoundException(`Cannot GET ${ctx.req.url}`)
+        throw notFound(ctx)
       }
 
       // Redirect to trailing slash so relative paths in HTML resolve correctly
@@ -195,11 +214,24 @@ export function createStaticHandler(
     // Dotfile guard - hard 404, no SPA fallback (so a request to /.git/HEAD
     // can't slip through to index.html when fallback is configured).
     if (!dotfiles && containsDotSegment(relativePath)) {
-      throw new NotFoundException(`Cannot GET ${ctx.req.url}`)
+      throw notFound(ctx)
     }
 
-    const response = await serveFile(ctx, relativePath)
-    if (response) return response
+    const resolved = await resolvePath(relativePath)
+    if (resolved?.stats.isFile()) return sendFile(ctx, resolved)
+
+    // A subdirectory with an index file: the same trailing-slash redirect as the mount root
+    if (index && resolved?.stats.isDirectory()) {
+      const indexFile = await resolveFile(`${relativePath}/${index}`)
+      if (indexFile) {
+        const url = new URL(ctx.req.url)
+        if (!url.pathname.endsWith('/')) {
+          url.pathname += '/'
+          return Response.redirect(url.toString(), 301)
+        }
+        return sendFile(ctx, indexFile)
+      }
+    }
 
     if (fallback !== false) {
       const accept = ctx.req.headers.get('accept')
@@ -209,7 +241,7 @@ export function createStaticHandler(
       }
     }
 
-    throw new NotFoundException(`Cannot GET ${ctx.req.url}`)
+    throw notFound(ctx)
   }
 }
 

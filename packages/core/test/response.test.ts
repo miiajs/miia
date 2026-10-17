@@ -26,14 +26,14 @@ describe('ResponseBuilder', () => {
   })
 
   it('should build text response', async () => {
-    const res = new ResponseBuilder().text('Hello').build()
-    expect(res.headers.get('Content-Type')).toBe('text/plain')
-    expect(await res.text()).toBe('Hello')
+    const res = new ResponseBuilder().text('Hello ✓').build()
+    expect(res.headers.get('Content-Type')).toBe('text/plain; charset=utf-8')
+    expect(await res.text()).toBe('Hello ✓')
   })
 
   it('should build HTML response', async () => {
     const res = new ResponseBuilder().html('<h1>Hi</h1>').build()
-    expect(res.headers.get('Content-Type')).toBe('text/html')
+    expect(res.headers.get('Content-Type')).toBe('text/html; charset=utf-8')
     expect(await res.text()).toBe('<h1>Hi</h1>')
   })
 

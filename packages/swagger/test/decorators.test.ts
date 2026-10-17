@@ -181,3 +181,64 @@ describe('Swagger Decorators', () => {
     expect(set?.has('public')).toBe(false)
   })
 })
+
+describe('Swagger Decorators - subclasses', () => {
+  it('a subclass adds headers and security without writing into its parent', () => {
+    @ApiHeader('x-parent')
+    @ApiSecurity('apiKey')
+    @Controller('/parent')
+    class Parent {
+      @ApiHeader('x-trace')
+      @Get('/')
+      list() {}
+    }
+
+    @ApiHeader('x-child')
+    @ApiSecurity('bearer')
+    @Controller('/child')
+    class Child extends Parent {
+      @ApiHeader('x-child-trace')
+      @Get('/own')
+      own() {}
+    }
+
+    const parentHeaders = getMeta<Map<string, { name: string }[]>>(Parent, API_HEADERS)!
+    expect(parentHeaders.get('*')!.map((h) => h.name)).toEqual(['x-parent'])
+    expect(parentHeaders.get('list')!.map((h) => h.name)).toEqual(['x-trace'])
+    expect(parentHeaders.has('own')).toBe(false)
+    expect(
+      getMeta<Map<string, { name: string }[]>>(Parent, API_SECURITY)!
+        .get('*')!
+        .map((s) => s.name),
+    ).toEqual(['apiKey'])
+
+    const childHeaders = getMeta<Map<string, { name: string }[]>>(Child, API_HEADERS)!
+    expect(childHeaders.get('*')!.map((h) => h.name)).toEqual(['x-parent', 'x-child'])
+    expect(childHeaders.get('list')!.map((h) => h.name)).toEqual(['x-trace'])
+    expect(childHeaders.get('own')!.map((h) => h.name)).toEqual(['x-child-trace'])
+    expect(
+      getMeta<Map<string, { name: string }[]>>(Child, API_SECURITY)!
+        .get('*')!
+        .map((s) => s.name),
+    ).toEqual(['apiKey', 'bearer'])
+  })
+
+  it('@ApiExclude on a subclass leaves its parent documented', () => {
+    @Controller('/parent')
+    class Parent {
+      @ApiExclude()
+      @Get('/internal')
+      internal() {}
+
+      @Get('/')
+      list() {}
+    }
+
+    @ApiExclude()
+    @Controller('/hidden')
+    class HiddenChild extends Parent {}
+
+    expect([...getMeta<Set<string>>(Parent, API_EXCLUDE)!]).toEqual(['internal'])
+    expect([...getMeta<Set<string>>(HiddenChild, API_EXCLUDE)!].sort()).toEqual(['*', 'internal'])
+  })
+})
