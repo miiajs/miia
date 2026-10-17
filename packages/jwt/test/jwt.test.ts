@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { Miia } from '@miiajs/core'
-import { SignJWT, decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair } from 'jose'
+import { SignJWT, decodeJwt, decodeProtectedHeader, exportPKCS8, exportSPKI, generateKeyPair } from 'jose'
 import { JwtModule } from '../src/jwt.module.js'
 import { JwtService } from '../src/jwt.service.js'
 import type { JwtOptions } from '../src/jwt.types.js'
@@ -131,5 +131,98 @@ describe('JwtService.sign - default algorithm', () => {
 
     const token = await svc.sign({ sub: 'heidi' })
     expect(decodeProtectedHeader(token).alg).toBe('HS256')
+  })
+})
+
+describe('JwtService.sign - numeric durations', () => {
+  it('reads a numeric expiresIn as seconds from now', async () => {
+    const svc = new JwtService({ secret })
+
+    const token = await svc.sign({ sub: 'ivan' }, { expiresIn: 3600 })
+    const { iat, exp } = decodeJwt(token)
+    expect(exp! - iat!).toBe(3600)
+    expect((await svc.verify<{ sub: string }>(token)).sub).toBe('ivan')
+  })
+
+  it('reads a numeric module expiresIn as seconds from now', async () => {
+    const svc = new JwtService({ secret, expiresIn: 60 })
+
+    const { iat, exp } = decodeJwt(await svc.sign({ sub: 'judy' }))
+    expect(exp! - iat!).toBe(60)
+  })
+
+  it('reads a numeric notBefore as seconds from now', async () => {
+    const svc = new JwtService({ secret })
+
+    const { iat, nbf } = decodeJwt(await svc.sign({ sub: 'ken' }, { notBefore: 30 }))
+    expect(nbf! - iat!).toBe(30)
+  })
+
+  it('keeps string durations relative', async () => {
+    const svc = new JwtService({ secret })
+
+    const { iat, exp, nbf } = decodeJwt(await svc.sign({ sub: 'lena' }, { expiresIn: '2h', notBefore: '10s' }))
+    // jose counts a string from its own clock reading, which may have crossed a second boundary since iat
+    expect(exp! - iat!).toBeOneOf([7200, 7201])
+    expect(nbf! - iat!).toBeOneOf([10, 11])
+  })
+})
+
+describe('JwtService - per-call keys', () => {
+  it('signs and verifies with a per-call key pair over the module secret', async () => {
+    const svc = makeService({ secret, algorithm: 'HS384' })
+    const { privateKey, publicKey } = await generateKeyPair('RS256')
+
+    const token = await svc.sign({ sub: 'mia' }, { privateKey })
+    expect(decodeProtectedHeader(token).alg).toBe('RS256')
+    expect((await svc.verify<{ sub: string }>(token, { publicKey })).sub).toBe('mia')
+    await expect(svc.verify(token)).rejects.toThrow()
+  })
+
+  it('uses a per-call PEM key with the algorithm of the call', async () => {
+    const svc = makeService({ secret })
+    const { privateKey, publicKey } = await generateKeyPair('ES256', { extractable: true })
+
+    const token = await svc.sign({ sub: 'nina' }, { privateKey: await exportPKCS8(privateKey), algorithm: 'ES256' })
+    expect(decodeProtectedHeader(token).alg).toBe('ES256')
+    const payload = await svc.verify<{ sub: string }>(token, {
+      publicKey: await exportSPKI(publicKey),
+      algorithms: ['ES256'],
+    })
+    expect(payload.sub).toBe('nina')
+  })
+
+  it('uses a per-call secret over the module key pair', async () => {
+    const { privateKey, publicKey } = await generateKeyPair('RS256')
+    const svc = makeService({ privateKey, publicKey })
+    const other = 'another-shared-secret-for-hs256-tests-0123456789'
+
+    const token = await svc.sign({ sub: 'olga' }, { secret: other })
+    expect(decodeProtectedHeader(token).alg).toBe('HS256')
+    expect((await svc.verify<{ sub: string }>(token, { secret: other })).sub).toBe('olga')
+    await expect(svc.verify(token)).rejects.toThrow()
+  })
+
+  it('applies the module algorithm to a per-call key of the same kind', async () => {
+    const ec = await generateKeyPair('ES256', { extractable: true })
+    const svc = makeService({ privateKey: (await generateKeyPair('ES256')).privateKey, algorithm: 'ES256' })
+
+    const token = await svc.sign({ sub: 'quinn' }, { privateKey: await exportPKCS8(ec.privateKey) })
+    expect(decodeProtectedHeader(token).alg).toBe('ES256')
+    expect((await svc.verify<{ sub: string }>(token, { publicKey: await exportSPKI(ec.publicKey) })).sub).toBe('quinn')
+
+    const hs = makeService({ secret, algorithm: 'HS512' })
+    const other = 'rotated-shared-secret-for-hs512-tests-0123456789'
+    const rotated = await hs.sign({ sub: 'rita' }, { secret: other })
+    expect(decodeProtectedHeader(rotated).alg).toBe('HS512')
+    expect((await hs.verify<{ sub: string }>(rotated, { secret: other })).sub).toBe('rita')
+  })
+
+  it('keeps the module algorithm for the module key', async () => {
+    const svc = makeService({ secret, algorithm: 'HS384' })
+
+    const token = await svc.sign({ sub: 'pia' })
+    expect(decodeProtectedHeader(token).alg).toBe('HS384')
+    expect((await svc.verify<{ sub: string }>(token)).sub).toBe('pia')
   })
 })
