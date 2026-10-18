@@ -1,9 +1,13 @@
 export type Dialect = 'postgres' | 'mysql' | 'sqlite'
 
+export type SqliteDriver = 'bun:sqlite' | 'better-sqlite3'
+
 export interface DrizzleModuleOptions {
   dialect: Dialect
   connection: {
     url: string
+    /** sqlite only. Default: 'bun:sqlite' on Bun, 'better-sqlite3' elsewhere. */
+    driver?: SqliteDriver
     pool?: Record<string, unknown>
     retry?: {
       attempts?: number

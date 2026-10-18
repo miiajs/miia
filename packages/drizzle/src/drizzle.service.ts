@@ -13,7 +13,11 @@ export class DrizzleService {
   private client: any = null
   private _db: any = null
 
-  constructor(private readonly options: DrizzleModuleOptions) {}
+  constructor(private readonly options: DrizzleModuleOptions) {
+    if (options.connection.driver && options.dialect !== 'sqlite') {
+      throw new TypeError('[Miia/Drizzle] connection.driver is only for dialect "sqlite"')
+    }
+  }
 
   get db(): any {
     if (!this._db) {
@@ -31,10 +35,9 @@ export class DrizzleService {
       try {
         const conn = await createConnection(
           this.options.dialect,
-          this.options.connection.url,
+          this.options.connection,
           this.logger,
           this.options.casing,
-          this.options.connection.pool,
         )
         client = conn.client
         const db = conn.createDb(this.options.schema ?? {})

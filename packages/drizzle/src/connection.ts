@@ -1,5 +1,5 @@
 import { Logger } from '@miiajs/core'
-import type { Dialect } from './types.js'
+import type { Dialect, DrizzleModuleOptions, SqliteDriver } from './types.js'
 
 export interface ConnectionResult {
   client: any
@@ -15,12 +15,12 @@ class DrizzleLogger {
 
 export async function createConnection(
   dialect: Dialect,
-  url: string,
+  connection: DrizzleModuleOptions['connection'],
   logger: Logger,
   casing?: 'snake_case' | 'camelCase',
-  pool?: Record<string, unknown>,
 ): Promise<ConnectionResult> {
   const drizzleLogger = new DrizzleLogger(logger)
+  const { url, pool } = connection
 
   switch (dialect) {
     case 'postgres': {
@@ -46,6 +46,17 @@ export async function createConnection(
       }
     }
     case 'sqlite': {
+      const driver = sqliteDriver(connection.driver)
+      if (driver === 'bun:sqlite') {
+        const { Database } = await import('bun:sqlite')
+        const sqlite = new Database(url, { create: true })
+        sqlite.query('PRAGMA journal_mode').get()
+        const { drizzle } = await import('drizzle-orm/bun-sqlite')
+        return {
+          client: sqlite,
+          createDb: (schema) => drizzle({ client: sqlite, schema, logger: drizzleLogger, casing }),
+        }
+      }
       // @ts-expect-error - better-sqlite3 is an optional peer dependency
       const Database = (await import('better-sqlite3')).default
       const sqlite = new Database(url)
@@ -59,6 +70,18 @@ export async function createConnection(
     default:
       throw new Error(`[Miia/Drizzle] Unknown dialect: ${dialect as string}`)
   }
+}
+
+function sqliteDriver(explicit: SqliteDriver | undefined): SqliteDriver {
+  const onBun = 'Bun' in globalThis
+  if (explicit === 'bun:sqlite' && !onBun) {
+    throw new Error('[Miia/Drizzle] connection.driver "bun:sqlite" needs the Bun runtime')
+  }
+  // better-sqlite3 crashes Deno with a segfault rather than an error; an explicit driver is the user's call
+  if (!explicit && 'Deno' in globalThis) {
+    throw new Error('[Miia/Drizzle] dialect "sqlite" is not supported on Deno')
+  }
+  return explicit ?? (onBun ? 'bun:sqlite' : 'better-sqlite3')
 }
 
 export async function closeConnection(dialect: Dialect, client: any): Promise<void> {
