@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ES2025",
+    "module": "nodenext",
+    "strict": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "types": ["bun", "node"],
+    "rootDirs": [
+      "base/files",
+      "runtimes/node/files",
+      "runtimes/deno/files",
+      "addons/biome/files",
+      "addons/drizzle-mysql/files",
+      "addons/drizzle-postgres/files",
+      "addons/drizzle-sqlite/files",
+      "addons/drizzle-sqlite/files-bun",
+      "addons/drizzle-sqlite/files-node",
+      "addons/jwt-auth/files",
+      "addons/jwt-auth/files-node",
+      "addons/serve-static/files",
+      "generate/controller/files",
+      "generate/guard/files",
+      "generate/middleware/files",
+      "generate/module/files",
+      "generate/resource/files",
+      "generate/service/files"
+    ]
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["node_modules"]
+}

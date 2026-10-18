@@ -1,7 +1,9 @@
-import { defineCommand } from 'citty'
 import * as p from '@clack/prompts'
+import { defineCommand } from 'citty'
 import { runGenerate } from '../generate/runner.js'
-import { action } from '../utils/errors.js'
+import { describeSchematics, listSchematics } from '../generate/schematics.js'
+import { action, CliError } from '../utils/errors.js'
+import { validateArtifactName } from '../utils/naming.js'
 
 export default defineCommand({
   meta: {
@@ -11,26 +13,31 @@ export default defineCommand({
   args: {
     schematic: {
       type: 'positional',
-      description: 'Schematic: module (m), controller (c), service (s), resource (r), middleware, guard',
+      description: 'Schematic: module (m), controller (c), service (s), resource (r), guard, middleware',
       required: false,
     },
     name: {
       type: 'positional',
-      description: 'Name of the artifact (e.g. "user" or "auth/user")',
+      description: 'Name of the artifact (e.g. "users" or "admin/users")',
       required: false,
     },
     path: {
       type: 'string',
-      description: 'Subdirectory under src/',
+      description: 'Folder under src/',
     },
     flat: {
       type: 'boolean',
-      description: 'Do not create a subdirectory for the artifact',
+      description: 'Do not create a folder for the artifact',
+      default: false,
+    },
+    export: {
+      type: 'boolean',
+      description: 'Also add the service to exports of the parent module',
       default: false,
     },
     'dry-run': {
       type: 'boolean',
-      description: 'Preview generated files without writing',
+      description: 'Print the changes without writing them',
       default: false,
     },
   },
@@ -38,24 +45,40 @@ export default defineCommand({
     let schematic = args.schematic as string | undefined
     let name = args.name as string | undefined
 
-    if (!schematic) {
-      const answer = await p.text({
-        message: 'Which schematic?',
-        placeholder: 'module | controller | service | resource | middleware | guard',
-        validate: (v) => (!v?.trim() ? 'Required' : undefined),
-      })
-      if (p.isCancel(answer)) return process.exit(0)
-      schematic = answer.trim()
-    }
-
-    if (!name) {
-      const answer = await p.text({
-        message: 'Artifact name:',
-        placeholder: 'user',
-        validate: (v) => (!v?.trim() ? 'Required' : undefined),
-      })
-      if (p.isCancel(answer)) return process.exit(0)
-      name = answer.trim()
+    if (!schematic || !name) {
+      if (!process.stdin.isTTY) {
+        throw new CliError(`Usage: miia g <schematic> <name>\nSchematics: ${describeSchematics()}`)
+      }
+      if (!schematic) {
+        const answer = await p.select<string>({
+          message: 'Schematic:',
+          options: listSchematics().map((s) => ({ value: s.name, label: s.name, hint: s.aliases.join(', ') })),
+        })
+        if (p.isCancel(answer)) {
+          p.cancel('Cancelled')
+          return
+        }
+        schematic = answer
+      }
+      if (!name) {
+        const answer = await p.text({
+          message: 'Name:',
+          placeholder: 'users',
+          validate: (value) => {
+            try {
+              validateArtifactName(value ?? '')
+              return undefined
+            } catch (err) {
+              return (err as Error).message
+            }
+          },
+        })
+        if (p.isCancel(answer)) {
+          p.cancel('Cancelled')
+          return
+        }
+        name = answer.trim()
+      }
     }
 
     await runGenerate({
@@ -63,6 +86,7 @@ export default defineCommand({
       name,
       path: args.path as string | undefined,
       flat: args.flat as boolean,
+      export: args.export as boolean,
       dryRun: args['dry-run'] as boolean,
     })
   }),

@@ -1,73 +1,58 @@
-import type { SchematicDefinition, SchematicName } from './types.js'
-import { moduleTemplate } from './templates/module.js'
-import { controllerTemplate } from './templates/controller.js'
-import { serviceTemplate } from './templates/service.js'
-import { middlewareTemplate } from './templates/middleware.js'
-import { guardTemplate } from './templates/guard.js'
+import type { ModuleKey } from '../codemod/source.js'
 
-const schematics: SchematicDefinition[] = [
+export type SchematicName = 'module' | 'controller' | 'service' | 'guard' | 'middleware' | 'resource'
+
+export interface Schematic {
+  name: SchematicName
+  aliases: string[]
+  /** resource: always in its own <file>/ folder; the rest only without --flat and without a slash in the name */
+  alwaysNested: boolean
+  /** What goes into the parent module */
+  register?: { key: Exclude<ModuleKey, 'exports'>; className: (name: string) => string; file: (file: string) => string }
+  /** --export also lists the class in `exports` */
+  exportable?: boolean
+}
+
+// A guard is not registered: an undeclared guard is constructed for the controller that uses it,
+// with that controller's module boundaries, so it works from any module
+const schematics: Schematic[] = [
   {
     name: 'module',
     aliases: ['m'],
-    fileSuffix: '.module',
-    template: moduleTemplate,
-    registrationTarget: 'imports',
+    alwaysNested: false,
+    register: { key: 'imports', className: (n) => `${n}Module`, file: (f) => `${f}.module.ts` },
   },
   {
     name: 'controller',
     aliases: ['c'],
-    fileSuffix: '.controller',
-    template: controllerTemplate,
-    registrationTarget: 'controllers',
+    alwaysNested: false,
+    register: { key: 'controllers', className: (n) => `${n}Controller`, file: (f) => `${f}.controller.ts` },
   },
   {
     name: 'service',
     aliases: ['s'],
-    fileSuffix: '.service',
-    template: serviceTemplate,
-    registrationTarget: 'providers',
+    alwaysNested: false,
+    register: { key: 'providers', className: (n) => `${n}Service`, file: (f) => `${f}.service.ts` },
+    exportable: true,
   },
+  { name: 'guard', aliases: [], alwaysNested: false },
+  { name: 'middleware', aliases: [], alwaysNested: false },
   {
-    name: 'middleware',
-    aliases: [],
-    fileSuffix: '.middleware',
-    template: middlewareTemplate,
-    registrationTarget: null,
-  },
-  {
-    name: 'guard',
-    aliases: [],
-    fileSuffix: '.guard',
-    template: guardTemplate,
-    registrationTarget: 'providers',
+    name: 'resource',
+    aliases: ['r'],
+    alwaysNested: true,
+    register: { key: 'imports', className: (n) => `${n}Module`, file: (f) => `${f}.module.ts` },
   },
 ]
 
-const byNameOrAlias = new Map<string, SchematicDefinition>()
-for (const s of schematics) {
-  byNameOrAlias.set(s.name, s)
-  for (const alias of s.aliases) {
-    byNameOrAlias.set(alias, s)
-  }
+export function resolveSchematic(nameOrAlias: string): Schematic | undefined {
+  return schematics.find((s) => s.name === nameOrAlias || s.aliases.includes(nameOrAlias))
 }
 
-/** Also recognizes "resource" / "r" - handled as composite in the runner */
-const RESOURCE_ALIASES = new Set<string>(['resource', 'r'])
-
-export function resolveSchematic(nameOrAlias: string): SchematicDefinition | 'resource' | undefined {
-  if (RESOURCE_ALIASES.has(nameOrAlias)) return 'resource'
-  return byNameOrAlias.get(nameOrAlias)
+export function listSchematics(): readonly Schematic[] {
+  return schematics
 }
 
-export function isResourceSchematic(result: SchematicDefinition | 'resource' | undefined): result is 'resource' {
-  return result === 'resource'
-}
-
-export function listSchematics(): Array<{ name: SchematicName | 'resource'; aliases: string[] }> {
-  const list: Array<{ name: SchematicName | 'resource'; aliases: string[] }> = schematics.map((s) => ({
-    name: s.name,
-    aliases: s.aliases,
-  }))
-  list.push({ name: 'resource', aliases: ['r'] })
-  return list
+export function describeSchematics(): string {
+  return schematics.map((s) => (s.aliases.length ? `${s.name} (${s.aliases.join(', ')})` : s.name)).join(', ')
 }

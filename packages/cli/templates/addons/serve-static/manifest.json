@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@miiajs/serve-static": "workspace:*"
+  }
+}

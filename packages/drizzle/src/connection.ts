@@ -35,7 +35,7 @@ export async function createConnection(
       }
     }
     case 'mysql': {
-      // @ts-expect-error - mysql2 is an optional peer dependency
+      // @ts-ignore - mysql2 is an optional peer dependency, typed only when it is installed
       const mysql2 = await import('mysql2/promise')
       const mysqlPool = mysql2.createPool({ uri: url, ...pool })
       await mysqlPool.query('SELECT 1')
@@ -57,7 +57,7 @@ export async function createConnection(
           createDb: (schema) => drizzle({ client: sqlite, schema, logger: drizzleLogger, casing }),
         }
       }
-      // @ts-expect-error - better-sqlite3 is an optional peer dependency
+      // @ts-ignore - better-sqlite3 is an optional peer dependency, typed only when its types are installed
       const Database = (await import('better-sqlite3')).default
       const sqlite = new Database(url)
       sqlite.pragma('journal_mode')

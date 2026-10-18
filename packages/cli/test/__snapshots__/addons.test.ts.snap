@@ -1,0 +1,2562 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`add-ons jwt-auth on bun 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+JWT_SECRET=abababababababababababababababababababababababababababababababab
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+JWT_SECRET=change-me-to-a-random-string-of-at-least-32-chars
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/auth": "^0.0.0-test",
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/jwt": "^0.0.0-test",
+    "jose": "^6.2.12",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { JwtModule } from '@miiajs/jwt'
+import { AuthModule } from '../auth/auth.module.js'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    JwtModule.configure(
+      (resolve) => ({
+        secret: resolve<ConfigService<Env>>(ConfigService).getOrThrow('JWT_SECRET'),
+        expiresIn: '1h',
+      }),
+      { global: true },
+    ),
+    AuthModule,
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/auth/auth.controller.ts": 
+"import { AuthGuard } from '@miiajs/auth'
+import { Controller, Get, inject, Post, type RequestContext, Status, UseGuard } from '@miiajs/core'
+import { type RegisterInput, RegisterSchema } from './auth.schemas.js'
+import { AuthService } from './auth.service.js'
+import { JwtAuth } from './providers/jwt-auth.provider.js'
+import { LocalAuth } from './providers/local-auth.provider.js'
+
+@Controller('/auth')
+export class AuthController {
+  private readonly authService = inject(AuthService)
+
+  @Post('/register', { body: RegisterSchema })
+  @Status(201)
+  async register(ctx: RequestContext) {
+    return this.authService.register(await ctx.json<RegisterInput>())
+  }
+
+  @Post('/login')
+  @UseGuard(AuthGuard(LocalAuth))
+  login(ctx: RequestContext) {
+    return this.authService.issueTokenFor(ctx.user!)
+  }
+
+  @Get('/me')
+  @UseGuard(AuthGuard(JwtAuth))
+  me(ctx: RequestContext) {
+    return ctx.user
+  }
+}
+"
+,
+  "src/auth/auth.module.ts": 
+"import { Module } from '@miiajs/core'
+import { UsersModule } from '../users/users.module.js'
+import { AuthController } from './auth.controller.js'
+import { AuthService } from './auth.service.js'
+import { JwtAuth } from './providers/jwt-auth.provider.js'
+import { LocalAuth } from './providers/local-auth.provider.js'
+
+// Global, so every controller can use AuthGuard(JwtAuth) without importing AuthModule
+@Module({
+  global: true,
+  imports: [UsersModule],
+  controllers: [AuthController],
+  providers: [AuthService, LocalAuth, JwtAuth],
+  exports: [JwtAuth],
+})
+export class AuthModule {}
+"
+,
+  "src/auth/auth.schemas.ts": 
+"import { z } from 'zod'
+
+export const LoginSchema = z.object({
+  email: z.email(),
+  password: z.string().min(1),
+})
+
+export const RegisterSchema = z.object({
+  email: z.email(),
+  password: z.string().min(8),
+})
+
+export type LoginInput = z.infer<typeof LoginSchema>
+export type RegisterInput = z.infer<typeof RegisterSchema>
+"
+,
+  "src/auth/auth.service.ts": 
+"import { ConflictException, Injectable, inject } from '@miiajs/core'
+import { JwtService } from '@miiajs/jwt'
+import { type User, UsersService } from '../users/users.service.js'
+import type { RegisterInput } from './auth.schemas.js'
+import { hashPassword } from './password.js'
+
+@Injectable()
+export class AuthService {
+  private readonly usersService = inject(UsersService)
+  private readonly jwtService = inject(JwtService)
+
+  async register({ email, password }: RegisterInput) {
+    if (await this.usersService.findByEmail(email)) {
+      throw new ConflictException('Email is already registered')
+    }
+    const user = await this.usersService.create({ email, passwordHash: await hashPassword(password) })
+    return this.issueTokenFor(user)
+  }
+
+  async issueTokenFor(user: User) {
+    return { accessToken: await this.jwtService.sign({ sub: String(user.id), email: user.email }) }
+  }
+}
+"
+,
+  "src/auth/auth.test.ts": 
+"import { describe, expect, it } from 'bun:test'
+import { JwtModule } from '@miiajs/jwt'
+import { TestApp } from '@miiajs/testing'
+import { AuthModule } from './auth.module.js'
+
+const createApp = () =>
+  TestApp.create(
+    JwtModule.configure({ secret: 'test-secret-that-is-at-least-32-chars' }, { global: true }),
+    AuthModule,
+  ).compile()
+
+describe('auth', () => {
+  // One app for the whole flow: users live in the app instance
+  it('registers, logs in and reads the current user', async () => {
+    const app = await createApp()
+    try {
+      const credentials = { email: 'ada@example.com', password: 'correct-horse' }
+
+      const registered = await app.request('POST', '/auth/register', { body: credentials })
+      expect(registered.status).toBe(201)
+      expect(typeof (await registered.json()).accessToken).toBe('string')
+
+      const again = await app.request('POST', '/auth/register', { body: credentials })
+      expect(again.status).toBe(409)
+
+      const login = await app.request('POST', '/auth/login', { body: credentials })
+      expect(login.status).toBe(200)
+      const { accessToken } = await login.json()
+
+      const wrong = await app.request('POST', '/auth/login', { body: { ...credentials, password: 'wrong-password' } })
+      expect(wrong.status).toBe(401)
+
+      const me = await app.request('GET', '/auth/me', { headers: { authorization: \`Bearer \${accessToken}\` } })
+      expect(me.status).toBe(200)
+      expect((await me.json()).email).toBe(credentials.email)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects /auth/me without a token', async () => {
+    const app = await createApp()
+    try {
+      const res = await app.request('GET', '/auth/me')
+      expect(res.status).toBe(401)
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "src/auth/password.ts": 
+"export function hashPassword(password: string): Promise<string> {
+  return Bun.password.hash(password)
+}
+
+export function verifyPassword(password: string, hash: string): Promise<boolean> {
+  return Bun.password.verify(password, hash)
+}
+"
+,
+  "src/auth/providers/jwt-auth.provider.ts": 
+"import { type AuthProvider, fromHeader } from '@miiajs/auth'
+import { Injectable, inject, type RequestContext, UnauthorizedException } from '@miiajs/core'
+import { JwtService } from '@miiajs/jwt'
+import { UsersService } from '../../users/users.service.js'
+
+@Injectable()
+export class JwtAuth implements AuthProvider {
+  private readonly jwtService = inject(JwtService)
+  private readonly usersService = inject(UsersService)
+  private readonly extract = fromHeader()
+
+  async authenticate(ctx: RequestContext) {
+    const token = this.extract(ctx)
+    if (!token) {
+      throw new UnauthorizedException('Missing token')
+    }
+    const payload = await this.jwtService.verify<{ sub: string }>(token).catch(() => {
+      throw new UnauthorizedException('Invalid token')
+    })
+
+    const user = await this.usersService.findById(Number(payload.sub))
+    if (!user) throw new UnauthorizedException('User not found')
+    return user
+  }
+}
+"
+,
+  "src/auth/providers/local-auth.provider.ts": 
+"import type { AuthProvider } from '@miiajs/auth'
+import { Injectable, inject, type RequestContext, UnauthorizedException } from '@miiajs/core'
+import { UsersService } from '../../users/users.service.js'
+import { LoginSchema } from '../auth.schemas.js'
+import { verifyPassword } from '../password.js'
+
+@Injectable()
+export class LocalAuth implements AuthProvider {
+  private readonly usersService = inject(UsersService)
+
+  async authenticate(ctx: RequestContext) {
+    const parsed = LoginSchema.safeParse(await ctx.json().catch(() => null))
+    if (!parsed.success) {
+      throw new UnauthorizedException('Invalid credentials payload')
+    }
+    const { email, password } = parsed.data
+
+    const found = await this.usersService.findByEmailForAuth(email)
+    if (!found || !(await verifyPassword(password, found.passwordHash))) {
+      throw new UnauthorizedException('Invalid credentials')
+    }
+    return { id: found.id, email: found.email }
+  }
+}
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  JWT_SECRET: z.string().min(32),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+  "src/types/core.d.ts": 
+"import type { User } from '../users/users.service.js'
+
+declare module '@miiajs/core' {
+  interface RequestContext {
+    user?: User
+  }
+}
+"
+,
+  "src/users/users.module.ts": 
+"import { Module } from '@miiajs/core'
+import { UsersService } from './users.service.js'
+
+@Module({
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+"
+,
+  "src/users/users.service.ts": 
+"import { Injectable } from '@miiajs/core'
+
+export interface User {
+  id: number
+  email: string
+}
+
+interface StoredUser extends User {
+  passwordHash: string
+}
+
+// In-memory store: replace it with your database
+@Injectable()
+export class UsersService {
+  private readonly users = new Map<number, StoredUser>()
+  private nextId = 1
+
+  async findById(id: number): Promise<User | undefined> {
+    const user = this.users.get(id)
+    return user && toUser(user)
+  }
+
+  async findByEmail(email: string): Promise<User | undefined> {
+    const user = await this.findByEmailForAuth(email)
+    return user && toUser(user)
+  }
+
+  async findByEmailForAuth(email: string): Promise<StoredUser | undefined> {
+    for (const user of this.users.values()) {
+      if (user.email === email) return user
+    }
+    return undefined
+  }
+
+  async create(data: { email: string; passwordHash: string }): Promise<User> {
+    const user = { id: this.nextId++, ...data }
+    this.users.set(user.id, user)
+    return toUser(user)
+  }
+}
+
+function toUser({ id, email }: StoredUser): User {
+  return { id, email }
+}
+"
+,
+}
+`;
+
+exports[`add-ons jwt-auth on node 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+JWT_SECRET=abababababababababababababababababababababababababababababababab
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+JWT_SECRET=change-me-to-a-random-string-of-at-least-32-chars
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/auth": "^0.0.0-test",
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/jwt": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "jose": "^6.2.12",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\""
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { JwtModule } from '@miiajs/jwt'
+import { AuthModule } from '../auth/auth.module.js'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    JwtModule.configure(
+      (resolve) => ({
+        secret: resolve<ConfigService<Env>>(ConfigService).getOrThrow('JWT_SECRET'),
+        expiresIn: '1h',
+      }),
+      { global: true },
+    ),
+    AuthModule,
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/auth/auth.controller.ts": 
+"import { AuthGuard } from '@miiajs/auth'
+import { Controller, Get, inject, Post, type RequestContext, Status, UseGuard } from '@miiajs/core'
+import { type RegisterInput, RegisterSchema } from './auth.schemas.js'
+import { AuthService } from './auth.service.js'
+import { JwtAuth } from './providers/jwt-auth.provider.js'
+import { LocalAuth } from './providers/local-auth.provider.js'
+
+@Controller('/auth')
+export class AuthController {
+  private readonly authService = inject(AuthService)
+
+  @Post('/register', { body: RegisterSchema })
+  @Status(201)
+  async register(ctx: RequestContext) {
+    return this.authService.register(await ctx.json<RegisterInput>())
+  }
+
+  @Post('/login')
+  @UseGuard(AuthGuard(LocalAuth))
+  login(ctx: RequestContext) {
+    return this.authService.issueTokenFor(ctx.user!)
+  }
+
+  @Get('/me')
+  @UseGuard(AuthGuard(JwtAuth))
+  me(ctx: RequestContext) {
+    return ctx.user
+  }
+}
+"
+,
+  "src/auth/auth.module.ts": 
+"import { Module } from '@miiajs/core'
+import { UsersModule } from '../users/users.module.js'
+import { AuthController } from './auth.controller.js'
+import { AuthService } from './auth.service.js'
+import { JwtAuth } from './providers/jwt-auth.provider.js'
+import { LocalAuth } from './providers/local-auth.provider.js'
+
+// Global, so every controller can use AuthGuard(JwtAuth) without importing AuthModule
+@Module({
+  global: true,
+  imports: [UsersModule],
+  controllers: [AuthController],
+  providers: [AuthService, LocalAuth, JwtAuth],
+  exports: [JwtAuth],
+})
+export class AuthModule {}
+"
+,
+  "src/auth/auth.schemas.ts": 
+"import { z } from 'zod'
+
+export const LoginSchema = z.object({
+  email: z.email(),
+  password: z.string().min(1),
+})
+
+export const RegisterSchema = z.object({
+  email: z.email(),
+  password: z.string().min(8),
+})
+
+export type LoginInput = z.infer<typeof LoginSchema>
+export type RegisterInput = z.infer<typeof RegisterSchema>
+"
+,
+  "src/auth/auth.service.ts": 
+"import { ConflictException, Injectable, inject } from '@miiajs/core'
+import { JwtService } from '@miiajs/jwt'
+import { type User, UsersService } from '../users/users.service.js'
+import type { RegisterInput } from './auth.schemas.js'
+import { hashPassword } from './password.js'
+
+@Injectable()
+export class AuthService {
+  private readonly usersService = inject(UsersService)
+  private readonly jwtService = inject(JwtService)
+
+  async register({ email, password }: RegisterInput) {
+    if (await this.usersService.findByEmail(email)) {
+      throw new ConflictException('Email is already registered')
+    }
+    const user = await this.usersService.create({ email, passwordHash: await hashPassword(password) })
+    return this.issueTokenFor(user)
+  }
+
+  async issueTokenFor(user: User) {
+    return { accessToken: await this.jwtService.sign({ sub: String(user.id), email: user.email }) }
+  }
+}
+"
+,
+  "src/auth/auth.test.ts": 
+"import { describe, it } from 'node:test'
+import { expect } from 'expect'
+import { JwtModule } from '@miiajs/jwt'
+import { TestApp } from '@miiajs/testing'
+import { AuthModule } from './auth.module.js'
+
+const createApp = () =>
+  TestApp.create(
+    JwtModule.configure({ secret: 'test-secret-that-is-at-least-32-chars' }, { global: true }),
+    AuthModule,
+  ).compile()
+
+describe('auth', () => {
+  // One app for the whole flow: users live in the app instance
+  it('registers, logs in and reads the current user', async () => {
+    const app = await createApp()
+    try {
+      const credentials = { email: 'ada@example.com', password: 'correct-horse' }
+
+      const registered = await app.request('POST', '/auth/register', { body: credentials })
+      expect(registered.status).toBe(201)
+      expect(typeof (await registered.json()).accessToken).toBe('string')
+
+      const again = await app.request('POST', '/auth/register', { body: credentials })
+      expect(again.status).toBe(409)
+
+      const login = await app.request('POST', '/auth/login', { body: credentials })
+      expect(login.status).toBe(200)
+      const { accessToken } = await login.json()
+
+      const wrong = await app.request('POST', '/auth/login', { body: { ...credentials, password: 'wrong-password' } })
+      expect(wrong.status).toBe(401)
+
+      const me = await app.request('GET', '/auth/me', { headers: { authorization: \`Bearer \${accessToken}\` } })
+      expect(me.status).toBe(200)
+      expect((await me.json()).email).toBe(credentials.email)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects /auth/me without a token', async () => {
+    const app = await createApp()
+    try {
+      const res = await app.request('GET', '/auth/me')
+      expect(res.status).toBe(401)
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "src/auth/password.ts": 
+"import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
+import { promisify } from 'node:util'
+
+const scryptAsync = promisify(scrypt) as (password: string, salt: Buffer, keylen: number) => Promise<Buffer>
+
+// Stored as scrypt$<salt hex>$<hash hex>
+export async function hashPassword(password: string): Promise<string> {
+  const salt = randomBytes(16)
+  const hash = await scryptAsync(password, salt, 64)
+  return \`scrypt$\${salt.toString('hex')}$\${hash.toString('hex')}\`
+}
+
+export async function verifyPassword(password: string, stored: string): Promise<boolean> {
+  const [algorithm, salt, hash] = stored.split('$')
+  if (algorithm !== 'scrypt' || !salt || !hash) return false
+  const expected = Buffer.from(hash, 'hex')
+  const actual = await scryptAsync(password, Buffer.from(salt, 'hex'), expected.length)
+  return timingSafeEqual(actual, expected)
+}
+"
+,
+  "src/auth/providers/jwt-auth.provider.ts": 
+"import { type AuthProvider, fromHeader } from '@miiajs/auth'
+import { Injectable, inject, type RequestContext, UnauthorizedException } from '@miiajs/core'
+import { JwtService } from '@miiajs/jwt'
+import { UsersService } from '../../users/users.service.js'
+
+@Injectable()
+export class JwtAuth implements AuthProvider {
+  private readonly jwtService = inject(JwtService)
+  private readonly usersService = inject(UsersService)
+  private readonly extract = fromHeader()
+
+  async authenticate(ctx: RequestContext) {
+    const token = this.extract(ctx)
+    if (!token) {
+      throw new UnauthorizedException('Missing token')
+    }
+    const payload = await this.jwtService.verify<{ sub: string }>(token).catch(() => {
+      throw new UnauthorizedException('Invalid token')
+    })
+
+    const user = await this.usersService.findById(Number(payload.sub))
+    if (!user) throw new UnauthorizedException('User not found')
+    return user
+  }
+}
+"
+,
+  "src/auth/providers/local-auth.provider.ts": 
+"import type { AuthProvider } from '@miiajs/auth'
+import { Injectable, inject, type RequestContext, UnauthorizedException } from '@miiajs/core'
+import { UsersService } from '../../users/users.service.js'
+import { LoginSchema } from '../auth.schemas.js'
+import { verifyPassword } from '../password.js'
+
+@Injectable()
+export class LocalAuth implements AuthProvider {
+  private readonly usersService = inject(UsersService)
+
+  async authenticate(ctx: RequestContext) {
+    const parsed = LoginSchema.safeParse(await ctx.json().catch(() => null))
+    if (!parsed.success) {
+      throw new UnauthorizedException('Invalid credentials payload')
+    }
+    const { email, password } = parsed.data
+
+    const found = await this.usersService.findByEmailForAuth(email)
+    if (!found || !(await verifyPassword(password, found.passwordHash))) {
+      throw new UnauthorizedException('Invalid credentials')
+    }
+    return { id: found.id, email: found.email }
+  }
+}
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  JWT_SECRET: z.string().min(32),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+  "src/types/core.d.ts": 
+"import type { User } from '../users/users.service.js'
+
+declare module '@miiajs/core' {
+  interface RequestContext {
+    user?: User
+  }
+}
+"
+,
+  "src/users/users.module.ts": 
+"import { Module } from '@miiajs/core'
+import { UsersService } from './users.service.js'
+
+@Module({
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+"
+,
+  "src/users/users.service.ts": 
+"import { Injectable } from '@miiajs/core'
+
+export interface User {
+  id: number
+  email: string
+}
+
+interface StoredUser extends User {
+  passwordHash: string
+}
+
+// In-memory store: replace it with your database
+@Injectable()
+export class UsersService {
+  private readonly users = new Map<number, StoredUser>()
+  private nextId = 1
+
+  async findById(id: number): Promise<User | undefined> {
+    const user = this.users.get(id)
+    return user && toUser(user)
+  }
+
+  async findByEmail(email: string): Promise<User | undefined> {
+    const user = await this.findByEmailForAuth(email)
+    return user && toUser(user)
+  }
+
+  async findByEmailForAuth(email: string): Promise<StoredUser | undefined> {
+    for (const user of this.users.values()) {
+      if (user.email === email) return user
+    }
+    return undefined
+  }
+
+  async create(data: { email: string; passwordHash: string }): Promise<User> {
+    const user = { id: this.nextId++, ...data }
+    this.users.set(user.id, user)
+    return toUser(user)
+  }
+}
+
+function toUser({ id, email }: StoredUser): User {
+  return { id, email }
+}
+"
+,
+}
+`;
+
+exports[`add-ons swagger on bun 1`] = `
+{
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/swagger": "^0.0.0-test",
+    "swagger-ui-dist": "^5.34.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { SwaggerModule } from '@miiajs/swagger'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true }), SwaggerModule.configure({ title: 'demo-app', version: '0.1.0' })],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+}
+`;
+
+exports[`add-ons swagger on node 1`] = `
+{
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "@miiajs/swagger": "^0.0.0-test",
+    "swagger-ui-dist": "^5.34.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\""
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { SwaggerModule } from '@miiajs/swagger'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true }), SwaggerModule.configure({ title: 'demo-app', version: '0.1.0' })],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+}
+`;
+
+exports[`add-ons cors on bun 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+CORS_ORIGIN=*
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+CORS_ORIGIN=*
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  CORS_ORIGIN: z.string().default('*'),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+  "src/main.ts": 
+"import { ConfigService } from '@miiajs/config'
+import { Miia, cors } from '@miiajs/core'
+import { AppModule } from './app/app.module.js'
+import type { Env } from './env.schema.js'
+
+const app = new Miia().register(AppModule)
+const config = app.get<ConfigService<Env>>(ConfigService)
+
+app.use(cors({ origin: config.get('CORS_ORIGIN') }))
+await app.listen(config.get('PORT'), config.get('HOST'))
+"
+,
+}
+`;
+
+exports[`add-ons cors on node 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+CORS_ORIGIN=*
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+CORS_ORIGIN=*
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  CORS_ORIGIN: z.string().default('*'),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+  "src/main.ts": 
+"import { ConfigService } from '@miiajs/config'
+import { Miia, cors } from '@miiajs/core'
+import { serve } from '@miiajs/node-server'
+import { AppModule } from './app/app.module.js'
+import type { Env } from './env.schema.js'
+
+const app = new Miia().register(AppModule)
+const config = app.get<ConfigService<Env>>(ConfigService)
+
+app.use(cors({ origin: config.get('CORS_ORIGIN') }))
+await app.listen(config.get('PORT'), config.get('HOST'), serve)
+"
+,
+}
+`;
+
+exports[`add-ons serve-static on bun 1`] = `
+{
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/serve-static": "^0.0.0-test",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test"
+  }
+}
+"
+,
+  "public/index.html": 
+"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MiiaJS</title>
+  </head>
+  <body>
+    <h1>Served from ./public</h1>
+  </body>
+</html>
+"
+,
+  "src/main.ts": 
+"import { ConfigService } from '@miiajs/config'
+import { Miia } from '@miiajs/core'
+import { AppModule } from './app/app.module.js'
+import type { Env } from './env.schema.js'
+import { serveStatic } from '@miiajs/serve-static'
+
+const app = new Miia().register(AppModule)
+const config = app.get<ConfigService<Env>>(ConfigService)
+
+serveStatic(app, '/static', './public')
+await app.listen(config.get('PORT'), config.get('HOST'))
+"
+,
+}
+`;
+
+exports[`add-ons serve-static on node 1`] = `
+{
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "@miiajs/serve-static": "^0.0.0-test",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\""
+  }
+}
+"
+,
+  "public/index.html": 
+"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>MiiaJS</title>
+  </head>
+  <body>
+    <h1>Served from ./public</h1>
+  </body>
+</html>
+"
+,
+  "src/main.ts": 
+"import { ConfigService } from '@miiajs/config'
+import { Miia } from '@miiajs/core'
+import { serve } from '@miiajs/node-server'
+import { AppModule } from './app/app.module.js'
+import type { Env } from './env.schema.js'
+import { serveStatic } from '@miiajs/serve-static'
+
+const app = new Miia().register(AppModule)
+const config = app.get<ConfigService<Env>>(ConfigService)
+
+serveStatic(app, '/static', './public')
+await app.listen(config.get('PORT'), config.get('HOST'), serve)
+"
+,
+}
+`;
+
+exports[`add-ons rate-limit on bun 1`] = `
+{
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/rate-limit": "^0.0.0-test",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { RateLimitModule } from '@miiajs/rate-limit'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true }), RateLimitModule.configure({ limit: 100, window: '1m' }, { global: true })],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/main.ts": 
+"import { ConfigService } from '@miiajs/config'
+import { Miia } from '@miiajs/core'
+import { AppModule } from './app/app.module.js'
+import type { Env } from './env.schema.js'
+import { RateLimitGuard } from '@miiajs/rate-limit'
+
+const app = new Miia().register(AppModule)
+const config = app.get<ConfigService<Env>>(ConfigService)
+
+app.useGuard(RateLimitGuard)
+await app.listen(config.get('PORT'), config.get('HOST'))
+"
+,
+}
+`;
+
+exports[`add-ons rate-limit on node 1`] = `
+{
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "@miiajs/rate-limit": "^0.0.0-test",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\""
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { RateLimitModule } from '@miiajs/rate-limit'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true }), RateLimitModule.configure({ limit: 100, window: '1m' }, { global: true })],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/main.ts": 
+"import { ConfigService } from '@miiajs/config'
+import { Miia } from '@miiajs/core'
+import { serve } from '@miiajs/node-server'
+import { AppModule } from './app/app.module.js'
+import type { Env } from './env.schema.js'
+import { RateLimitGuard } from '@miiajs/rate-limit'
+
+const app = new Miia().register(AppModule)
+const config = app.get<ConfigService<Env>>(ConfigService)
+
+app.useGuard(RateLimitGuard)
+await app.listen(config.get('PORT'), config.get('HOST'), serve)
+"
+,
+}
+`;
+
+exports[`add-ons biome on bun 1`] = `
+{
+  "biome.json": 
+"{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "files": {
+    "includes": ["src/**"]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "trailingCommas": "all",
+      "semicolons": "asNeeded"
+    }
+  },
+  "linter": {
+    "enabled": true
+  }
+}
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test",
+    "format": "biome format --write .",
+    "lint": "biome lint ."
+  }
+}
+"
+,
+}
+`;
+
+exports[`add-ons biome on node 1`] = `
+{
+  "biome.json": 
+"{
+  "$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+  "files": {
+    "includes": ["src/**"]
+  },
+  "formatter": {
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "trailingCommas": "all",
+      "semicolons": "asNeeded"
+    }
+  },
+  "linter": {
+    "enabled": true
+  }
+}
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.15",
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\"",
+    "format": "biome format --write .",
+    "lint": "biome lint ."
+  }
+}
+"
+,
+}
+`;
+
+exports[`add-ons drizzle-postgres on bun 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/demo_app
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/demo_app
+"
+,
+  "drizzle.config.ts": 
+"import { defineConfig } from 'drizzle-kit'
+
+// npm run and deno task do not load .env, and drizzle-kit needs DATABASE_URL
+try {
+  process.loadEnvFile()
+} catch {
+  // no .env: DATABASE_URL comes from the environment
+}
+
+export default defineConfig({
+  dialect: 'postgresql',
+  schema: './src/db/schema.ts',
+  out: './drizzle',
+  dbCredentials: { url: process.env.DATABASE_URL! },
+})
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/drizzle": "^0.0.0-test",
+    "drizzle-orm": "^0.45.4",
+    "postgres": "^3.4.9",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { DrizzleModule } from '@miiajs/drizzle'
+import * as schema from '../db/schema.js'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    DrizzleModule.configure(
+      (resolve) => ({
+        dialect: 'postgres',
+        connection: { url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('DATABASE_URL') },
+        schema,
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/db/db.ts": 
+"import { drizzleDb } from '@miiajs/drizzle'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import type * as schema from './schema.js'
+
+// The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
+export const db = drizzleDb<PostgresJsDatabase<typeof schema>>()
+"
+,
+  "src/db/schema.ts": 
+"import { pgTable, serial, text, timestamp } from 'drizzle-orm/pg-core'
+
+export const notes = pgTable('notes', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  DATABASE_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+}
+`;
+
+exports[`add-ons drizzle-postgres on node 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/demo_app
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/demo_app
+"
+,
+  "drizzle.config.ts": 
+"import { defineConfig } from 'drizzle-kit'
+
+// npm run and deno task do not load .env, and drizzle-kit needs DATABASE_URL
+try {
+  process.loadEnvFile()
+} catch {
+  // no .env: DATABASE_URL comes from the environment
+}
+
+export default defineConfig({
+  dialect: 'postgresql',
+  schema: './src/db/schema.ts',
+  out: './drizzle',
+  dbCredentials: { url: process.env.DATABASE_URL! },
+})
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/drizzle": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "drizzle-orm": "^0.45.4",
+    "postgres": "^3.4.9",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "drizzle-kit": "^0.31.11",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\"",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { DrizzleModule } from '@miiajs/drizzle'
+import * as schema from '../db/schema.js'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    DrizzleModule.configure(
+      (resolve) => ({
+        dialect: 'postgres',
+        connection: { url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('DATABASE_URL') },
+        schema,
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/db/db.ts": 
+"import { drizzleDb } from '@miiajs/drizzle'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import type * as schema from './schema.js'
+
+// The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
+export const db = drizzleDb<PostgresJsDatabase<typeof schema>>()
+"
+,
+  "src/db/schema.ts": 
+"import { pgTable, serial, text, timestamp } from 'drizzle-orm/pg-core'
+
+export const notes = pgTable('notes', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  DATABASE_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+}
+`;
+
+exports[`add-ons drizzle-mysql on bun 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=mysql://root:root@localhost:3306/demo_app
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=mysql://root:root@localhost:3306/demo_app
+"
+,
+  "drizzle.config.ts": 
+"import { defineConfig } from 'drizzle-kit'
+
+// npm run and deno task do not load .env, and drizzle-kit needs DATABASE_URL
+try {
+  process.loadEnvFile()
+} catch {
+  // no .env: DATABASE_URL comes from the environment
+}
+
+export default defineConfig({
+  dialect: 'mysql',
+  schema: './src/db/schema.ts',
+  out: './drizzle',
+  dbCredentials: { url: process.env.DATABASE_URL! },
+})
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/drizzle": "^0.0.0-test",
+    "drizzle-orm": "^0.45.4",
+    "mysql2": "^3.24.6",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { DrizzleModule } from '@miiajs/drizzle'
+import * as schema from '../db/schema.js'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    DrizzleModule.configure(
+      (resolve) => ({
+        dialect: 'mysql',
+        connection: { url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('DATABASE_URL') },
+        schema,
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/db/db.ts": 
+"import { drizzleDb } from '@miiajs/drizzle'
+import type { MySql2Database } from 'drizzle-orm/mysql2'
+import type * as schema from './schema.js'
+
+// The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
+export const db = drizzleDb<MySql2Database<typeof schema>>()
+"
+,
+  "src/db/schema.ts": 
+"import { mysqlTable, serial, timestamp, varchar } from 'drizzle-orm/mysql-core'
+
+export const notes = mysqlTable('notes', {
+  id: serial('id').primaryKey(),
+  title: varchar('title', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  DATABASE_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+}
+`;
+
+exports[`add-ons drizzle-mysql on node 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=mysql://root:root@localhost:3306/demo_app
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=mysql://root:root@localhost:3306/demo_app
+"
+,
+  "drizzle.config.ts": 
+"import { defineConfig } from 'drizzle-kit'
+
+// npm run and deno task do not load .env, and drizzle-kit needs DATABASE_URL
+try {
+  process.loadEnvFile()
+} catch {
+  // no .env: DATABASE_URL comes from the environment
+}
+
+export default defineConfig({
+  dialect: 'mysql',
+  schema: './src/db/schema.ts',
+  out: './drizzle',
+  dbCredentials: { url: process.env.DATABASE_URL! },
+})
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/drizzle": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "drizzle-orm": "^0.45.4",
+    "mysql2": "^3.24.6",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "drizzle-kit": "^0.31.11",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\"",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { DrizzleModule } from '@miiajs/drizzle'
+import * as schema from '../db/schema.js'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    DrizzleModule.configure(
+      (resolve) => ({
+        dialect: 'mysql',
+        connection: { url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('DATABASE_URL') },
+        schema,
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/db/db.ts": 
+"import { drizzleDb } from '@miiajs/drizzle'
+import type { MySql2Database } from 'drizzle-orm/mysql2'
+import type * as schema from './schema.js'
+
+// The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
+export const db = drizzleDb<MySql2Database<typeof schema>>()
+"
+,
+  "src/db/schema.ts": 
+"import { mysqlTable, serial, timestamp, varchar } from 'drizzle-orm/mysql-core'
+
+export const notes = mysqlTable('notes', {
+  id: serial('id').primaryKey(),
+  title: varchar('title', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  DATABASE_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+}
+`;
+
+exports[`add-ons drizzle-sqlite on bun 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=data.db
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=data.db
+"
+,
+  ".gitignore": 
+"node_modules/
+dist/
+*.tsbuildinfo
+.env
+data.db
+"
+,
+  "drizzle.config.ts": 
+"import { defineConfig } from 'drizzle-kit'
+
+// npm run and deno task do not load .env, and drizzle-kit needs DATABASE_URL
+try {
+  process.loadEnvFile()
+} catch {
+  // no .env: DATABASE_URL comes from the environment
+}
+
+export default defineConfig({
+  dialect: 'sqlite',
+  schema: './src/db/schema.ts',
+  out: './drizzle',
+  dbCredentials: { url: process.env.DATABASE_URL! },
+})
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/drizzle": "^0.0.0-test",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun src/db/migrate.ts"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { DrizzleModule } from '@miiajs/drizzle'
+import * as schema from '../db/schema.js'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    DrizzleModule.configure(
+      (resolve) => ({
+        dialect: 'sqlite',
+        connection: { url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('DATABASE_URL') },
+        schema,
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/db/db.ts": 
+"import { drizzleDb } from '@miiajs/drizzle'
+import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
+import type * as schema from './schema.js'
+
+// The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
+export const db = drizzleDb<BunSQLiteDatabase<typeof schema>>()
+"
+,
+  "src/db/migrate.ts": 
+"import { Database } from 'bun:sqlite'
+import { drizzle } from 'drizzle-orm/bun-sqlite'
+import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
+
+// drizzle-kit migrate needs better-sqlite3 under Node.js; on Bun the migrations run through bun:sqlite
+const sqlite = new Database(process.env.DATABASE_URL ?? 'data.db', { create: true })
+migrate(drizzle({ client: sqlite }), { migrationsFolder: './drizzle' })
+sqlite.close()
+"
+,
+  "src/db/schema.ts": 
+"import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export const notes = sqliteTable('notes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  title: text('title').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+})
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  DATABASE_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+}
+`;
+
+exports[`add-ons drizzle-sqlite on node 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=data.db
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+DATABASE_URL=data.db
+"
+,
+  ".gitignore": 
+"node_modules/
+dist/
+*.tsbuildinfo
+.env
+data.db
+"
+,
+  "drizzle.config.ts": 
+"import { defineConfig } from 'drizzle-kit'
+
+// npm run and deno task do not load .env, and drizzle-kit needs DATABASE_URL
+try {
+  process.loadEnvFile()
+} catch {
+  // no .env: DATABASE_URL comes from the environment
+}
+
+export default defineConfig({
+  dialect: 'sqlite',
+  schema: './src/db/schema.ts',
+  out: './drizzle',
+  dbCredentials: { url: process.env.DATABASE_URL! },
+})
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/drizzle": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.45.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^24.13.3",
+    "drizzle-kit": "^0.31.11",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\"",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { DrizzleModule } from '@miiajs/drizzle'
+import * as schema from '../db/schema.js'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    DrizzleModule.configure(
+      (resolve) => ({
+        dialect: 'sqlite',
+        connection: { url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('DATABASE_URL') },
+        schema,
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/db/db.ts": 
+"import { drizzleDb } from '@miiajs/drizzle'
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
+import type * as schema from './schema.js'
+
+// The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
+export const db = drizzleDb<BetterSQLite3Database<typeof schema>>()
+"
+,
+  "src/db/schema.ts": 
+"import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export const notes = sqliteTable('notes', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  title: text('title').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+})
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  DATABASE_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+}
+`;
+
+exports[`add-ons papr on bun 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+MONGODB_URL=mongodb://localhost:27017/demo_app
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+MONGODB_URL=mongodb://localhost:27017/demo_app
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/papr": "^0.0.0-test",
+    "mongodb": "^7.7.0",
+    "papr": "^17.1.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { PaprModule } from '@miiajs/papr'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    PaprModule.configure(
+      (resolve) => ({
+        connection: { url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('MONGODB_URL') },
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  MONGODB_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+}
+`;
+
+exports[`add-ons papr on node 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+MONGODB_URL=mongodb://localhost:27017/demo_app
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+MONGODB_URL=mongodb://localhost:27017/demo_app
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "@miiajs/papr": "^0.0.0-test",
+    "mongodb": "^7.7.0",
+    "papr": "^17.1.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\""
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { PaprModule } from '@miiajs/papr'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    PaprModule.configure(
+      (resolve) => ({
+        connection: { url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('MONGODB_URL') },
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  MONGODB_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+}
+`;
+
+exports[`add-ons mongoose on bun 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+MONGODB_URL=mongodb://localhost:27017/demo_app
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+MONGODB_URL=mongodb://localhost:27017/demo_app
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/mongoose": "^0.0.0-test",
+    "mongoose": "^9.11.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test"
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { MongooseModule } from '@miiajs/mongoose'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    MongooseModule.configure(
+      (resolve) => ({
+        uri: resolve<ConfigService<Env>>(ConfigService).getOrThrow('MONGODB_URL'),
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  MONGODB_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+}
+`;
+
+exports[`add-ons mongoose on node 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+MONGODB_URL=mongodb://localhost:27017/demo_app
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+MONGODB_URL=mongodb://localhost:27017/demo_app
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/mongoose": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "mongoose": "^9.11.2",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\""
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { MongooseModule } from '@miiajs/mongoose'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    MongooseModule.configure(
+      (resolve) => ({
+        uri: resolve<ConfigService<Env>>(ConfigService).getOrThrow('MONGODB_URL'),
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  MONGODB_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+}
+`;
+
+exports[`add-ons combine into one project 1`] = `
+"import { ConfigModule, ConfigService } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema, type Env } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { JwtModule } from '@miiajs/jwt'
+import { AuthModule } from '../auth/auth.module.js'
+import { SwaggerModule } from '@miiajs/swagger'
+import { RateLimitModule } from '@miiajs/rate-limit'
+import { DrizzleModule } from '@miiajs/drizzle'
+import * as schema from '../db/schema.js'
+
+@Module({
+  imports: [
+    ConfigModule.configure({ schema: envSchema }, { global: true }),
+    JwtModule.configure(
+      (resolve) => ({
+        secret: resolve<ConfigService<Env>>(ConfigService).getOrThrow('JWT_SECRET'),
+        expiresIn: '1h',
+      }),
+      { global: true },
+    ),
+    AuthModule,
+    SwaggerModule.configure({ title: 'demo-app', version: '0.1.0' }),
+    RateLimitModule.configure({ limit: 100, window: '1m' }, { global: true }),
+    DrizzleModule.configure(
+      (resolve) => ({
+        dialect: 'sqlite',
+        connection: { url: resolve<ConfigService<Env>>(ConfigService).getOrThrow('DATABASE_URL') },
+        schema,
+      }),
+      { global: true },
+    ),
+  ],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+`;
+
+exports[`add-ons combine into one project 2`] = `
+"import { ConfigService } from '@miiajs/config'
+import { Miia, cors } from '@miiajs/core'
+import { AppModule } from './app/app.module.js'
+import type { Env } from './env.schema.js'
+import { serveStatic } from '@miiajs/serve-static'
+import { RateLimitGuard } from '@miiajs/rate-limit'
+
+const app = new Miia().register(AppModule)
+const config = app.get<ConfigService<Env>>(ConfigService)
+
+app.use(cors({ origin: config.get('CORS_ORIGIN') }))
+serveStatic(app, '/static', './public')
+app.useGuard(RateLimitGuard)
+await app.listen(config.get('PORT'), config.get('HOST'))
+"
+`;
+
+exports[`add-ons combine into one project 3`] = `
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  JWT_SECRET: z.string().min(32),
+  CORS_ORIGIN: z.string().default('*'),
+  DATABASE_URL: z.string(),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+`;

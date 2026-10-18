@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@miiajs/auth": "workspace:*",
+    "@miiajs/config": "workspace:*",
+    "@miiajs/jwt": "workspace:*",
+    "jose": "^6.2.12",
+    "zod": "^4.3.6"
+  }
+}

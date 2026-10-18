@@ -1,0 +1,13 @@
+{
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime deno",
+    "build": "miia build --runtime deno",
+    "start": "miia start --runtime deno",
+    "check": "miia check",
+    "test": "deno test --no-check --allow-all src/"
+  }
+}

@@ -44,10 +44,12 @@ Up to **9% faster** than Hono | Up to **33% faster** than NestJS+Fastify \*
 ## Quick start
 
 ```bash
-npx @miiajs/cli new my-app
+bun create miia my-app
 cd my-app
-npm run dev
+bun run dev
 ```
+
+With npm: `npm create miia@latest my-app`, then `npm run dev`.
 
 ## Documentation
 

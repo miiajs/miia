@@ -66,3 +66,19 @@ export function addDevHint(pm: PackageManager, pkg: string): string {
       return `deno add -D npm:${pkg}`
   }
 }
+
+/** How to run the project's own `miia` binary outside package.json scripts. */
+export function execCommand(pm: PackageManager): string {
+  switch (pm) {
+    case 'bun':
+      return 'bunx miia'
+    case 'npm':
+      return 'npx miia'
+    case 'pnpm':
+      return 'pnpm exec miia'
+    case 'yarn':
+      return 'yarn miia'
+    case 'deno':
+      return 'deno run -A npm:@miiajs/cli'
+  }
+}

@@ -1,0 +1,313 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`miia g module: files and the parent module 1`] = `
+{
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { UserProfileModule } from '../user-profile/user-profile.module.js'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true }), UserProfileModule],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/user-profile/user-profile.module.ts": 
+"import { Module } from '@miiajs/core'
+
+@Module({})
+export class UserProfileModule {}
+"
+,
+}
+`;
+
+exports[`miia g controller: files and the parent module 1`] = `
+{
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { UserProfileController } from '../user-profile/user-profile.controller.js'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true })],
+  controllers: [AppController, UserProfileController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/user-profile/user-profile.controller.ts": 
+"import { Controller, Get } from '@miiajs/core'
+
+@Controller('/user-profile')
+export class UserProfileController {
+  @Get()
+  findAll() {
+    return []
+  }
+}
+"
+,
+}
+`;
+
+exports[`miia g service: files and the parent module 1`] = `
+{
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { UserProfileService } from '../user-profile/user-profile.service.js'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true })],
+  controllers: [AppController],
+  providers: [AppService, UserProfileService],
+})
+export class AppModule {}
+"
+,
+  "src/user-profile/user-profile.service.ts": 
+"import { Injectable } from '@miiajs/core'
+
+@Injectable()
+export class UserProfileService {
+  findAll() {
+    return []
+  }
+}
+"
+,
+}
+`;
+
+exports[`miia g guard: files and the parent module 1`] = `
+{
+  "src/user-profile/user-profile.guard.ts": 
+"import { type CanActivate, Injectable, type RequestContext } from '@miiajs/core'
+
+@Injectable()
+export class UserProfileGuard implements CanActivate {
+  canActivate(_ctx: RequestContext): boolean {
+    return true
+  }
+}
+"
+,
+}
+`;
+
+exports[`miia g middleware: files and the parent module 1`] = `
+{
+  "src/user-profile/user-profile.middleware.ts": 
+"import type { Middleware } from '@miiajs/core'
+
+export const userProfileMiddleware: Middleware = async (_ctx, next) => {
+  await next()
+}
+"
+,
+}
+`;
+
+exports[`miia g resource: files and the parent module 1`] = `
+{
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+import { UserProfileModule } from '../user-profile/user-profile.module.js'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true }), UserProfileModule],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/user-profile/user-profile.controller.ts": 
+"import { Controller, Delete, Get, inject, Patch, Post, type RequestContext, Status } from '@miiajs/core'
+import {
+  type UserProfileIdParams,
+  UserProfileIdParamsSchema,
+  type CreateUserProfileInput,
+  CreateUserProfileSchema,
+  type UpdateUserProfileInput,
+  UpdateUserProfileSchema,
+} from './user-profile.schemas.js'
+import { UserProfileService } from './user-profile.service.js'
+
+@Controller('/user-profile')
+export class UserProfileController {
+  private readonly userProfileService = inject(UserProfileService)
+
+  @Post({ body: CreateUserProfileSchema })
+  @Status(201)
+  async create(ctx: RequestContext) {
+    return this.userProfileService.create(await ctx.json<CreateUserProfileInput>())
+  }
+
+  @Get()
+  findAll() {
+    return this.userProfileService.findAll()
+  }
+
+  @Get(':id', { params: UserProfileIdParamsSchema })
+  findOne(ctx: RequestContext) {
+    return this.userProfileService.findOne((ctx.params as UserProfileIdParams).id)
+  }
+
+  @Patch(':id', { params: UserProfileIdParamsSchema, body: UpdateUserProfileSchema })
+  async update(ctx: RequestContext) {
+    const { id } = ctx.params as UserProfileIdParams
+    return this.userProfileService.update(id, await ctx.json<UpdateUserProfileInput>())
+  }
+
+  // Without @Status(204) a null result answers 200 with an empty body
+  @Delete(':id', { params: UserProfileIdParamsSchema })
+  @Status(204)
+  remove(ctx: RequestContext) {
+    this.userProfileService.remove((ctx.params as UserProfileIdParams).id)
+    return null
+  }
+}
+"
+,
+  "src/user-profile/user-profile.module.ts": 
+"import { Module } from '@miiajs/core'
+import { UserProfileController } from './user-profile.controller.js'
+import { UserProfileService } from './user-profile.service.js'
+
+@Module({
+  controllers: [UserProfileController],
+  providers: [UserProfileService],
+  exports: [UserProfileService],
+})
+export class UserProfileModule {}
+"
+,
+  "src/user-profile/user-profile.schemas.ts": 
+"import { z } from 'zod'
+
+export const CreateUserProfileSchema = z.object({
+  name: z.string().min(1),
+})
+
+export const UpdateUserProfileSchema = CreateUserProfileSchema.partial()
+
+export const UserProfileIdParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+})
+
+export type CreateUserProfileInput = z.infer<typeof CreateUserProfileSchema>
+export type UpdateUserProfileInput = z.infer<typeof UpdateUserProfileSchema>
+export type UserProfileIdParams = z.infer<typeof UserProfileIdParamsSchema>
+"
+,
+  "src/user-profile/user-profile.service.ts": 
+"import { Injectable, NotFoundException } from '@miiajs/core'
+import type { CreateUserProfileInput, UpdateUserProfileInput } from './user-profile.schemas.js'
+
+export interface UserProfile {
+  id: number
+  name: string
+}
+
+// In-memory store: replace it with your database
+@Injectable()
+export class UserProfileService {
+  private readonly items = new Map<number, UserProfile>()
+  private nextId = 1
+
+  create(input: CreateUserProfileInput): UserProfile {
+    const item = { id: this.nextId++, ...input }
+    this.items.set(item.id, item)
+    return item
+  }
+
+  findAll(): UserProfile[] {
+    return [...this.items.values()]
+  }
+
+  findOne(id: number): UserProfile {
+    const item = this.items.get(id)
+    if (!item) throw new NotFoundException(\`UserProfile \${id} not found\`)
+    return item
+  }
+
+  update(id: number, input: UpdateUserProfileInput): UserProfile {
+    const item = { ...this.findOne(id), ...input }
+    this.items.set(id, item)
+    return item
+  }
+
+  remove(id: number): void {
+    this.findOne(id)
+    this.items.delete(id)
+  }
+}
+"
+,
+  "src/user-profile/user-profile.test.ts": 
+"import { describe, expect, it } from 'bun:test'
+import { TestApp } from '@miiajs/testing'
+import { UserProfileModule } from './user-profile.module.js'
+
+const createApp = () => TestApp.create(UserProfileModule).compile()
+
+describe('UserProfileController', () => {
+  // One app for the whole flow: items live in the app instance
+  it('creates, lists, reads, updates and deletes', async () => {
+    const app = await createApp()
+    try {
+      const created = await app.request('POST', '/user-profile', { body: { name: 'First' } })
+      expect(created.status).toBe(201)
+      const { id } = await created.json()
+
+      const list = await app.request('GET', '/user-profile')
+      expect(await list.json()).toEqual([{ id, name: 'First' }])
+
+      const found = await app.request('GET', \`/user-profile/\${id}\`)
+      expect(found.status).toBe(200)
+      expect(await found.json()).toEqual({ id, name: 'First' })
+
+      const updated = await app.request('PATCH', \`/user-profile/\${id}\`, { body: { name: 'Renamed' } })
+      expect(await updated.json()).toEqual({ id, name: 'Renamed' })
+
+      const removed = await app.request('DELETE', \`/user-profile/\${id}\`)
+      expect(removed.status).toBe(204)
+      expect((await app.request('GET', \`/user-profile/\${id}\`)).status).toBe(404)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('answers 404 for a missing item and 422 for an invalid body', async () => {
+    const app = await createApp()
+    try {
+      expect((await app.request('GET', '/user-profile/999')).status).toBe(404)
+      expect((await app.request('POST', '/user-profile', { body: { name: '' } })).status).toBe(422)
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+}
+`;

@@ -17,6 +17,7 @@
     { "path": "packages/mongoose" },
     { "path": "packages/messaging" },
     { "path": "packages/messaging-redis" },
-    { "path": "packages/cli" }
+    { "path": "packages/cli" },
+    { "path": "packages/create-miia" }
   ]
 }

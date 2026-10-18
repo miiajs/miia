@@ -6,6 +6,7 @@ import {
   addToModuleArray,
   detectStyle,
   hasCall,
+  hasModuleEntry,
   insertStatement,
   isListenCall,
 } from '../src/codemod/source.js'
@@ -58,7 +59,14 @@ describe('addImport', () => {
 
     const value = lines("import { envSchema } from './env.js'")
     expect(addImport(ts, value, { from: './env.js', names: ['Env'], type: true }).text).toBe(
-      lines("import { envSchema } from './env.js'", "import type { Env } from './env.js'"),
+      lines("import { envSchema, type Env } from './env.js'"),
+    )
+    const both = lines("import { envSchema } from './env.js'", "import type { A } from './env.js'")
+    expect(addImport(ts, both, { from: './env.js', names: ['Env'], type: true }).text).toBe(
+      lines("import { envSchema } from './env.js'", "import type { A, Env } from './env.js'"),
+    )
+    expect(addImport(ts, lines('x()'), { from: './env.js', names: ['Env'], type: true }).text).toBe(
+      lines("import type { Env } from './env.js'", '', 'x()'),
     )
   })
 
@@ -314,6 +322,21 @@ describe('addToModuleArray', () => {
     expect(addToModuleArray(ts, text, { key: 'providers', element: 'S', ref: 'S' }).text).toBe(
       "import { Module } from '@miiajs/core'\r\n\r\n@Module({\r\n\timports: [\r\n\t\tA,\r\n\t],\r\n\tproviders: [S],\r\n})\r\nexport class M {}\r\n",
     )
+  })
+})
+
+describe('hasModuleEntry', () => {
+  it('finds references in a key of the module', () => {
+    const text = lines(
+      "import { Module } from '@miiajs/core'",
+      '',
+      '@Module({ imports: [ConfigModule.configure({}, { global: true })], providers: [A] })',
+      'export class M {}',
+    )
+    expect(hasModuleEntry(ts, text, { key: 'imports', ref: 'ConfigModule' })).toBe(true)
+    expect(hasModuleEntry(ts, text, { key: 'imports', ref: 'A' })).toBe(false)
+    expect(hasModuleEntry(ts, text, { key: 'providers', ref: 'A' })).toBe(true)
+    expect(hasModuleEntry(ts, lines('export class M {}'), { key: 'imports', ref: 'A' })).toBe(false)
   })
 })
 

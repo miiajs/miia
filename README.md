@@ -15,14 +15,22 @@ Inspired by Angular/NestJS architectural ideas - decorator-driven DI, controller
 
 ## Installation
 
+Create a project - runtime, features and database are prompts, or flags for CI:
+
+```sh
+bun create miia my-app
+# or
+npm create miia@latest my-app
+# or
+deno run -A npm:create-miia my-app
+```
+
+Or add the core package to an existing project:
+
 ```sh
 bun add @miiajs/core
 # or
 npm install @miiajs/core
-# or
-pnpm add @miiajs/core
-# or
-yarn add @miiajs/core
 ```
 
 ## Quick start
@@ -89,7 +97,8 @@ await app.listen(3000)
 | `@miiajs/mongoose` | MongoDB integration via Mongoose |
 | `@miiajs/swagger` | OpenAPI 3.1 spec generation, Swagger UI |
 | `@miiajs/testing` | `TestApp` harness for unit and integration tests |
-| `@miiajs/cli` | Dev CLI: `dev`, `build`, `start`, `check`, `new`, `generate` |
+| `@miiajs/cli` | CLI: `new`, `add`, `generate`, `dev`, `build`, `start`, `check` |
+| `create-miia` | `bun create miia` / `npm create miia` - runs `miia new` |
 
 ## Requirements
 

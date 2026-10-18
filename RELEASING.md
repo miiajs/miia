@@ -1,10 +1,10 @@
 # Releasing MiiaJS
 
-All `@miiajs/*` packages use fixed versioning via [Changesets](https://github.com/changesets/changesets): every published package always ships at the same version.
+All `@miiajs/*` packages and `create-miia` use fixed versioning via [Changesets](https://github.com/changesets/changesets): every published package always ships at the same version.
 
 ## Prerequisites
 
-- npm account with publish permissions for the `@miiajs` scope
+- npm account with publish permissions for the `@miiajs` scope and the unscoped `create-miia` package
 - `npm login` performed on the machine
 - `GITHUB_TOKEN` in `.env.local` at repo root (already gitignored). Required by `@changesets/changelog-github` during `changeset:version` to fetch PR and author metadata. [Create a PAT with `read:user` + `repo:status` scopes](https://github.com/settings/tokens/new?scopes=read:user,repo:status&description=miia-changesets), then:
   ```sh
@@ -32,7 +32,7 @@ Shows which packages would bump, to which versions, and from which changesets.
 bun run changeset:version
 ```
 
-Bumps `version` in every `@miiajs/*` `package.json`, writes `CHANGELOG.md` in each package, deletes spent `.changeset/*.md` files, regenerates `bun.lock`.
+Bumps `version` in every `@miiajs/*` `package.json` and in `create-miia`, writes `CHANGELOG.md` in each package, deletes spent `.changeset/*.md` files, regenerates `bun.lock`.
 
 Review the diff:
 
@@ -40,9 +40,17 @@ Review the diff:
 git diff
 ```
 
-Expected: 14 `@miiajs/*` packages bumped to the same new version, CHANGELOGs written, `.changeset/` cleaned, root `package.json` and `examples/*/package.json` untouched.
+Expected: every `@miiajs/*` package and `create-miia` bumped to the same new version, CHANGELOGs written, `.changeset/` cleaned, root `package.json` and `examples/*/package.json` untouched.
 
-### 3. Build
+### 3. Check generated projects
+
+```sh
+bun run cli:e2e
+```
+
+Builds and packs every package, generates projects with `miia new` outside the repo against those tarballs, installs them and runs `check`, the tests and the server with HTTP probes on Bun, Node.js and Deno. Needs `bun`, `node`, `deno` and network access; takes a few minutes. `--only <scenario,...>` runs a subset, `--keep` keeps the generated projects.
+
+### 4. Build
 
 ```sh
 bun run build
@@ -50,24 +58,26 @@ bun run build
 
 Must succeed before publishing - `changeset publish` uploads whatever is in `dist/` for each package.
 
-### 4. Commit
+### 5. Commit
 
 ```sh
 git add -A
 git commit -m "chore: release"
 ```
 
-### 5. Publish
+### 6. Publish
 
 ```sh
 bun run release
 ```
 
-`changeset publish` validates `npm login` has access to the `@miiajs` scope and publishes each package with `publishConfig.access: public`. The `--no-git-tag` flag suppresses the 14 per-package tags changesets would otherwise create - we use a single parent tag `v{version}` (Step 6) for the whole release since all `@miiajs/*` packages share a version via the `fixed` group.
+`changeset publish` validates `npm login` has access to the `@miiajs` scope and publishes each package with `publishConfig.access: public`. The `--no-git-tag` flag suppresses the per-package tags changesets would otherwise create - we use a single parent tag `v{version}` (Step 7) for the whole release since all packages share a version via the `fixed` group.
+
+`create-miia` goes out through the same `changeset publish`. Its name was reserved on npm as `0.0.1` (no `bin`); the first release from the repo publishes over that reservation at the group version.
 
 Use Step 1 (`bun run changeset:status`) as the preview - `changeset publish` has no `--dry-run` flag, so publishing is the publish.
 
-### 6. Tag and push
+### 7. Tag and push
 
 Add a parent tag and push everything:
 
@@ -77,9 +87,9 @@ git tag -a "v${VERSION}" -m "Release v${VERSION}"
 git push --follow-tags
 ```
 
-The parent tag `v{version}` is the only tag we create per release - it covers all 14 `@miiajs/*` packages via the `fixed` group, and is used by GitHub Releases and human-friendly history navigation.
+The parent tag `v{version}` is the only tag we create per release - it covers every `@miiajs/*` package and `create-miia` via the `fixed` group, and is used by GitHub Releases and human-friendly history navigation.
 
-### 7. GitHub Release
+### 8. GitHub Release
 
 Open the parent tag on GitHub and create a release:
 

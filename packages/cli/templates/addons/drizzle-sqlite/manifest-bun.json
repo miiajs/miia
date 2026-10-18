@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "db:migrate": "bun src/db/migrate.ts"
+  }
+}

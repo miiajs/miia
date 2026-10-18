@@ -1,0 +1,581 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`createProject generates the base project for bun 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+"
+,
+  ".gitignore": 
+"node_modules/
+dist/
+*.tsbuildinfo
+.env
+"
+,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`bun run dev\` | Dev server with reload and type-checking |
+| \`bun run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`bun run check\` | Type-check |
+| \`bun run build\` | Build |
+| \`bun run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists them with defaults; \`.env\` holds your local values and is not committed.
+
+## Next steps
+
+- \`bunx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`bunx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/bun": "^1.4.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test"
+  }
+}
+"
+,
+  "src/app/app.controller.ts": 
+"import { Controller, Get, inject } from '@miiajs/core'
+import { AppService } from './app.service.js'
+
+@Controller()
+export class AppController {
+  private readonly appService = inject(AppService)
+
+  @Get()
+  hello() {
+    return { message: this.appService.getHello() }
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true })],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/app/app.service.ts": 
+"import { Injectable } from '@miiajs/core'
+
+@Injectable()
+export class AppService {
+  getHello(): string {
+    return 'Hello, Miia!'
+  }
+}
+"
+,
+  "src/app/app.test.ts": 
+"import { describe, expect, it } from 'bun:test'
+import { Module } from '@miiajs/core'
+import { TestApp } from '@miiajs/testing'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+
+// Only what the controller needs: the test does not depend on the add-ons in AppModule
+@Module({ controllers: [AppController], providers: [AppService] })
+class TestModule {}
+
+describe('AppController', () => {
+  it('GET / greets', async () => {
+    const app = await TestApp.create(TestModule).compile()
+    try {
+      const res = await app.request('GET', '/')
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ message: 'Hello, Miia!' })
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+  "src/main.ts": 
+"import { ConfigService } from '@miiajs/config'
+import { Miia } from '@miiajs/core'
+import { AppModule } from './app/app.module.js'
+import type { Env } from './env.schema.js'
+
+const app = new Miia().register(AppModule)
+const config = app.get<ConfigService<Env>>(ConfigService)
+
+await app.listen(config.get('PORT'), config.get('HOST'))
+"
+,
+  "tsconfig.json": 
+"{
+  "compilerOptions": {
+    "target": "ES2025",
+    "module": "nodenext",
+    "strict": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "types": ["bun"]
+  },
+  "include": ["src"]
+}
+"
+,
+}
+`;
+
+exports[`createProject generates the base project for node 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+"
+,
+  ".gitignore": 
+"node_modules/
+dist/
+*.tsbuildinfo
+.env
+"
+,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`npm run dev\` | Dev server with reload and type-checking |
+| \`npm run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`npm run check\` | Type-check |
+| \`npm run build\` | Build |
+| \`npm run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists them with defaults; \`.env\` holds your local values and is not committed.
+
+## Next steps
+
+- \`npx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`npx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "@miiajs/node-server": "^0.0.0-test",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \\"src/**/*.test.ts\\""
+  }
+}
+"
+,
+  "src/app/app.controller.ts": 
+"import { Controller, Get, inject } from '@miiajs/core'
+import { AppService } from './app.service.js'
+
+@Controller()
+export class AppController {
+  private readonly appService = inject(AppService)
+
+  @Get()
+  hello() {
+    return { message: this.appService.getHello() }
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true })],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/app/app.service.ts": 
+"import { Injectable } from '@miiajs/core'
+
+@Injectable()
+export class AppService {
+  getHello(): string {
+    return 'Hello, Miia!'
+  }
+}
+"
+,
+  "src/app/app.test.ts": 
+"import { describe, it } from 'node:test'
+import { expect } from 'expect'
+import { Module } from '@miiajs/core'
+import { TestApp } from '@miiajs/testing'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+
+// Only what the controller needs: the test does not depend on the add-ons in AppModule
+@Module({ controllers: [AppController], providers: [AppService] })
+class TestModule {}
+
+describe('AppController', () => {
+  it('GET / greets', async () => {
+    const app = await TestApp.create(TestModule).compile()
+    try {
+      const res = await app.request('GET', '/')
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ message: 'Hello, Miia!' })
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+  "src/main.ts": 
+"import { ConfigService } from '@miiajs/config'
+import { Miia } from '@miiajs/core'
+import { serve } from '@miiajs/node-server'
+import { AppModule } from './app/app.module.js'
+import type { Env } from './env.schema.js'
+
+const app = new Miia().register(AppModule)
+const config = app.get<ConfigService<Env>>(ConfigService)
+
+await app.listen(config.get('PORT'), config.get('HOST'), serve)
+"
+,
+  "tsconfig.build.json": 
+"{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": true
+  },
+  "exclude": ["src/**/*.test.ts"]
+}
+"
+,
+  "tsconfig.json": 
+"{
+  "compilerOptions": {
+    "target": "ES2025",
+    "module": "nodenext",
+    "strict": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}
+"
+,
+}
+`;
+
+exports[`createProject generates the base project for deno 1`] = `
+{
+  ".env": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+"
+,
+  ".env.example": 
+"NODE_ENV=development
+HOST=0.0.0.0
+PORT=3000
+"
+,
+  ".gitignore": 
+"node_modules/
+dist/
+*.tsbuildinfo
+.env
+"
+,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`deno task dev\` | Dev server with reload and type-checking |
+| \`deno task test\` | Tests (\`src/**/*.test.ts\`) |
+| \`deno task check\` | Type-check |
+| \`deno task build\` | Build |
+| \`deno task start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists them with defaults; \`.env\` holds your local values and is not committed.
+
+## Next steps
+
+- \`deno run -A npm:@miiajs/cli g resource posts\` - a CRUD module with route schemas and a test
+- \`deno run -A npm:@miiajs/cli add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
+  "deno.json": 
+"{
+  "unstable": ["sloppy-imports"]
+}
+"
+,
+  "package.json": 
+"{
+  "name": "demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@miiajs/config": "^0.0.0-test",
+    "@miiajs/core": "^0.0.0-test",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "^0.0.0-test",
+    "@miiajs/testing": "^0.0.0-test",
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime deno",
+    "build": "miia build --runtime deno",
+    "start": "miia start --runtime deno",
+    "check": "miia check",
+    "test": "deno test --no-check --allow-all src/"
+  }
+}
+"
+,
+  "src/app/app.controller.ts": 
+"import { Controller, Get, inject } from '@miiajs/core'
+import { AppService } from './app.service.js'
+
+@Controller()
+export class AppController {
+  private readonly appService = inject(AppService)
+
+  @Get()
+  hello() {
+    return { message: this.appService.getHello() }
+  }
+}
+"
+,
+  "src/app/app.module.ts": 
+"import { ConfigModule } from '@miiajs/config'
+import { Module } from '@miiajs/core'
+import { envSchema } from '../env.schema.js'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+
+@Module({
+  imports: [ConfigModule.configure({ schema: envSchema }, { global: true })],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}
+"
+,
+  "src/app/app.service.ts": 
+"import { Injectable } from '@miiajs/core'
+
+@Injectable()
+export class AppService {
+  getHello(): string {
+    return 'Hello, Miia!'
+  }
+}
+"
+,
+  "src/app/app.test.ts": 
+"import { describe, it } from 'node:test'
+import { expect } from 'expect'
+import { Module } from '@miiajs/core'
+import { TestApp } from '@miiajs/testing'
+import { AppController } from './app.controller.js'
+import { AppService } from './app.service.js'
+
+// Only what the controller needs: the test does not depend on the add-ons in AppModule
+@Module({ controllers: [AppController], providers: [AppService] })
+class TestModule {}
+
+describe('AppController', () => {
+  it('GET / greets', async () => {
+    const app = await TestApp.create(TestModule).compile()
+    try {
+      const res = await app.request('GET', '/')
+      expect(res.status).toBe(200)
+      expect(await res.json()).toEqual({ message: 'Hello, Miia!' })
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "src/env.schema.ts": 
+"import { z } from 'zod'
+
+export const envSchema = z.object({
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  HOST: z.string().default('0.0.0.0'),
+  PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+})
+
+export type Env = z.infer<typeof envSchema>
+"
+,
+  "src/main.ts": 
+"import { ConfigService } from '@miiajs/config'
+import { Miia } from '@miiajs/core'
+import { AppModule } from './app/app.module.js'
+import type { Env } from './env.schema.js'
+
+const app = new Miia().register(AppModule)
+const config = app.get<ConfigService<Env>>(ConfigService)
+
+await app.listen(config.get('PORT'), config.get('HOST'))
+"
+,
+  "tsconfig.json": 
+"{
+  "compilerOptions": {
+    "target": "ES2025",
+    "module": "nodenext",
+    "strict": true,
+    "skipLibCheck": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "types": [
+      "node"
+    ]
+  },
+  "include": [
+    "src"
+  ]
+}
+"
+,
+}
+`;

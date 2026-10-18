@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "@miiajs/config": "workspace:*",
+    "@miiajs/mongoose": "workspace:*",
+    "mongoose": "^9.11.2"
+  }
+}

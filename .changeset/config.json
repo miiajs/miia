@@ -5,7 +5,7 @@
     { "repo": "miiajs/miia" }
   ],
   "commit": false,
-  "fixed": [["@miiajs/*"]],
+  "fixed": [["@miiajs/*", "create-miia"]],
   "linked": [],
   "access": "public",
   "baseBranch": "main",

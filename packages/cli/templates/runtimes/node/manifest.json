@@ -1,0 +1,17 @@
+{
+  "dependencies": {
+    "@miiajs/node-server": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "expect": "^30.5.2",
+    "tsx": "^4.21.0"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime node",
+    "build": "miia build --runtime node",
+    "start": "miia start --runtime node",
+    "check": "miia check",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  }
+}

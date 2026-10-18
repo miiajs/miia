@@ -1,0 +1,3 @@
+[test]
+# Template tests run inside generated projects, not in the repo
+pathIgnorePatterns = ["packages/cli/templates/**"]

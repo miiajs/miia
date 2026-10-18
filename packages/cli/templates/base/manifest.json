@@ -1,0 +1,12 @@
+{
+  "dependencies": {
+    "@miiajs/config": "workspace:*",
+    "@miiajs/core": "workspace:*",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@miiajs/cli": "workspace:*",
+    "@miiajs/testing": "workspace:*",
+    "typescript": "^6.0.2"
+  }
+}

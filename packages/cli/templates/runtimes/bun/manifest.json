@@ -1,0 +1,12 @@
+{
+  "devDependencies": {
+    "@types/bun": "^1.4.0"
+  },
+  "scripts": {
+    "dev": "miia dev --runtime bun",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
+    "check": "miia check",
+    "test": "bun test"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "create-miia",
+  "version": "0.8.0",
+  "author": "Ruslan Matiushev",
+  "license": "MIT",
+  "description": "Create a MiiaJS app: bun create miia / npm create miia",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miiajs/miia.git",
+    "directory": "packages/create-miia"
+  },
+  "homepage": "https://miiajs.com",
+  "bugs": {
+    "url": "https://github.com/miiajs/miia/issues"
+  },
+  "keywords": [
+    "miiajs",
+    "miia",
+    "create",
+    "scaffold"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "bin": {
+    "create-miia": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.12.0",
+    "bun": ">=1.4.0",
+    "deno": ">=2.4.0"
+  },
+  "dependencies": {
+    "@miiajs/cli": "^0.8.0",
+    "typescript": "^6.0.2"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean"
+  }
+}

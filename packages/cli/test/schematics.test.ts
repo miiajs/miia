@@ -1,91 +1,45 @@
-import { describe, it, expect } from 'bun:test'
-import { resolveSchematic, isResourceSchematic, listSchematics } from '../src/generate/schematics.js'
+import { describe, expect, it } from 'bun:test'
+import { describeSchematics, listSchematics, resolveSchematic } from '../src/generate/schematics.js'
 
-describe('resolveSchematic', () => {
-  it('resolves by full name', () => {
-    const result = resolveSchematic('controller')
-    expect(result).not.toBeUndefined()
-    expect(result).not.toBe('resource')
-    if (result && result !== 'resource') {
-      expect(result.name).toBe('controller')
-    }
-  })
-
-  it('resolves module by alias "m"', () => {
-    const result = resolveSchematic('m')
-    expect(result).not.toBeUndefined()
-    if (result && result !== 'resource') {
-      expect(result.name).toBe('module')
-    }
-  })
-
-  it('resolves controller by alias "c"', () => {
-    const result = resolveSchematic('c')
-    expect(result).not.toBeUndefined()
-    if (result && result !== 'resource') {
-      expect(result.name).toBe('controller')
-    }
-  })
-
-  it('resolves service by alias "s"', () => {
-    const result = resolveSchematic('s')
-    expect(result).not.toBeUndefined()
-    if (result && result !== 'resource') {
-      expect(result.name).toBe('service')
-    }
-  })
-
-  it('resolves resource by name', () => {
-    expect(resolveSchematic('resource')).toBe('resource')
-  })
-
-  it('resolves resource by alias "r"', () => {
-    expect(resolveSchematic('r')).toBe('resource')
-  })
-
-  it('middleware has no short alias', () => {
+describe('schematics', () => {
+  it('resolve by name and alias', () => {
+    expect(resolveSchematic('module')?.name).toBe('module')
+    expect(resolveSchematic('m')?.name).toBe('module')
+    expect(resolveSchematic('c')?.name).toBe('controller')
+    expect(resolveSchematic('s')?.name).toBe('service')
+    expect(resolveSchematic('r')?.name).toBe('resource')
+    expect(resolveSchematic('guard')?.name).toBe('guard')
+    expect(resolveSchematic('middleware')?.name).toBe('middleware')
     expect(resolveSchematic('mw')).toBeUndefined()
-    const result = resolveSchematic('middleware')
-    expect(result).not.toBeUndefined()
-  })
-
-  it('guard has no short alias', () => {
-    expect(resolveSchematic('gu')).toBeUndefined()
-    const result = resolveSchematic('guard')
-    expect(result).not.toBeUndefined()
-  })
-
-  it('returns undefined for unknown', () => {
     expect(resolveSchematic('xyz')).toBeUndefined()
   })
-})
 
-describe('isResourceSchematic', () => {
-  it('returns true for resource', () => {
-    expect(isResourceSchematic('resource')).toBe(true)
+  it('register into the expected module keys', () => {
+    const keys = Object.fromEntries(listSchematics().map((s) => [s.name, s.register?.key ?? null]))
+    expect(keys).toEqual({
+      module: 'imports',
+      controller: 'controllers',
+      service: 'providers',
+      guard: null,
+      middleware: null,
+      resource: 'imports',
+    })
   })
 
-  it('returns false for a SchematicDefinition', () => {
-    const result = resolveSchematic('module')
-    expect(isResourceSchematic(result)).toBe(false)
-  })
-})
-
-describe('listSchematics', () => {
-  it('includes all 6 schematics', () => {
-    const list = listSchematics()
-    const names = list.map((s) => s.name)
-    expect(names).toContain('module')
-    expect(names).toContain('controller')
-    expect(names).toContain('service')
-    expect(names).toContain('middleware')
-    expect(names).toContain('guard')
-    expect(names).toContain('resource')
+  it('allow --export for service only and nest resource always', () => {
+    expect(
+      listSchematics()
+        .filter((s) => s.exportable)
+        .map((s) => s.name),
+    ).toEqual(['service'])
+    expect(
+      listSchematics()
+        .filter((s) => s.alwaysNested)
+        .map((s) => s.name),
+    ).toEqual(['resource'])
   })
 
-  it('resource has alias "r"', () => {
-    const list = listSchematics()
-    const resource = list.find((s) => s.name === 'resource')
-    expect(resource?.aliases).toEqual(['r'])
+  it('describe themselves for usage messages', () => {
+    expect(describeSchematics()).toBe('module (m), controller (c), service (s), guard, middleware, resource (r)')
   })
 })

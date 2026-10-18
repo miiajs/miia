@@ -38,6 +38,10 @@
   "types": "./dist/cli.d.ts",
   "files": [
     "dist",
+    "templates",
+    "!templates/package.json",
+    "!templates/tsconfig.json",
+    "!templates/node_modules",
     "README.md",
     "LICENSE"
   ],

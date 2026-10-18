@@ -84,7 +84,10 @@ export function addImport(
   }
   if (missing.length === 0) return { text, status: 'exists' }
 
-  if (!namedImportsOf(ts, sf, opts.from, !!opts.type)) {
+  // A type goes into `import type { }` from the module, else inline as `type X` into its value import
+  const typeOnly = !!opts.type && !!namedImportsOf(ts, sf, opts.from, true)
+  const inline = !!opts.type && !typeOnly
+  if (!namedImportsOf(ts, sf, opts.from, typeOnly)) {
     const line = `import ${opts.type ? 'type ' : ''}{ ${missing.join(', ')} } from ${quote(ts, sf, opts.from)}`
     return { text: insertImportLine(ts, sf, text, line), status: 'added' }
   }
@@ -93,10 +96,11 @@ export function addImport(
   let result = text
   // One name at a time, re-parsing in between, keeps the list rules in one place
   for (const name of missing) {
-    const list = namedImportsOf(ts, parse(ts, result), opts.from, !!opts.type) as NamedImports
+    const list = namedImportsOf(ts, parse(ts, result), opts.from, typeOnly) as NamedImports
+    const element = inline ? `type ${name}` : name
     result = applyEdits(
       result,
-      insertIntoList(ts, result, style, listOf(list, list.elements), name, list.elements.length),
+      insertIntoList(ts, result, style, listOf(list, list.elements), element, list.elements.length),
     )
   }
   return { text: result, status: 'added' }
@@ -255,6 +259,22 @@ export function addToModuleArray(
     padSingleLine: true,
   })
   return { text: applyEdits(text, edits), status: 'added' }
+}
+
+/** Whether `key` of the @Module holds an array entry referring to `ref`. */
+export function hasModuleEntry(
+  ts: TS,
+  text: string,
+  opts: { key: ModuleKey; ref: string; moduleClass?: string },
+): boolean {
+  const config = findModuleConfig(ts, parse(ts, text), opts.moduleClass)
+  const prop = config?.properties.find((p) => propertyName(ts, p) === opts.key)
+  return (
+    !!prop &&
+    ts.isPropertyAssignment(prop) &&
+    ts.isArrayLiteralExpression(prop.initializer) &&
+    prop.initializer.elements.some((el) => refersTo(ts, el, opts.ref))
+  )
 }
 
 function findModuleConfig(ts: TS, sf: SourceFile, moduleClass?: string): ObjectLiteralExpression | null {

@@ -13,6 +13,7 @@ export const main = defineCommand({
     start: () => import('./commands/start.js').then((m) => m.default),
     check: () => import('./commands/check.js').then((m) => m.default),
     new: () => import('./commands/new.js').then((m) => m.default),
+    add: () => import('./commands/add.js').then((m) => m.default),
     generate: () => import('./commands/generate.js').then((m) => m.default),
     g: () => import('./commands/generate.js').then((m) => m.default),
   },

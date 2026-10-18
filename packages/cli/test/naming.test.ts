@@ -1,81 +1,48 @@
-import { describe, it, expect } from 'bun:test'
-import { toKebabCase, toPascalCase, lowerFirst } from '../src/utils/naming.js'
+import { describe, expect, it } from 'bun:test'
+import { CliError } from '../src/utils/errors.js'
+import { splitWords, toCamelCase, toKebabCase, toPascalCase, validateArtifactName } from '../src/utils/naming.js'
 
-describe('toKebabCase', () => {
-  it('converts PascalCase', () => {
-    expect(toKebabCase('UserProfile')).toBe('user-profile')
-  })
-
-  it('converts camelCase', () => {
-    expect(toKebabCase('userProfile')).toBe('user-profile')
-  })
-
-  it('keeps already kebab-case', () => {
-    expect(toKebabCase('user-profile')).toBe('user-profile')
-  })
-
-  it('converts underscores', () => {
-    expect(toKebabCase('user_profile')).toBe('user-profile')
-  })
-
-  it('handles single word', () => {
-    expect(toKebabCase('user')).toBe('user')
-  })
-
-  it('handles uppercase single word', () => {
-    expect(toKebabCase('User')).toBe('user')
-  })
-
-  it('handles consecutive uppercase', () => {
-    expect(toKebabCase('HTTPServer')).toBe('httpserver')
+describe('splitWords', () => {
+  it('splits camel, Pascal, snake and kebab case and acronyms', () => {
+    expect(splitWords('HTTPServer')).toEqual(['HTTP', 'Server'])
+    expect(splitWords('userProfile')).toEqual(['user', 'Profile'])
+    expect(splitWords('user_profile')).toEqual(['user', 'profile'])
+    expect(splitWords('user-profile')).toEqual(['user', 'profile'])
+    expect(splitWords('User2FA')).toEqual(['User2', 'FA'])
+    expect(splitWords('HTTP2Server')).toEqual(['HTTP2', 'Server'])
   })
 })
 
-describe('toPascalCase', () => {
-  it('converts kebab-case', () => {
-    expect(toPascalCase('user-profile')).toBe('UserProfile')
-  })
-
-  it('converts snake_case', () => {
-    expect(toPascalCase('user_profile')).toBe('UserProfile')
-  })
-
-  it('converts camelCase', () => {
-    expect(toPascalCase('userProfile')).toBe('UserProfile')
-  })
-
-  it('keeps PascalCase input', () => {
-    expect(toPascalCase('UserProfile')).toBe('UserProfile')
-  })
-
-  it('handles already-capitalized single word', () => {
-    expect(toPascalCase('User')).toBe('User')
-  })
-
-  it('handles single word', () => {
-    expect(toPascalCase('user')).toBe('User')
-  })
-
-  it('handles multiple segments', () => {
-    expect(toPascalCase('my-cool-feature')).toBe('MyCoolFeature')
-  })
-
-  it('handles consecutive uppercase (no acronym boundary)', () => {
-    // Consistent with toKebabCase('HTTPServer') === 'httpserver'
-    expect(toPascalCase('HTTPServer')).toBe('Httpserver')
-  })
+describe('case conversion', () => {
+  const cases: Array<[string, string, string, string]> = [
+    ['HTTPServer', 'HttpServer', 'httpServer', 'http-server'],
+    ['userProfile', 'UserProfile', 'userProfile', 'user-profile'],
+    ['user_profile', 'UserProfile', 'userProfile', 'user-profile'],
+    ['user-profile', 'UserProfile', 'userProfile', 'user-profile'],
+    ['UserProfile', 'UserProfile', 'userProfile', 'user-profile'],
+    ['User2FA', 'User2Fa', 'user2Fa', 'user2-fa'],
+    ['users', 'Users', 'users', 'users'],
+  ]
+  for (const [input, pascal, camel, kebab] of cases) {
+    it(input, () => {
+      expect(toPascalCase(input)).toBe(pascal)
+      expect(toCamelCase(input)).toBe(camel)
+      expect(toKebabCase(input)).toBe(kebab)
+    })
+  }
 })
 
-describe('lowerFirst', () => {
-  it('lowercases first character', () => {
-    expect(lowerFirst('UserService')).toBe('userService')
+describe('validateArtifactName', () => {
+  it('splits a path from the name', () => {
+    expect(validateArtifactName('users')).toEqual({ dir: '', name: 'users' })
+    expect(validateArtifactName('admin/users')).toEqual({ dir: 'admin', name: 'users' })
+    expect(validateArtifactName('a/b/user_profile')).toEqual({ dir: 'a/b', name: 'user_profile' })
   })
 
-  it('keeps already lowercase', () => {
-    expect(lowerFirst('userService')).toBe('userService')
-  })
-
-  it('handles single char', () => {
-    expect(lowerFirst('U')).toBe('u')
+  it('rejects dots, empty segments, parent folders and leading digits', () => {
+    for (const bad of ['user.profile', '../x', 'a//b', '', '/users', '2fa', 'my users', 'a\\b']) {
+      expect(() => validateArtifactName(bad)).toThrow(CliError)
+    }
+    expect(() => validateArtifactName('user.profile')).toThrow('Invalid name "user.profile"')
   })
 })

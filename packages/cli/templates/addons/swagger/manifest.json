@@ -1,0 +1,6 @@
+{
+  "dependencies": {
+    "@miiajs/swagger": "workspace:*",
+    "swagger-ui-dist": "^5.34.0"
+  }
+}

@@ -32,7 +32,8 @@ packages/
   messaging/         - Decorator-driven message bus (event-bus pattern), retry, DLQ, idempotency, named buses, W3C tracing
   messaging-redis/   - Redis Streams transport for messaging (consumer groups, PEL-backed retry)
   testing/       - TestApp harness for integration tests
-  cli/           - Dev CLI: dev, build, start, check, new commands
+  cli/           - CLI: new, add, generate, dev, build, start, check; project templates in cli/templates/
+  create-miia/   - bun create miia / npm create miia: runs miia new
 examples/
   drizzle-app/   - CRUD with Drizzle + PostgreSQL
   papr-app/      - CRUD with Papr + MongoDB
@@ -334,15 +335,25 @@ Tests use `bun test` with explicit imports: `import { describe, it, expect } fro
 
 ### CLI: @miiajs/cli
 
-Commands: `miia dev`, `miia build`, `miia start`, `miia check`, `miia new`, `miia generate` (alias `miia g`).
+Commands: `miia new`, `miia add`, `miia generate` (alias `miia g`), `miia dev`, `miia build`, `miia start`, `miia check`. `create-miia` (`packages/create-miia`) is a one-line bin over `run(['new', ...argv])` exported by the CLI (`--version` alone passes through); it sits in the changesets `fixed` group with `@miiajs/*` and depends on `typescript`, because Yarn does not install the CLI's peer.
 
-**Runtime detection:** lockfile-based (`bun.lock` → Bun, `deno.lock` → Deno, `yarn.lock`/`package-lock.json`/`pnpm-lock.yaml` → Node), fallback to executable check, override with `--runtime` flag.
+**Errors:** library code throws `CliError(message, exitCode)`; only `action()` at the command boundary prints it and sets `process.exitCode`. The logger is a consola instance with a fixed level (the default one drops `log`, errors included, under `NODE_ENV=test`).
 
-**Dev mode:** runs two parallel processes — `tsc --watch` (type checking) + runtime dev server with file watching. Output from tsc piped through formatter for cleaner logs.
+**Runtime detection** (`resolveRuntime`): `--runtime`; then walking up from cwd, on each level `deno.json`/`deno.jsonc` before lockfiles (`bun.lock`/`bun.lockb` -> Bun, `deno.lock` -> Deno, npm/yarn/pnpm -> Node); then `bun`/`deno` in PATH; then Node. Executables come from `findExecutable`/`findLocalBin` (PATHEXT on win32), not `which`. The package manager comes from lockfiles or `npm_config_user_agent`.
 
-**Generate:** `miia g <schematic> <name>` creates individual artifacts with auto-registration in the parent `@Module`. Schematics: `module` (m), `controller` (c), `service` (s), `resource` (r), `middleware`, `guard`. The `resource` schematic creates a module + controller + service with CRUD endpoints. Flags: `--path`, `--flat`, `--dry-run`. Parent module discovery walks up from the target directory; also checks `src/app/app.module.ts` as fallback.
+**dev/start:** `dev` runs the runtime's watcher plus `tsc --noEmit --watch --pretty false`; no restart loop (the watchers wait for the next change), a dead `tsc` is a warning, the watcher's exit ends `dev` with its code. Signals go through `createSignalPolicy`: first -> `SIGTERM` to the children, a repeat within 1 s (the `bun run`/`npm run` duplicate) -> ignored, later -> `SIGKILL`; execa runs with `forceKillAfterDelay: false`; a signal exit is `128 + n`. `NODE_ENV` is set only when absent. Node `build` uses `tsconfig.build.json` when present, `start` adds `--enable-source-maps`.
 
-**New (scaffold wizard):** `miia new` runs an interactive wizard via `@clack/prompts`. Prompts: project name → runtime → package manager (pnpm/npm/yarn, skipped for Bun) → features (multiselect: Config, JWT Auth, Swagger, CORS, Serve Static) → database (single-select: Drizzle PG/MySQL/SQLite, Papr, Mongoose, None). Features that need env config auto-select Config. Scaffold generates pre-wired `app.module.ts`, `main.ts`, `.env`, and feature-specific files (auth providers, env schema, etc.). Flags: `--dry-run`, `--skip-install`.
+**Templates:** `packages/cli/templates/` ships in the package: `base/`, `runtimes/{bun,node,deno}/`, `addons/<id>/`, `generate/<schematic>/`. A template is `files/` + optional `files-bun/` / `files-node/` (Node and Deno share the `node` flavor) + optional `manifest.json` / `manifest-<flavor>.json` (`dependencies`, `devDependencies`, `scripts`; full `^X.Y.Z`; `@miiajs/*` as `workspace:*`, written as `^<CLI version>`). Dotfiles are stored as `_gitignore`, `_env.example`, `_biome.json` (npm drops dotfiles; a nested `biome.json` is a second Biome root). Placeholders: `{{name}}`, `{{run:dev}}`, `{{exec}}` (README); `__Name__` / `__name__` / `__file__` (schematics, file names included). `templates/package.json` (`miia-cli-templates`: private, no version, not packed) makes the folder a workspace so the IDE resolves the imports; `templates/tsconfig.json` lists the layers in `rootDirs`. That workspace also links optional peers such as `mysql2` into other packages, so an optional-peer import takes `@ts-ignore`, not `@ts-expect-error`.
+
+**Codemods:** every change goes through `ProjectTree` (in memory; `commit()` writes, `--dry-run` prints `summary()`). `codemod/source.ts` (`addImport`, `addToModuleArray`, `addSchemaKey`, `insertStatement`, `hasModuleEntry`) finds positions with the TypeScript compiler API and inserts text, keeping EOL, indent and comments; a shape it cannot handle returns `'unsupported'` and becomes a warning, never a guess. `typescript` is a peer (`^6.0.0`) loaded lazily by `loadTypeScript()`.
+
+**new / add:** `createProject` = base + runtime layers merged in memory, `.env` as a copy of `.env.example`, then add-ons in `resolveAddons` order. An add-on (`src/addons/`, registry in `src/addons/index.ts`) has `isInstalled(tree, layout)` and `apply(ctx)`; `miia add` = `openProject` (runtime from `--runtime` in `scripts.dev`, files via `detectLayout`) + `addToProject` (installed ones skipped, a second database refused) + install + format. Infrastructure modules are `{ global: true }`; `AuthModule` is global with `exports: [JwtAuth]`.
+
+**Generate:** the schematic table is `generate/schematics.ts`. A resource is always in its own folder, goes into the parent's `imports`, and its module exports its service; `--export` is for services only; guards and middleware are not registered. The parent module is the nearest `*.module.ts` walking up to `src/`, else `src/app/app.module.ts`.
+
+**Generated tests:** `bun:test` with only `describe`/`it`/`test`/`expect` and no hooks (`node:test` on Deno has none); `toNodeTestRunner` rewrites the import to `node:test` + the `expect` package for Node and Deno; each test creates its own `TestApp`. `template-versions.test.ts` checks every manifest against the peer ranges and required peers of the `@miiajs/*` packages and against the templates workspace. The repo's `bun test` skips `packages/cli/templates/**` (`bunfig.toml`, plus a second `--path-ignore-patterns` in the `test` script, since the flag replaces the bunfig list).
+
+**e2e:** `bun run cli:e2e [--only a,b] [--keep]` (`packages/cli/e2e/`): clean build, `bun pm pack` of every package, projects generated outside the repo with `@miiajs/*` pointed at the tarballs (plus `overrides`), install (Deno projects through npm), `check`/`test`/`build`, start with HTTP probes, `miia add` and `miia g` steps, on Bun, Node and Deno. Needs network; it is a release step in `RELEASING.md`.
 
 ### Logger
 
@@ -368,6 +379,7 @@ bun test                       # run all tests
 bun run typecheck              # type-check without emitting
 bun run format                 # format all files with Biome
 bun run format:check           # check formatting without writing
+bun run cli:e2e                # generate, install, test and start projects (network, a few minutes)
 ```
 
 Run example apps:
