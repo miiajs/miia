@@ -1,3 +1,5 @@
 export { ConfigService } from './config.service.js'
 export { ConfigModule } from './config.module.js'
 export type { ConfigModuleOptions } from './config.module.js'
+export { defineConfig } from './define-config.js'
+export type { ConfigToken } from './define-config.js'

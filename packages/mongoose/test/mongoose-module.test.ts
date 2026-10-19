@@ -11,6 +11,15 @@ function createApp(...modules: Parameters<Miia['register']>): Miia {
   return new Miia({ logger: false }).register(...modules)
 }
 
+async function initError(app: Miia): Promise<Error> {
+  try {
+    await app.init()
+  } catch (err) {
+    return err as Error
+  }
+  throw new Error('expected init() to fail')
+}
+
 const uriOf = (service: MongooseService) => (service as any).options.uri
 
 const userSchema = () => new Schema({ name: String })
@@ -217,19 +226,80 @@ describe('MongooseModule.register', () => {
     )
   })
 
-  it('names the feature modules and their hosts when two of them provide one model', () => {
-    const User = defineModel('User', userSchema())
+  it('lets two modules that register the same model share one instance', async () => {
+    const onInit = spyOn(MongooseService.prototype, 'onInit').mockImplementation(async () => {})
+    const onDestroy = spyOn(MongooseService.prototype, 'onDestroy').mockImplementation(async () => {})
+    try {
+      const User = defineModel('User', userSchema())
 
-    @Module({ imports: [MongooseModule.register([User])] })
-    class UsersModule {}
+      @Injectable()
+      class UsersService {
+        users = inject(User)
+      }
 
-    @Module({ imports: [MongooseModule.register([User])] })
-    class OrdersModule {}
+      @Injectable()
+      class OrdersService {
+        users = inject(User)
+      }
 
-    expect(() => createApp(UsersModule, OrdersModule).get(User)).toThrow(
-      'MongooseModel(User) is provided by both MongooseModule.register([User]) in UsersModule and ' +
-        'MongooseModule.register([User]) in OrdersModule',
-    )
+      @Module({ imports: [MongooseModule, MongooseModule.register([User])], providers: [UsersService] })
+      class UsersModule {}
+
+      @Module({ imports: [MongooseModule, MongooseModule.register([User])], providers: [OrdersService] })
+      class OrdersModule {}
+
+      @Module({ imports: [MongooseModule.configure({ uri: 'mongodb://localhost/test' }), UsersModule, OrdersModule] })
+      class Root {}
+
+      const app = createApp(Root)
+      await app.init()
+      const users = app.get(UsersService).users
+      expect(typeof users).toBe('function')
+      expect(app.get(OrdersService).users).toBe(users)
+      expect(app.get(User)).toBe(users)
+      await app.destroy()
+    } finally {
+      onInit.mockRestore()
+      onDestroy.mockRestore()
+    }
+  })
+
+  it('checks a shared model from every module that registers it, whatever the order of imports', async () => {
+    const onInit = spyOn(MongooseService.prototype, 'onInit').mockImplementation(async () => {})
+    const onDestroy = spyOn(MongooseService.prototype, 'onDestroy').mockImplementation(async () => {})
+    try {
+      const User = defineModel('User', userSchema())
+
+      // Only UsersModule imports MongooseModule: the register() module of ReportsModule cannot reach the connection.
+      @Module({
+        imports: [MongooseModule.configure({ uri: 'mongodb://localhost/test' }), MongooseModule.register([User])],
+      })
+      class UsersModule {}
+
+      @Module({ imports: [MongooseModule.register([User])] })
+      class ReportsModule {}
+
+      @Module({ imports: [UsersModule, ReportsModule] })
+      class RootAB {}
+
+      @Module({ imports: [ReportsModule, UsersModule] })
+      class RootBA {}
+
+      const ab = await initError(createApp(RootAB))
+      const ba = await initError(createApp(RootBA))
+      expect(ab.message).toBe(
+        '[Miia] 1 module boundary violation:\n\n' +
+          'MongooseModel(User) (MongooseModule.register([User]) in ReportsModule) injects ' +
+          'MongooseService(default), MongooseRegistry(default) (MongooseModule in UsersModule), which is not global:\n' +
+          '  - make it global: MongooseModule.configure(options, { global: true })\n' +
+          '  - or add MongooseModule to ReportsModule `imports`\n\n' +
+          'Docs: /docs/core-concepts/modules#boundaries',
+      )
+      expect(ba.message).toBe(ab.message)
+    } finally {
+      onInit.mockRestore()
+      onDestroy.mockRestore()
+    }
   })
 
   it('populates the registry on resolve and returns a lazy Model proxy', () => {
@@ -338,15 +408,24 @@ describe('MongooseModule.register', () => {
     expect(anaReg.has(User)).toBe(false)
   })
 
-  it('warns when the same token is registered for two different connections', () => {
-    const User = defineModel('User', userSchema())
+  it('rejects the same token registered for two different connections at startup, without a warning', async () => {
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {})
     try {
-      MongooseModule.register([User])
-      MongooseModule.register([User], { name: 'analytics' })
-      expect(warnSpy).toHaveBeenCalled()
-      const args = warnSpy.mock.calls[warnSpy.mock.calls.length - 1] as string[]
-      expect(args[0]).toContain('registered in connections')
+      const User = defineModel('User', userSchema())
+
+      @Module({ imports: [MongooseModule.register([User])] })
+      class UsersModule {}
+
+      @Module({ imports: [MongooseModule.register([User], { name: 'analytics' })] })
+      class ReportsModule {}
+
+      const error = await initError(createApp(UsersModule, ReportsModule))
+      expect(error.message).toBe(
+        "[Miia] MongooseModel(User) is shared by MongooseModule.register([User]) in UsersModule (connection 'default') " +
+          "and MongooseModule.register([User], { name: 'analytics' }) in ReportsModule (connection 'analytics') - " +
+          'a shared provider must be declared the same way in every module; use a separate token for each variant',
+      )
+      expect(warnSpy).not.toHaveBeenCalled()
     } finally {
       warnSpy.mockRestore()
     }

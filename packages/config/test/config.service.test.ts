@@ -67,6 +67,14 @@ describe('ConfigService', () => {
     })
   })
 
+  describe('private state', () => {
+    it('keeps the values in a private field', () => {
+      const service = createService<AppConfig>({ PORT: '3000', HOST: 'localhost' })
+      expect(Object.keys(service)).not.toContain('config')
+      expect((service as any).config).toBeUndefined()
+    })
+  })
+
   describe('without ConfigModule.configure()', () => {
     it('falls back to an empty object', () => {
       const service = createService()

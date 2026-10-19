@@ -1,28 +1,10 @@
 import type { ConfiguredModule, Constructor, FactoryProvider, OptionsOrFactory } from '@miiajs/core'
-import { createLazyProxy, resolveOptions } from '@miiajs/core'
+import { createLazyProxy, provider, resolveOptions } from '@miiajs/core'
 import type mongoose from 'mongoose'
 import type { MongooseModuleOptions } from './types.js'
 import type { ModelToken } from './define-model.js'
 import { MongooseService } from './mongoose.service.js'
 import { configureCall, getInternalServiceToken, getRegistryToken, mongooseConnection } from './tokens.js'
-
-// ─── Cross-connection collision warning ──────────────────────────────────────
-
-const seenTokens = new WeakMap<ModelToken<any>, string>()
-
-function checkCrossConnectionCollision(models: ModelToken<any>[], conn: string): void {
-  for (const token of models) {
-    const previous = seenTokens.get(token)
-    if (previous !== undefined && previous !== conn) {
-      const fmt = (n: string) => (n === '' ? 'default' : n)
-      console.warn(
-        `[Miia/Mongoose] Token ${token.name} registered in connections "${fmt(previous)}" and "${fmt(conn)}". ` +
-          `Use a separate defineModel(...) per connection.`,
-      )
-    }
-    seenTokens.set(token, conn)
-  }
-}
 
 // ─── Friendly error helper ───────────────────────────────────────────────────
 
@@ -78,9 +60,7 @@ export class MongooseModule {
     const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
     const registryToken = getRegistryToken(name)
-    const conn = name ?? ''
-
-    checkCrossConnectionCollision(models, conn)
+    const shared = `connection '${name ?? 'default'}'`
 
     const FeatureModule = class MongooseFeatureModule {} as Constructor
     // How errors and the start-up log name this module
@@ -89,22 +69,25 @@ export class MongooseModule {
       value: `MongooseModule.register([${listed}]${name ? `, { name: '${name}' }` : ''})`,
     })
 
-    const providers: FactoryProvider[] = models.map((token) => ({
-      token,
-      factory: (resolve) => {
-        let service: MongooseService
-        let registry: Map<ModelToken<any>, ModelToken<any>>
-        try {
-          service = resolve(serviceToken)
-          registry = resolve(registryToken)
-        } catch {
-          throw configureMissingError(name, `inject(${token.name}) failed:`)
-        }
-        registry.set(token, token)
-        // Constructable for the injected model's `new this.users({...})`; `doc instanceof this.users` keeps working
-        return createLazyProxy<mongoose.Model<any>>(() => service.getModel(token), { constructable: true })
-      },
-    }))
+    const providers: FactoryProvider[] = models.map((token) =>
+      provider(
+        token,
+        (resolve) => {
+          let service: MongooseService
+          let registry: Map<ModelToken<any>, ModelToken<any>>
+          try {
+            service = resolve(serviceToken)
+            registry = resolve(registryToken)
+          } catch {
+            throw configureMissingError(name, `inject(${token.name}) failed:`)
+          }
+          registry.set(token, token)
+          // Constructable for the injected model's `new this.users({...})`; `doc instanceof this.users` keeps working
+          return createLazyProxy<mongoose.Model<any>>(() => service.getModel(token), { constructable: true })
+        },
+        { shared },
+      ),
+    )
 
     return {
       module: FeatureModule,

@@ -8,6 +8,7 @@ import { type NewUser, publicUserColumns, users } from './user.table.js'
 import { count, desc, eq } from 'drizzle-orm'
 import type { ListUsersQuery, UpdateUserInput } from './schemas/index.js'
 import { ConfigService } from '@miiajs/config'
+import { usersConfig } from './users.config.js'
 
 const MAX_AVATAR_BYTES = 2 * 1024 * 1024
 const AVATAR_EXTENSIONS: Record<string, string> = {
@@ -16,25 +17,24 @@ const AVATAR_EXTENSIONS: Record<string, string> = {
   'image/webp': '.webp',
 }
 
-const SEED_ADMIN_EMAIL = 'admin@miiajs.com'
-const SEED_ADMIN_PASSWORD = 'admin'
-
 @Injectable()
 export class UsersService {
   private db = inject(db)
   private logger = new Logger('UsersService')
   private configService = inject(ConfigService)
+  private config = inject(usersConfig)
 
   async onReady(): Promise<void> {
     if (this.configService.get('NODE_ENV') === 'production') return
-    const existing = await this.findByEmail(SEED_ADMIN_EMAIL)
+    const { SEED_ADMIN_EMAIL: email, SEED_ADMIN_PASSWORD: password } = this.config
+    const existing = await this.findByEmail(email)
     if (existing) return
     await this.create({
-      email: SEED_ADMIN_EMAIL,
+      email,
       role: 'admin',
-      passwordHash: await hash(SEED_ADMIN_PASSWORD),
+      passwordHash: await hash(password),
     })
-    this.logger.log(`Seeded admin user (${SEED_ADMIN_EMAIL} / ${SEED_ADMIN_PASSWORD})`)
+    this.logger.log(`Seeded admin user (${email} / ${password})`)
   }
 
   public async findByEmail(email: string) {

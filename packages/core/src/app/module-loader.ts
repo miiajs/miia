@@ -1,5 +1,6 @@
 import { type Container, REQUEST_CONTEXT, requestContextReplaced } from '../di-container.js'
 import { formatToken } from '../di-token-format.js'
+import { SHARED_PROVIDER } from '../di-token.js'
 import { Logger } from '../logger.js'
 import { getMeta, setMeta, MODULE, INJECTABLE, PREFIX, RESOLVED_PREFIX } from '../decorators/index.js'
 import type { InjectableMeta } from '../decorators/index.js'
@@ -52,6 +53,10 @@ function isConfiguredModule(value: unknown): value is ConfiguredModule {
   return typeof value === 'object' && value !== null && typeof (value as ConfiguredModule).module === 'function'
 }
 
+function sharedKeyOf(provider: ProviderDefinition): string | undefined {
+  return typeof provider === 'function' ? undefined : (provider as { [SHARED_PROVIDER]?: string })[SHARED_PROVIDER]
+}
+
 function describeValue(value: unknown): string {
   if (value === null || value === undefined) return String(value)
   return typeof value === 'object' ? 'an object' : `a ${typeof value}`
@@ -66,6 +71,8 @@ export class ModuleLoader {
   private nodes = new Map<Constructor, Map<string, ModuleNode>>()
   private processed = new Set<ModuleNode>()
   private owners = new Map<AnyToken, ModuleNode>()
+  /** The `shared` key of the first declaration of a token. */
+  private sharedKeys = new Map<AnyToken, string>()
   /** Tokens first registered from the `@Module` providers of a class: its other names own them too. */
   private staticTokens = new Set<AnyToken>()
   /** By module class: its controllers are mounted once, whatever the number of names. */
@@ -369,10 +376,24 @@ export class ModuleLoader {
   /** `isStatic`: from `@Module({ providers })` of the class, not from a configure() result. */
   private registerProvider(provider: ProviderDefinition, node: ModuleNode, isStatic = false): void {
     const token = typeof provider === 'function' ? provider : (provider as FactoryProvider).token
+    const key = sharedKeyOf(provider)
     const owner = this.owners.get(token)
     if (owner) {
       // Another name of the class: one instance, owned by every name.
       if (isStatic && owner !== node && owner.module === node.module && this.staticTokens.has(token)) {
+        node.owns.add(token)
+        this.container.addOwner(token, node)
+        return
+      }
+      const firstKey = this.sharedKeys.get(token)
+      if (owner !== node && key !== undefined && firstKey !== undefined) {
+        if (key !== firstKey) {
+          throw new Error(
+            `[Miia] ${formatToken(token)} is shared by ${owner.where} (${firstKey}) and ${node.where} (${key}) - ` +
+              'a shared provider must be declared the same way in every module; use a separate token for each variant',
+          )
+        }
+        // Another module declaring a shared provider: one instance, owned by both.
         node.owns.add(token)
         this.container.addOwner(token, node)
         return
@@ -388,8 +409,9 @@ export class ModuleLoader {
     // A built-in token declared by a module keeps the built-in.
     if (this.container.has(token)) return
 
-    // An overridden provider still has its owner, so a second module declaring it is a duplicate.
+    // An overridden provider still has its owner and key: a second module declaring it is a duplicate, or joins it.
     this.owners.set(token, node)
+    if (key !== undefined) this.sharedKeys.set(token, key)
     node.owns.add(token)
     if (isStatic) this.staticTokens.add(token)
     if (this.applyOverride(token, node)) return

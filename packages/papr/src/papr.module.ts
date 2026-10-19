@@ -1,32 +1,11 @@
 import type { ConfiguredModule, Constructor, FactoryProvider, OptionsOrFactory } from '@miiajs/core'
-import { createLazyProxy, resolveOptions } from '@miiajs/core'
+import { createLazyProxy, provider, resolveOptions } from '@miiajs/core'
 import type { Db } from 'mongodb'
 import type { Model } from 'papr'
 import type { PaprModuleOptions } from './types.js'
 import type { ModelToken } from './define-model.js'
 import { PaprService } from './papr.service.js'
 import { configureCall, getInternalServiceToken, getRegistryToken, paprDb } from './tokens.js'
-
-// ─── Cross-connection collision warning ──────────────────────────────────────
-// Module-level WeakMap. If the same ModelToken is registered under two different
-// connection names, log a warning - this is almost certainly a bug (the same
-// token can only resolve to one provider at a time per container).
-
-const seenTokens = new WeakMap<ModelToken<any, any>, string>()
-
-function checkCrossConnectionCollision(models: ModelToken<any, any>[], conn: string): void {
-  for (const token of models) {
-    const previous = seenTokens.get(token)
-    if (previous !== undefined && previous !== conn) {
-      const fmt = (n: string) => (n === '' ? 'default' : n)
-      console.warn(
-        `[Miia/Papr] Token ${token.name} registered in connections "${fmt(previous)}" and "${fmt(conn)}". ` +
-          `Use a separate defineModel(...) per connection.`,
-      )
-    }
-    seenTokens.set(token, conn)
-  }
-}
 
 // ─── Friendly error helpers ──────────────────────────────────────────────────
 
@@ -82,9 +61,7 @@ export class PaprModule {
     const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
     const registryToken = getRegistryToken(name)
-    const conn = name ?? ''
-
-    checkCrossConnectionCollision(models, conn)
+    const shared = `connection '${name ?? 'default'}'`
 
     const FeatureModule = class PaprFeatureModule {} as Constructor
     // How errors and the start-up log name this module
@@ -93,21 +70,24 @@ export class PaprModule {
       value: `PaprModule.register([${listed}]${name ? `, { name: '${name}' }` : ''})`,
     })
 
-    const providers: FactoryProvider[] = models.map((token) => ({
-      token,
-      factory: (resolve) => {
-        let service: PaprService
-        let registry: Map<ModelToken<any, any>, ModelToken<any, any>>
-        try {
-          service = resolve(serviceToken)
-          registry = resolve(registryToken)
-        } catch {
-          throw configureMissingError(name, `inject(${token.name}) failed:`)
-        }
-        registry.set(token, token)
-        return createLazyProxy<Model<any, any>>(() => service.getModel(token))
-      },
-    }))
+    const providers: FactoryProvider[] = models.map((token) =>
+      provider(
+        token,
+        (resolve) => {
+          let service: PaprService
+          let registry: Map<ModelToken<any, any>, ModelToken<any, any>>
+          try {
+            service = resolve(serviceToken)
+            registry = resolve(registryToken)
+          } catch {
+            throw configureMissingError(name, `inject(${token.name}) failed:`)
+          }
+          registry.set(token, token)
+          return createLazyProxy<Model<any, any>>(() => service.getModel(token))
+        },
+        { shared },
+      ),
+    )
 
     return {
       module: FeatureModule,

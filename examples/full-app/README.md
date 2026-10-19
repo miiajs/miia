@@ -51,12 +51,12 @@ Open:
 
 On first boot in dev mode, `UsersService.onReady()` seeds an admin user:
 
-- **Email:** `admin@miiajs.com`
-- **Password:** `admin`
+- **Email:** `admin@miiajs.com` (set `SEED_ADMIN_EMAIL` to change it)
+- **Password:** `admin` (set `SEED_ADMIN_PASSWORD` to change it)
 
 Use these to authenticate in Swagger UI (`Authorize` button → `bearer <token>` from `POST /api/auth/login`).
 
-The seed is a no-op when `NODE_ENV=production`.
+The seed is a no-op when `NODE_ENV=production`. The two variables are not in the root `env.schema.ts`: they belong to `usersConfig` (`src/users/users.config.ts`), a feature config that `UsersModule` registers with `ConfigModule.register()`.
 
 ## Environment
 
@@ -69,6 +69,8 @@ The seed is a no-op when `NODE_ENV=production`.
 | `JWT_SECRET`   | yes      | -                        | HMAC secret for JWT sign/verify              |
 | `DATABASE_URL` | yes      | -                        | Postgres connection string                   |
 | `CORS_ORIGIN`  | no       | `*`                      | CORS origin (string, comma-list, or `*`)     |
+| `SEED_ADMIN_EMAIL` | no   | `admin@miiajs.com`       | Admin seed email, a feature config of `UsersModule` |
+| `SEED_ADMIN_PASSWORD` | no | `admin`                 | Admin seed password, a feature config of `UsersModule` |
 
 ## Endpoints
 

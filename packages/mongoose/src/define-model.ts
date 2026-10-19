@@ -11,7 +11,8 @@ export type ModelToken<T> = Token<mongoose.Model<T>> & {
 // defineModel не мемоізується: identity = export site (один раз на модель).
 // Повторний defineModel('User', schema) свідомо створює окремий токен -
 // для multi-connection use-case. Колізія імен моделей ловиться runtime у
-// MongooseService.onInit, cross-registry колізія - через console.warn у register().
+// MongooseService.onInit, а той самий токен на двох з'єднаннях - помилка спільного
+// провайдера register() на старті застосунку.
 export function defineModel<T>(name: string, schema: mongoose.Schema<T>): ModelToken<T> {
   const token = createToken<mongoose.Model<T>>(`MongooseModel(${name})`, {
     hint: `MongooseModule.register([${name}])`,
