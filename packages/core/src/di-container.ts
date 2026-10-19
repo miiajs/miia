@@ -20,6 +20,8 @@ interface ContainerEntry {
   deps?: readonly AnyToken[]
   /** The module that declares the provider; null for built-ins, `provide()` and guards no module declares. */
   owner: ModuleNode | null
+  /** Every module that declares the provider, `owner` first: what it injects is checked from each; null without one. */
+  owners: ModuleNode[] | null
   /** A guard no module declares, registered for the routes or app.useGuard(). */
   guard: boolean
   /** What such a guard injected while it was constructed, checked from every module that uses it. */
@@ -49,6 +51,15 @@ function hintOf(token: AnyToken): string | undefined {
 
 /** The context of the current request: inject() it in a request-scoped provider, or resolve() it in its factory. */
 export const REQUEST_CONTEXT: Token<RequestContext> = createToken<RequestContext>('RequestContext')
+
+/** provide() / override() of REQUEST_CONTEXT: every request seeds its own. @internal */
+export function requestContextReplaced(call: 'provide' | 'override'): Error {
+  return new Error(
+    `[Miia] ${call}(${formatToken(REQUEST_CONTEXT)}): REQUEST_CONTEXT is built in and seeded by every request - ` +
+      'it cannot be provided or overridden; test a request-scoped provider through a route with TestApp.request(), ' +
+      'or override that provider itself',
+  )
+}
 
 /** The scope of a request whose pipeline has finished. @internal */
 export const CLOSED = Symbol('closed')
@@ -88,6 +99,8 @@ export class Container {
   /** Every constructed singleton: a request does not own one its factory returns. */
   private singletons = new WeakSet<object>()
   private requestLogger = new Logger('RequestScope')
+  /** The async onDestroy() chains of finished requests; destroyAll() waits for them. */
+  private pendingRequestDestroys = new Set<Promise<void>>()
   private stack: Frame[] = []
   /** Violations of the start-up window; null outside it, where a violation throws at once. */
   private violations: BoundaryViolation[] | null = null
@@ -107,7 +120,18 @@ export class Container {
     deps?: readonly AnyToken[],
     owner: ModuleNode | null = null,
   ): void {
-    this.registry.set(token, { factory, scope, deps, owner, guard: false, injected: null })
+    const owners = owner ? [owner] : null
+    this.registry.set(token, { factory, scope, deps, owner, owners, guard: false, injected: null })
+  }
+
+  /**
+   * One more module that declares `token`, e.g. another name of a module class: it owns the same entry, and what
+   * the entry injects is checked from it too.
+   * @internal
+   */
+  addOwner(token: AnyToken, node: ModuleNode): void {
+    const owners = this.registry.get(token)?.owners
+    if (owners && !owners.includes(node)) owners.push(node)
   }
 
   registerClass<T>(cls: Constructor<T>, scope: Scope = 'singleton'): void {
@@ -258,7 +282,7 @@ export class Container {
   /**
    * The end of a request: onDestroy() on the instances it owns, newest first, in a microtask after the caller has
    * returned. Not the context itself, a singleton a request factory returned, or a lazy proxy. Nothing to destroy,
-   * nothing scheduled.
+   * nothing scheduled. destroyAll() waits for the hooks still running.
    * @internal
    */
   destroyRequestScope(scope: Map<AnyToken, unknown>, ctx: object): void {
@@ -352,11 +376,13 @@ export class Container {
   }
 
   /**
-   * Shutdown: onShutdown() on every singleton, then onDestroy() on every singleton, both in reverse
-   * dependency order. A hook that throws does not stop the rest - its error is returned, not thrown.
+   * Shutdown: first the onDestroy() hooks of requests that have already finished, then onShutdown() on every
+   * singleton, then onDestroy() on every singleton, both in reverse dependency order. A hook that throws does
+   * not stop the rest - its error is returned, not thrown.
    * Without constructAll() (only app.get(), or a failed init()) the order comes from what was built so far.
    */
   async destroyAll(): Promise<ShutdownFailure[]> {
+    await this.settleRequestScopes()
     const order = (this.hookOrder ?? this.lifecycleOrder(false)).toReversed()
     const failures: ShutdownFailure[] = []
     for (const hook of ['onShutdown', 'onDestroy'] as const) {
@@ -376,6 +402,11 @@ export class Container {
     return failures
   }
 
+  /** Until no request onDestroy() chain is pending: a chain that settles may have started the next one. */
+  private async settleRequestScopes(): Promise<void> {
+    while (this.pendingRequestDestroys.size > 0) await Promise.all([...this.pendingRequestDestroys])
+  }
+
   /** Hooks from `targets[from]` down to the oldest; after a hook that returns a thenable the rest wait for it. */
   private runRequestDestroy(targets: HookTarget[], from: number): void {
     for (let i = from; i >= 0; i--) {
@@ -383,7 +414,12 @@ export class Container {
       try {
         const result = (target.instance as { onDestroy: () => unknown }).onDestroy()
         if (isThenable(result)) {
-          this.awaitRequestDestroy(result, targets, i).catch(() => {})
+          const chain: Promise<void> = this.awaitRequestDestroy(result, targets, i)
+            .catch(() => {})
+            .then(() => {
+              this.pendingRequestDestroys.delete(chain)
+            })
+          this.pendingRequestDestroys.add(chain)
           return
         }
       } catch (error) {
@@ -524,12 +560,23 @@ export class Container {
     return resolver
   }
 
-  /** `token`, declared by `owner`, must be visible from the module of `frame`, or the root for an entry without one. */
+  /**
+   * `token`, declared by `owner`, must be visible from every module that declares `frame`, or the root for an
+   * entry without one: the result does not depend on which of them the loader reached first.
+   */
   private checkVisible(frame: Frame, token: AnyToken, owner: ModuleNode, via: 'inject' | 'deps'): void {
-    const from = frame.entry.owner
-    if (this.sees(from ?? 'root', token)) return
-    const provided = this.provided.has(frame.token)
-    this.violate({ requester: frame.token, from, provided, token, owner, via, controller: null })
+    const owners = frame.entry.owners
+    if (owners === null) {
+      if (this.sees('root', token)) return
+      const provided = this.provided.has(frame.token)
+      this.violate({ requester: frame.token, from: null, provided, token, owner, via, controller: null })
+      return
+    }
+    for (let i = 0; i < owners.length; i++) {
+      const from = owners[i]!
+      if (this.sees(from, token)) continue
+      this.violate({ requester: frame.token, from, provided: false, token, owner, via, controller: null })
+    }
   }
 
   /** A configured module also sees what its host sees. */

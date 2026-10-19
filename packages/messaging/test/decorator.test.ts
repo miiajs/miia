@@ -75,4 +75,19 @@ describe('@On decorator', () => {
     expect(items!.map((i) => i.topic).sort()).toEqual(['created', 'updated'])
     expect(items!.every((i) => i.handlerName === 'handleAny')).toBe(true)
   })
+
+  it('a subclass @On does not change the parent list', () => {
+    class Parent {
+      @On('a')
+      onA() {}
+    }
+
+    class Child extends Parent {
+      @On('b')
+      onB() {}
+    }
+
+    expect(getMeta<OnMeta[]>(Parent, ON)!.map((i) => i.topic)).toEqual(['a'])
+    expect(getMeta<OnMeta[]>(Child, ON)!.map((i) => i.topic)).toEqual(['a', 'b'])
+  })
 })

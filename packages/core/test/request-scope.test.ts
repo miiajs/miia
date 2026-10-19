@@ -768,3 +768,173 @@ describe('the end of a request', () => {
     expect(typeof (captured as unknown as { _scope: unknown })._scope).toBe('symbol')
   })
 })
+
+describe('app.destroy() after requests', () => {
+  function delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  function singletonHooks(events: string[]) {
+    @Injectable()
+    class Pool {
+      onShutdown() {
+        events.push('Pool.onShutdown')
+      }
+
+      onDestroy() {
+        events.push('Pool.onDestroy')
+      }
+    }
+    return Pool
+  }
+
+  it('waits for an async onDestroy() of a finished request before the singleton hooks', async () => {
+    const events: string[] = []
+    const Pool = singletonHooks(events)
+
+    @Injectable({ scope: 'request' })
+    class Session {
+      pool = inject(Pool)
+
+      async onDestroy() {
+        await delay(20)
+        events.push('Session.onDestroy')
+      }
+    }
+
+    @Controller('/')
+    class SessionController {
+      @Get('session')
+      read(ctx: RequestContext) {
+        ctx.resolve(Session)
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [SessionController], providers: [Pool, Session] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    await app.init()
+    expect((await app.fetch(new Request('http://localhost/session'))).status).toBe(200)
+    await app.destroy()
+    events.push('destroy() returned')
+    expect(events).toEqual(['Session.onDestroy', 'Pool.onShutdown', 'Pool.onDestroy', 'destroy() returned'])
+  })
+
+  it('waits for a chain of async onDestroy() hooks, newest first', async () => {
+    const events: string[] = []
+    const Pool = singletonHooks(events)
+
+    @Injectable({ scope: 'request' })
+    class Transaction {
+      async onDestroy() {
+        await delay(10)
+        events.push('Transaction.onDestroy')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class UnitOfWork {
+      tx = inject(Transaction)
+
+      async onDestroy() {
+        await delay(10)
+        events.push('UnitOfWork.onDestroy')
+      }
+    }
+
+    @Controller('/')
+    class WorkController {
+      @Get('work')
+      read(ctx: RequestContext) {
+        ctx.resolve(UnitOfWork)
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [WorkController], providers: [Pool, Transaction, UnitOfWork] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    expect((await get(app, '/work')).status).toBe(200)
+    await app.destroy()
+    expect(events).toEqual(['UnitOfWork.onDestroy', 'Transaction.onDestroy', 'Pool.onShutdown', 'Pool.onDestroy'])
+  })
+
+  it('regression: a sync onDestroy() has run when destroy() follows the request at once', async () => {
+    const events: string[] = []
+    const Pool = singletonHooks(events)
+
+    @Injectable({ scope: 'request' })
+    class Session {
+      onDestroy() {
+        events.push('Session.onDestroy')
+      }
+    }
+
+    @Controller('/')
+    class SessionController {
+      @Get('session')
+      read(ctx: RequestContext) {
+        ctx.resolve(Session)
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [SessionController], providers: [Pool, Session] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    await app.init()
+    expect((await app.fetch(new Request('http://localhost/session'))).status).toBe(200)
+    await app.destroy()
+    expect(events).toEqual(['Session.onDestroy', 'Pool.onShutdown', 'Pool.onDestroy'])
+  })
+
+  it('regression: logs a request hook that rejects under RequestScope, destroy() resolves', async () => {
+    const events: string[] = []
+    const logged: [string, string | undefined][] = []
+    const Pool = singletonHooks(events)
+
+    @Injectable({ scope: 'request' })
+    class First {
+      onDestroy() {
+        events.push('First.onDestroy')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class Rejects {
+      async onDestroy() {
+        throw new Error('cannot close')
+      }
+    }
+
+    @Controller('/')
+    class RejectsController {
+      @Get('rejects')
+      read(ctx: RequestContext) {
+        ctx.resolve(First)
+        ctx.resolve(Rejects)
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [RejectsController], providers: [Pool, First, Rejects] })
+    class AppModule {}
+
+    const logger = {
+      log() {},
+      error(message: string, _trace?: string, context?: string) {
+        logged.push([message, context])
+      },
+      warn() {},
+    }
+    const app = new Miia({ logger }).register(AppModule)
+    expect((await get(app, '/rejects')).status).toBe(200)
+    await app.destroy()
+    expect(events).toEqual(['First.onDestroy', 'Pool.onShutdown', 'Pool.onDestroy'])
+    expect(logged).toEqual([['Rejects.onDestroy() failed at the end of a request', 'RequestScope']])
+  })
+})

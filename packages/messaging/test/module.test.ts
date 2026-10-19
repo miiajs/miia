@@ -84,6 +84,55 @@ describe('MessagingModule.configure', () => {
     expect(app.resolve(H).received).toEqual([{ n: 1 }])
   })
 
+  it('calls the options factory once per bus and gives the bus the transport it built', async () => {
+    const built: InMemoryTransport[] = []
+    const factory = () => {
+      const transport = inMemoryTransport()
+      built.push(transport)
+      return { transport }
+    }
+    let namedCalls = 0
+
+    @Module({
+      imports: [
+        MessagingModule.configure(factory),
+        MessagingModule.configure(
+          () => {
+            namedCalls++
+            return { transport: inMemoryTransport() }
+          },
+          { name: 'kafka' },
+        ),
+      ],
+    })
+    class AppModule {}
+
+    const app = await TestApp.create(AppModule).compile()
+    cleanup.push(() => app.close())
+
+    expect(built).toHaveLength(1)
+    expect(namedCalls).toBe(1)
+    expect(app.resolve(transportToken())).toBe(built[0]!)
+
+    const publish = spyOn(built[0]!, 'publish')
+    await app.resolve(MessageBus).publish('t', {})
+    expect(publish).toHaveBeenCalledTimes(1)
+  })
+
+  it('regression: two apps compiled from one configure() factory get a transport each', async () => {
+    const configured = MessagingModule.configure(() => ({ transport: inMemoryTransport() }))
+
+    @Module({ imports: [configured] })
+    class AppModule {}
+
+    const first = await TestApp.create(AppModule).compile()
+    cleanup.push(() => first.close())
+    const second = await TestApp.create(AppModule).compile()
+    cleanup.push(() => second.close())
+
+    expect(first.resolve(transportToken())).not.toBe(second.resolve(transportToken()))
+  })
+
   it('MessageBus is a singleton - same instance across resolves', async () => {
     @Module({ imports: [MessagingModule.configure({ transport: inMemoryTransport() })] })
     class AppModule {}

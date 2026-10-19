@@ -2,7 +2,7 @@ import type { ConfiguredModule, OptionsOrFactory } from '@miiajs/core'
 import { provider, resolveOptions } from '@miiajs/core'
 import { MessageBus } from './message-bus.js'
 import { type IdempotencyStore } from './idempotency.js'
-import { busToken, idempotencyStoreToken, transportToken } from './tokens.js'
+import { busToken, idempotencyStoreToken, optionsToken, transportToken } from './tokens.js'
 import { type DispatchMode, type InitialPosition, type MessageTransport } from './types.js'
 
 /**
@@ -97,17 +97,15 @@ export class MessagingModule {
       global: options?.global,
       exports: [busToken(name)],
       providers: [
-        provider(transportToken(name), (resolve) => resolveOptions(optionsOrFactory, { resolve }).transport),
+        provider(optionsToken(name), (resolve) => resolveOptions(optionsOrFactory, { resolve })),
+        provider(transportToken(name), (resolve) => resolve(optionsToken(name)).transport),
         // Always registered so MessageBus's optional read resolves cleanly.
         // Value is `null` when the user did not configure a store.
-        provider(
-          idempotencyStoreToken(name),
-          (resolve) => resolveOptions(optionsOrFactory, { resolve }).idempotency ?? null,
-        ),
+        provider(idempotencyStoreToken(name), (resolve) => resolve(optionsToken(name)).idempotency ?? null),
         provider(busToken(name), (resolve) => {
           const transport = resolve(transportToken(name))
           const store = resolve(idempotencyStoreToken(name))
-          const opts = resolveOptions(optionsOrFactory, { resolve })
+          const opts = resolve(optionsToken(name))
           return new MessageBus(transport, store, name ?? null, {
             dispatch: opts.dispatch ?? null,
             appName: opts.appName ?? null,

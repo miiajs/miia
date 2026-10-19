@@ -122,7 +122,7 @@ export class MessageBus {
     }
 
     // Filter to handlers targeting THIS bus.
-    const handlers = allHandlers.filter((h) => (h.metadata.bus ?? null) === this.busName)
+    const handlers = allHandlers.filter((h) => (h.metadata.bus || null) === this.busName)
 
     const transportName = (this.transport as object).constructor.name
     const dispatchDefaults = this.options.dispatch ?? null

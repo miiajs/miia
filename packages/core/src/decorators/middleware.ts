@@ -41,11 +41,14 @@ export const UseGuard = createDecorator<[...guards: Guard[]]>((context, ...guard
 export const SkipGuard = createDecorator<[first: Guard | Function, ...rest: (Guard | Function)[]]>(
   (context, ...guards) => {
     const name = context.kind === 'class' ? '*' : String(context.name)
-    const map: Map<string, Set<any>> = (context.metadata![SKIP_GUARDS] as Map<string, Set<any>>) ?? new Map()
-    const existing = map.get(name) ?? new Set()
-    for (const g of guards) existing.add(g)
-    map.set(name, existing)
-    context.metadata![SKIP_GUARDS] = map
+    const meta = context.metadata!
+    const current = meta[SKIP_GUARDS] as Map<string, Set<any>> | undefined
+    // Inherited from a parent class: copy the Map and the Set, never write into them.
+    const map = current && Object.hasOwn(meta, SKIP_GUARDS) ? current : new Map(current ?? [])
+    const set = new Set(map.get(name))
+    for (const g of guards) set.add(g)
+    map.set(name, set)
+    meta[SKIP_GUARDS] = map
   },
 )
 

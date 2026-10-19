@@ -41,21 +41,28 @@ export function setMeta<T>(meta: Meta, key: symbol, value: T): void {
   meta[key] = value
 }
 
+// A subclass's metadata inherits its parent's through the prototype chain, so an
+// inherited array or Map is copied before the first write instead of mutated.
+function ownMap<V>(meta: Meta, key: symbol): Map<string, V> {
+  const map = meta[key] as Map<string, V> | undefined
+  if (map && Object.hasOwn(meta, key)) return map
+  const copy = new Map<string, V>(map ?? [])
+  meta[key] = copy
+  return copy
+}
+
 export function pushMeta<T>(meta: Meta, key: symbol, item: T): void {
-  const arr = (meta[key] as T[]) ?? []
-  arr.push(item)
-  meta[key] = arr
+  const arr = meta[key] as T[] | undefined
+  if (arr && Object.hasOwn(meta, key)) arr.push(item)
+  else meta[key] = [...(arr ?? []), item]
 }
 
 export function addToMapMeta<T>(meta: Meta, key: symbol, name: string, items: T[]): void {
-  const map = (meta[key] as Map<string, T[]>) ?? new Map<string, T[]>()
+  const map = ownMap<T[]>(meta, key)
   const existing = map.get(name) ?? []
   map.set(name, [...existing, ...items])
-  meta[key] = map
 }
 
 export function setInMapMeta<T>(meta: Meta, key: symbol, name: string, value: T): void {
-  const map = (meta[key] as Map<string, T>) ?? new Map<string, T>()
-  map.set(name, value)
-  meta[key] = map
+  ownMap<T>(meta, key).set(name, value)
 }

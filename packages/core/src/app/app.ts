@@ -1,5 +1,5 @@
 import { applyBodyCeiling, DEFAULT_BODY_LIMIT } from '../body-limit.js'
-import { CLOSED, Container, REQUEST_CONTEXT, type ShutdownFailure } from '../di-container.js'
+import { CLOSED, Container, REQUEST_CONTEXT, requestContextReplaced, type ShutdownFailure } from '../di-container.js'
 import { DiscoveryService } from '../discovery/index.js'
 import { type AddRouteOptions, type GlobalGuardBinding, type MatchResult, Router } from '../router.js'
 import { compose, guardToMiddleware } from '../middleware.js'
@@ -246,6 +246,9 @@ export class Miia {
 
   provide(...providers: ProviderDefinition[]): this {
     this.assertGraphPending('provide')
+    if (providers.some((provider) => typeof provider !== 'function' && provider.token === REQUEST_CONTEXT)) {
+      throw requestContextReplaced('provide')
+    }
     for (const provider of providers) {
       if (typeof provider === 'function') {
         this.container.register(provider, () => new provider(), 'singleton')

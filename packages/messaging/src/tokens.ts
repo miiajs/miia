@@ -2,6 +2,7 @@ import type { Token } from '@miiajs/core'
 import { createToken } from '@miiajs/core'
 import type { IdempotencyStore } from './idempotency.js'
 import { MessageBus } from './message-bus.js'
+import type { MessagingModuleOptions } from './messaging.module.js'
 import type { MessageTransport } from './types.js'
 
 // An empty name is the default bus, as in MessagingModule.configure()
@@ -42,6 +43,10 @@ export function messageBus(name: string): Token<MessageBus> {
 }
 
 // ─── Internal token helpers (not exported from package index) ─────────────
+
+export const optionsToken: (name?: string) => Token<MessagingModuleOptions> = memoByName((name) =>
+  createToken<MessagingModuleOptions>(`MessagingOptions(${name ?? 'default'})`),
+)
 
 export const transportToken: (name?: string) => Token<MessageTransport> = memoByName((name) =>
   createToken<MessageTransport>(`MessageTransport(${name ?? 'default'})`),

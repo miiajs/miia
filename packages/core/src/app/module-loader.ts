@@ -1,4 +1,4 @@
-import type { Container } from '../di-container.js'
+import { type Container, REQUEST_CONTEXT, requestContextReplaced } from '../di-container.js'
 import { formatToken } from '../di-token-format.js'
 import { Logger } from '../logger.js'
 import { getMeta, setMeta, MODULE, INJECTABLE, PREFIX, RESOLVED_PREFIX } from '../decorators/index.js'
@@ -25,6 +25,13 @@ interface PendingRoute {
   controller: Constructor
   prefix: string
   node: ModuleNode
+}
+
+/** The node that mounts the controllers of a module class, and the other names of the class: they own them too. */
+interface MountedControllers {
+  node: ModuleNode
+  prefix: string
+  owners: ModuleNode[]
 }
 
 interface ConfiguredEntry {
@@ -59,6 +66,12 @@ export class ModuleLoader {
   private nodes = new Map<Constructor, Map<string, ModuleNode>>()
   private processed = new Set<ModuleNode>()
   private owners = new Map<AnyToken, ModuleNode>()
+  /** Tokens first registered from the `@Module` providers of a class: its other names own them too. */
+  private staticTokens = new Set<AnyToken>()
+  /** By module class: its controllers are mounted once, whatever the number of names. */
+  private mountedControllers = new Map<Constructor, MountedControllers>()
+  /** The node that registered a module class instance. */
+  private moduleClassOwners = new Map<Constructor, ModuleNode>()
   private configured = new Map<Constructor, Map<string, ConfiguredEntry>>()
   private forwardRefs = new WeakMap<ForwardRef<ModuleItem>, ModuleItem>()
   private providerOverrides = new Map<AnyToken, () => unknown>()
@@ -83,8 +96,9 @@ export class ModuleLoader {
     const moduleOverrides: ConfiguredModule[] = []
     items.forEach((item, index) => {
       if (!isOverride(item)) modules.push(this.unwrap(item, root, 'imports', index) as ModuleItem)
-      else if (item[OVERRIDE_KIND] === 'provider') this.providerOverrides.set(item.token, item.factory)
-      else moduleOverrides.push(item.module)
+      else if (item[OVERRIDE_KIND] === 'module') moduleOverrides.push(item.module)
+      else if (item.token === REQUEST_CONTEXT) throw requestContextReplaced('override')
+      else this.providerOverrides.set(item.token, item.factory)
     })
 
     for (const mod of modules) {
@@ -132,6 +146,14 @@ export class ModuleLoader {
 
     // Phase 2: Resolve routes
     for (const { controller, prefix, node } of this.pendingRoutes) {
+      const owners = this.mountedControllers.get(node.module!)?.owners ?? []
+      if (owners.length > 0) {
+        // The other names must own the entry before the controller is constructed.
+        if (!this.container.has(controller)) {
+          this.container.register(controller, () => new controller(), 'singleton', undefined, node)
+        }
+        for (const owner of owners) this.container.addOwner(controller, owner)
+      }
       this.routesResolver.resolve(controller, prefix, node)
       const ctrlPrefix = getMeta<string>(controller, PREFIX) ?? ''
       const resolvedPrefix = joinPaths(prefix, ctrlPrefix)
@@ -181,7 +203,9 @@ export class ModuleLoader {
               `in tests, replace it with TestApp.override(${cls}, ${cls}.configure(...))`,
           )
         }
-        if (node.host !== host) {
+        // Two names of one module class share its own imports: the first stays the host.
+        const sameClass = node.host!.module !== null && node.host!.module === host.module
+        if (node.host !== host && !sameClass) {
           throw new Error(
             `[Miia] The same configured module ${node.label} is imported by ${node.host!.importer} and ${host.importer} - ` +
               'import it once and re-export it from that module, or make it global',
@@ -266,22 +290,39 @@ export class ModuleLoader {
 
     if (meta?.providers) {
       for (const provider of meta.providers) {
-        this.registerProvider(provider, node)
+        this.registerProvider(provider, node, true)
       }
     }
 
-    if (meta?.controllers) {
+    if (meta?.controllers?.length) {
+      const mounted = this.mountedControllers.get(moduleCtor)
+      if (mounted && mounted.prefix !== prefix) {
+        throw new Error(
+          `[Miia] ${node.label} resolves its controllers under /${prefix}, but ${mounted.node.label} already ` +
+            `mounted them under /${mounted.prefix} - a module class configured under several names mounts its ` +
+            'controllers once; give them one prefix',
+        )
+      }
+      if (mounted) mounted.owners.push(node)
+      else this.mountedControllers.set(moduleCtor, { node, prefix, owners: [] })
       for (const controller of meta.controllers) {
         node.owns.add(controller)
+        if (mounted) continue
         // Controllers are registered in phase 2, only if absent - an override has to be there first.
         this.applyOverride(controller, node)
         this.pendingRoutes.push({ controller, prefix, node })
       }
     }
 
-    if (!this.container.has(moduleCtor)) {
+    const classOwner = this.moduleClassOwners.get(moduleCtor)
+    if (classOwner) {
+      // Another name of the class: one module instance, owned by every name.
+      node.owns.add(moduleCtor)
+      this.container.addOwner(moduleCtor, node)
+    } else if (!this.container.has(moduleCtor)) {
       this.container.register(moduleCtor, () => new moduleCtor(), 'singleton', undefined, node)
       node.owns.add(moduleCtor)
+      this.moduleClassOwners.set(moduleCtor, node)
     }
 
     this.logger.log(`${moduleCtor.name} dependencies initialized`)
@@ -325,10 +366,19 @@ export class ModuleLoader {
     )
   }
 
-  private registerProvider(provider: ProviderDefinition, node: ModuleNode): void {
+  /** `isStatic`: from `@Module({ providers })` of the class, not from a configure() result. */
+  private registerProvider(provider: ProviderDefinition, node: ModuleNode, isStatic = false): void {
     const token = typeof provider === 'function' ? provider : (provider as FactoryProvider).token
     const owner = this.owners.get(token)
-    if (owner) throw new Error(this.duplicateMessage(token, owner, node))
+    if (owner) {
+      // Another name of the class: one instance, owned by every name.
+      if (isStatic && owner !== node && owner.module === node.module && this.staticTokens.has(token)) {
+        node.owns.add(token)
+        this.container.addOwner(token, node)
+        return
+      }
+      throw new Error(this.duplicateMessage(token, owner, node))
+    }
     if (this.provided.has(token)) {
       const name = formatToken(token)
       throw new Error(
@@ -341,6 +391,7 @@ export class ModuleLoader {
     // An overridden provider still has its owner, so a second module declaring it is a duplicate.
     this.owners.set(token, node)
     node.owns.add(token)
+    if (isStatic) this.staticTokens.add(token)
     if (this.applyOverride(token, node)) return
     if (typeof provider === 'function') {
       const scope = getMeta<InjectableMeta>(provider, INJECTABLE)?.scope ?? 'singleton'

@@ -530,6 +530,32 @@ describe('MessageBus', () => {
       expect(app.resolve(KafkaOnly).calls).toBe(1)
     })
 
+    it("@On with bus: '' subscribes to the default bus", async () => {
+      @Injectable()
+      class EmptyName {
+        calls = 0
+        @On('topic', { bus: '' })
+        async run() {
+          this.calls++
+        }
+      }
+
+      @Module({
+        imports: [
+          MessagingModule.configure({ transport: inMemoryTransport({ retry: { backoffMs: 5 }, drainTimeoutMs: 50 }) }),
+        ],
+        providers: [EmptyName],
+      })
+      class AppModule {}
+
+      const app = await TestApp.create(AppModule).compile()
+      cleanup.push(() => app.close())
+
+      await app.resolve(MessageBus).publish('topic', {})
+      await wait(20)
+      expect(app.resolve(EmptyName).calls).toBe(1)
+    })
+
     it('throws at startup when @On references an unknown bus', async () => {
       @Injectable()
       class Bad {

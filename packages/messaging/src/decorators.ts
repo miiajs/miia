@@ -125,7 +125,7 @@ export const On = createMethodDecorator<
     topic,
     group: options?.group,
     concurrency: options?.concurrency,
-    bus: options?.bus,
+    bus: options?.bus || undefined,
     mode: options?.mode,
     broadcast: options?.broadcast,
     initialPosition: options?.initialPosition,

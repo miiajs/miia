@@ -12,6 +12,8 @@ import {
   Module,
   overrideModule,
   overrideProvider,
+  provider,
+  REQUEST_CONTEXT,
   UseGuard,
 } from '../src/index.js'
 
@@ -192,6 +194,20 @@ describe('override descriptors', () => {
     expect(err.constructor).toBe(Error)
   })
 
+  it('reject REQUEST_CONTEXT before anything is registered', async () => {
+    @Module({})
+    class EmptyModule {}
+
+    const app = new Miia({ logger: false }).register(
+      EmptyModule,
+      overrideProvider(REQUEST_CONTEXT, () => ({})),
+    )
+
+    await expect(app.init()).rejects.toThrow(
+      '[Miia] override(RequestContext): REQUEST_CONTEXT is built in and seeded by every request - it cannot be provided or overridden; test a request-scoped provider through a route with TestApp.request(), or override that provider itself',
+    )
+  })
+
   it('reject a descriptor inside imports', () => {
     @Module({ imports: [overrideProvider(createToken('X'), () => 1) as unknown as ConfiguredModule] })
     class BadModule {}
@@ -261,5 +277,23 @@ describe('module override descriptors', () => {
     const app = new Miia({ logger: false }).register(FeatureModule, ConfigLikeModule.configure('test'))
 
     expect(app.get(CONFIG)).toBe('test')
+  })
+})
+
+describe('provide()', () => {
+  it('rejects REQUEST_CONTEXT and registers none of the providers passed with it', () => {
+    const CLOCK = createToken<string>('CLOCK')
+    const app = new Miia({ logger: false })
+
+    const err = thrownBy(() =>
+      app.provide(
+        provider(CLOCK, () => 'real'),
+        provider(REQUEST_CONTEXT, () => ({}) as RequestContext),
+      ),
+    )
+    expect(err.message).toBe(
+      '[Miia] provide(RequestContext): REQUEST_CONTEXT is built in and seeded by every request - it cannot be provided or overridden; test a request-scoped provider through a route with TestApp.request(), or override that provider itself',
+    )
+    expect(() => app.get(CLOCK)).toThrow('[Miia] No provider found for token: CLOCK')
   })
 })

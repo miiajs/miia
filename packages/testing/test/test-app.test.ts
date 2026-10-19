@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { Controller, createToken, Get, Post, Module, Injectable, UseGuard, inject } from '@miiajs/core'
+import { Controller, createToken, Get, Post, Module, Injectable, UseGuard, inject, REQUEST_CONTEXT } from '@miiajs/core'
 import type { CanActivate, ConfiguredModule, RequestContext, Guard, Middleware } from '@miiajs/core'
 import { ForbiddenException } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
@@ -266,6 +266,14 @@ describe('TestApp', () => {
     it('should reject a token no loaded module provides', async () => {
       await expect(TestApp.create(AppModule).override(createToken('MISSING'), {}).compile()).rejects.toThrow(
         '[Miia] override(MISSING): no loaded module provides MISSING - use provide() for a module-less test',
+      )
+    })
+  })
+
+  describe('override REQUEST_CONTEXT', () => {
+    it('should reject it - every request seeds its own', async () => {
+      await expect(TestApp.create(AppModule).override(REQUEST_CONTEXT, { params: {} }).compile()).rejects.toThrow(
+        '[Miia] override(RequestContext): REQUEST_CONTEXT is built in and seeded by every request - it cannot be provided or overridden; test a request-scoped provider through a route with TestApp.request(), or override that provider itself',
       )
     })
   })
