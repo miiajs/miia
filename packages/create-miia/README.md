@@ -8,7 +8,11 @@ npm create miia@latest my-app
 deno run -A npm:create-miia my-app
 ```
 
-Flags: `--runtime`, `--pm`, `--features`, `--db`, `-y`, `--skip-install`, `--dry-run`.
+Flags: `--runtime`, `--pm`, `--features`, `--db`, `-y`, `--skip-install`, `--dry-run`. npm keeps flags before `--` for itself:
+
+```bash
+npm create miia@latest my-app -- --runtime node -y
+```
 
 ## Documentation
 

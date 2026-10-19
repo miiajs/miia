@@ -90,12 +90,13 @@ export default defineCommand({
 
     const written = await tree.commit()
     for (const line of tree.summary()) logger.success(`  ${line}`)
+    // Before the install: a failed install must not hide what is left to do by hand
+    for (const warning of new Set(warnings)) logger.warn(warning)
     if (!args['skip-install'] && dependencySnapshot(tree) !== before) {
       logger.info(`\nInstalling dependencies with ${project.packageManager}...`)
       await install(project.packageManager, cwd)
     }
     await formatFiles(written, cwd)
-    for (const warning of new Set(warnings)) logger.warn(warning)
     logger.success(`\nAdded ${applied.map((a) => a.id).join(', ')}`)
   }),
 })

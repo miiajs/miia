@@ -1,6 +1,6 @@
 import { defineCommand } from 'citty'
 import { execa } from 'execa'
-import { createSignalPolicy, onTerminationSignals, signalExitCode } from '../dev/signals.js'
+import { childExitCode, createSignalPolicy, onTerminationSignals } from '../dev/signals.js'
 import { getStartCommand, resolveCommandEnv } from '../runtime/commands.js'
 import { resolveRuntime } from '../runtime/detect.js'
 import { action, CliError } from '../utils/errors.js'
@@ -51,16 +51,22 @@ export default defineCommand({
       forceKillAfterDelay: false,
     })
 
+    let forwarded = null as NodeJS.Signals | null
     const policy = createSignalPolicy()
     const stopListening = onTerminationSignals((signal) => {
       const decision = policy(signal)
-      if (decision === 'forward') child.kill('SIGTERM')
-      else if (decision === 'kill') child.kill('SIGKILL')
+      if (decision === 'forward') {
+        forwarded = signal
+        child.kill('SIGTERM')
+      } else if (decision === 'kill') {
+        child.kill('SIGKILL')
+      }
     })
 
     const result = await child.finally(stopListening)
-    if (result.failed && result.exitCode === undefined && !result.signal)
+    if (result.failed && result.exitCode === undefined && !result.signal) {
       throw new CliError(result.shortMessage ?? `Failed to start ${cmd.command}`)
-    process.exitCode = result.signal ? signalExitCode(result.signal) : (result.exitCode ?? 1)
+    }
+    process.exitCode = childExitCode(result, forwarded)
   }),
 })

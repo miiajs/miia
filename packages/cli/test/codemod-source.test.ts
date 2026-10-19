@@ -76,9 +76,25 @@ describe('addImport', () => {
     expect(addImport(ts, text, { from: './x.js', names: ['Bar'] }).status).toBe('exists')
   })
 
-  it('treats an aliased import of the same export as present', () => {
+  it('needs the name itself: an aliased import of the export does not count', () => {
     const text = lines("import { ConfigService as Cs } from '@miiajs/config'")
-    expect(addImport(ts, text, { from: '@miiajs/config', names: ['ConfigService'] }).status).toBe('exists')
+    expect(addImport(ts, text, { from: '@miiajs/config', names: ['ConfigService'] })).toEqual({
+      status: 'added',
+      text: lines("import { ConfigService as Cs, ConfigService } from '@miiajs/config'"),
+    })
+  })
+
+  it('treats specifiers with and without .js as one module and follows the file style', () => {
+    const text = lines("import { envSchema } from './env.schema'", "import { A } from './a'")
+    expect(addImport(ts, text, { from: './env.schema.js', names: ['Env'], type: true }).text).toBe(
+      lines("import { envSchema, type Env } from './env.schema'", "import { A } from './a'"),
+    )
+    expect(addImport(ts, text, { from: './b.js', names: ['B'] }).text).toBe(
+      lines("import { envSchema } from './env.schema'", "import { A } from './a'", "import { B } from './b'"),
+    )
+    expect(addImport(ts, text, { from: './env.schema.js', names: ['envSchema'] }).status).toBe('exists')
+    const mixed = lines("import { A } from './a.js'")
+    expect(addImport(ts, mixed, { from: './b.js', names: ['B'] }).text).toContain("from './b.js'")
   })
 
   it('reports a conflict when the local name is taken', () => {
@@ -254,6 +270,24 @@ describe('addToModuleArray', () => {
     expect(addToModuleArray(ts, text, { key: 'imports', element: 'A', ref: 'A' }).text).toBe(
       module('  ...base,', '  imports: [B, A],'),
     )
+  })
+
+  it('keeps comments when a one-line array becomes multi-line', () => {
+    const text = module('  imports: [A /* keep me */, /* and me */ B],')
+    expect(addToModuleArray(ts, text, { key: 'imports', element: 'X.configure(\n  {},\n)', ref: 'X' }).text).toBe(
+      module(
+        '  imports: [',
+        '    A /* keep me */,',
+        '    /* and me */ B,',
+        '    X.configure(',
+        '      {},',
+        '    ),',
+        '  ],',
+      ),
+    )
+    expect(
+      addToModuleArray(ts, module('  imports: [A, B /* last */],'), { key: 'imports', element: 'C', ref: 'C' }).text,
+    ).toBe(module('  imports: [A, B /* last */, C],'))
   })
 
   it('expands @Module({}) and keeps the class indent', () => {

@@ -9,8 +9,8 @@ function appendLines(text: string, lines: string[]): string {
   return prefix + lines.join(eol) + eol
 }
 
-/** `.env` entries: skips keys that are already assigned. */
-export function addEnvEntries(text: string, entries: Array<[key: string, value: string]>): string {
+/** `.env` entries: skips keys that are already assigned; a comment goes on the line above its key. */
+export function addEnvEntries(text: string, entries: Array<[key: string, value: string, comment?: string]>): string {
   const keys = new Set(
     text
       .split('\n')
@@ -20,7 +20,7 @@ export function addEnvEntries(text: string, entries: Array<[key: string, value: 
   const missing = entries.filter(([key]) => !keys.has(key))
   return appendLines(
     text,
-    missing.map(([key, value]) => `${key}=${value}`),
+    missing.flatMap(([key, value, comment]) => (comment ? [`# ${comment}`, `${key}=${value}`] : [`${key}=${value}`])),
   )
 }
 

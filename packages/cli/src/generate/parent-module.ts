@@ -3,17 +3,18 @@ import { dirname, join } from 'node:path'
 
 /**
  * Find the nearest *.module.ts file by walking up from targetDir toward src/.
- * Prefers a module matching the directory name (e.g. user/ → user.module.ts).
+ * Prefers a module matching the directory name (e.g. user/ → user.module.ts), then `rootModule`
+ * (the module main.ts registers) when a folder holds several.
  * Pass `excludeFile` to skip a specific path (e.g. a module file that was just generated).
  */
-export function findParentModule(targetDir: string, excludeFile?: string): string | null {
+export function findParentModule(targetDir: string, excludeFile?: string, rootModule?: string | null): string | null {
   const srcRoot = findSrcRoot(targetDir)
   if (!srcRoot) return null
 
   // Walk up from targetDir toward src/
   let current = targetDir
   while (current.length >= srcRoot.length) {
-    const moduleFile = findModuleInDir(current, excludeFile)
+    const moduleFile = findModuleInDir(current, excludeFile, rootModule)
     if (moduleFile && moduleFile !== excludeFile) return moduleFile
     const parent = dirname(current)
     if (parent === current) break
@@ -41,7 +42,7 @@ function findSrcRoot(from: string): string | null {
   return null
 }
 
-function findModuleInDir(dir: string, excludeFile?: string): string | null {
+function findModuleInDir(dir: string, excludeFile?: string, rootModule?: string | null): string | null {
   let files: string[]
   try {
     files = readdirSync(dir)
@@ -54,6 +55,7 @@ function findModuleInDir(dir: string, excludeFile?: string): string | null {
 
   // Prefer module matching directory name
   const dirName = dir.split(/[/\\]/).pop()
-  const preferred = modules.find((f) => f === `${dirName}.module.ts`)
+  const preferred =
+    modules.find((f) => f === `${dirName}.module.ts`) ?? modules.find((f) => join(dir, f) === rootModule)
   return join(dir, preferred ?? modules[0])
 }

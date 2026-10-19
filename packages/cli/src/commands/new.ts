@@ -98,13 +98,14 @@ export default defineCommand({
 
     const written = await ctx.tree.commit()
     for (const line of ctx.tree.summary()) logger.success(`  ${line}`)
+    // Before the install: a failed install must not hide what is left to do by hand
+    for (const warning of new Set(warnings)) logger.warn(warning)
 
     if (options.install) {
       logger.info(`\nInstalling dependencies with ${options.packageManager}...`)
       await install(options.packageManager, options.dir)
       if (existsSync(join(options.dir, 'biome.json'))) await formatFiles(written, options.dir)
     }
-    for (const warning of new Set(warnings)) logger.warn(warning)
 
     const steps = [
       shownDir === '.' ? null : `cd ${shownDir}`,

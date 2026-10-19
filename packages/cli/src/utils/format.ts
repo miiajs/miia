@@ -22,11 +22,17 @@ interface FormatterChoice {
 function detectFormatter(cwd: string): FormatterChoice | null {
   if (BIOME_CONFIGS.some((f) => existsSync(join(cwd, f)))) {
     const bin = findLocalBin(cwd, 'biome')
-    return bin ? { bin, args: (files) => ['format', '--write', '--no-errors-on-unmatched', ...files] } : null
+    // Changed files include .env and .gitignore: unknown and unmatched files are skipped, not errors
+    return bin
+      ? {
+          bin,
+          args: (files) => ['format', '--write', '--no-errors-on-unmatched', '--files-ignore-unknown=true', ...files],
+        }
+      : null
   }
   if (PRETTIER_CONFIGS.some((f) => existsSync(join(cwd, f)))) {
     const bin = findLocalBin(cwd, 'prettier')
-    return bin ? { bin, args: (files) => ['--write', ...files] } : null
+    return bin ? { bin, args: (files) => ['--write', '--ignore-unknown', ...files] } : null
   }
   return null
 }

@@ -3,14 +3,12 @@
 exports[`createProject generates the base project for bun 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 "
 ,
@@ -38,7 +36,7 @@ A [MiiaJS](https://miiajs.com) app.
 
 ## Configuration
 
-Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists them with defaults; \`.env\` holds your local values and is not committed.
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
 
 ## Next steps
 
@@ -185,14 +183,12 @@ await app.listen(config.get('PORT'), config.get('HOST'))
 exports[`createProject generates the base project for node 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 "
 ,
@@ -220,7 +216,7 @@ A [MiiaJS](https://miiajs.com) app.
 
 ## Configuration
 
-Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists them with defaults; \`.env\` holds your local values and is not committed.
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
 
 ## Next steps
 
@@ -389,14 +385,12 @@ await app.listen(config.get('PORT'), config.get('HOST'), serve)
 exports[`createProject generates the base project for deno 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 "
 ,
@@ -424,12 +418,12 @@ A [MiiaJS](https://miiajs.com) app.
 
 ## Configuration
 
-Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists them with defaults; \`.env\` holds your local values and is not committed.
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
 
 ## Next steps
 
-- \`deno run -A npm:@miiajs/cli g resource posts\` - a CRUD module with route schemas and a test
-- \`deno run -A npm:@miiajs/cli add swagger\` - OpenAPI docs at \`/docs\`
+- \`deno task miia g resource posts\` - a CRUD module with route schemas and a test
+- \`deno task miia add swagger\` - OpenAPI docs at \`/docs\`
 - Docs: https://miiajs.com/docs
 "
 ,
@@ -462,7 +456,8 @@ Environment variables are validated by \`src/env.schema.ts\` and read through \`
     "build": "miia build --runtime deno",
     "start": "miia start --runtime deno",
     "check": "miia check",
-    "test": "deno test --no-check --allow-all src/"
+    "test": "deno test --no-check --allow-all src/",
+    "miia": "miia"
   }
 }
 "

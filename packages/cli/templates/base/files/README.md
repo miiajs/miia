@@ -14,7 +14,7 @@ A [MiiaJS](https://miiajs.com) app.
 
 ## Configuration
 
-Environment variables are validated by `src/env.schema.ts` and read through `ConfigService`. `.env.example` lists them with defaults; `.env` holds your local values and is not committed.
+Environment variables are validated by `src/env.schema.ts` and read through `ConfigService`. `.env.example` lists every variable, with a value where it is safe to share; secrets such as `JWT_SECRET` stay empty there, and the app does not start until you set them. `.env` holds your local values (secrets generated when the project was created) and is not committed. `NODE_ENV` is set by the scripts: `development` for `dev`, `production` for `start`.
 
 ## Next steps
 

@@ -146,7 +146,15 @@ export const scenarios: Scenario[] = [
     runtime: 'deno',
     pm: 'deno',
     installWith: 'npm',
-    steps: [install(), ...basics('deno'), ...generateAll, ...basics('deno'), start(greets, createWidget)],
+    steps: [
+      install(),
+      ...basics('deno'),
+      // README points Deno users at this task: the project's own CLI, not the latest from npm
+      shell('deno task miia --version'),
+      ...generateAll,
+      ...basics('deno'),
+      start(greets, createWidget),
+    ],
   },
   {
     name: 'full-bun',

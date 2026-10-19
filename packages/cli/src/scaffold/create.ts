@@ -1,4 +1,4 @@
-import { type PackageJson, updateJson } from '../codemod/json.js'
+import { mergeScripts, type PackageJson, updateJson } from '../codemod/json.js'
 import { execCommand, runScriptCommand } from '../runtime/package-manager.js'
 import { addonContext, resolveAddons } from './addons.js'
 import { type ApplyContext, applyTemplate } from './apply.js'
@@ -18,6 +18,8 @@ export function createProject(ctx: ApplyContext, options: NewOptions): { warning
   ctx.tree.update('package.json', (text) =>
     updateJson<PackageJson>(text, 'package.json', (pkg) => {
       pkg.name = options.name
+      // deno has no exec for package bins; `deno task miia g ...` runs the project's own CLI version
+      if (pm === 'deno') mergeScripts(pkg, { miia: 'miia' })
     }),
   )
   applyRuntime(ctx)

@@ -1,6 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, posix, win32 } from 'node:path'
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, posix, win32 } from 'node:path'
 import { CliError } from '../utils/errors.js'
 
 export interface FileChange {
@@ -86,13 +86,39 @@ export class ProjectTree {
     return this.changes().map((c) => `${c.kind.toUpperCase()} ${c.path}`)
   }
 
+  /**
+   * Writes every change to a temporary file next to its target first, then renames them into place:
+   * a failed write leaves the project as it was, and a failed rename names what is already written.
+   */
   async commit(): Promise<string[]> {
+    const staged: Array<{ path: string; temp: string; target: string }> = []
+    const createdDirs: string[] = []
+    try {
+      for (const change of this.changes()) {
+        const target = join(this.root, change.path)
+        const created = await mkdir(dirname(target), { recursive: true })
+        if (created) createdDirs.push(created)
+        const temp = join(dirname(target), `.${basename(target)}.${process.pid}.miia-tmp`)
+        await writeFile(temp, change.content, 'utf-8')
+        staged.push({ path: change.path, temp, target })
+      }
+    } catch (err) {
+      await Promise.all(staged.map((s) => rm(s.temp, { force: true })))
+      for (const dir of createdDirs.reverse()) await rm(dir, { recursive: true, force: true })
+      throw new CliError(`Nothing was written: ${(err as Error).message}`)
+    }
+
     const written: string[] = []
-    for (const change of this.changes()) {
-      const target = join(this.root, change.path)
-      await mkdir(dirname(target), { recursive: true })
-      await writeFile(target, change.content, 'utf-8')
-      written.push(target)
+    for (const [i, s] of staged.entries()) {
+      try {
+        await rename(s.temp, s.target)
+      } catch (err) {
+        await Promise.all(staged.slice(i).map((rest) => rm(rest.temp, { force: true })))
+        const done = staged.slice(0, i).map((d) => `  ${d.path}`)
+        const listing = done.length > 0 ? `\nAlready written:\n${done.join('\n')}` : ''
+        throw new CliError(`Writing ${s.path} failed: ${(err as Error).message}${listing}`)
+      }
+      written.push(s.target)
     }
     return written
   }

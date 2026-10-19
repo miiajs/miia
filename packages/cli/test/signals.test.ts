@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { createSignalPolicy, signalExitCode } from '../src/dev/signals.js'
+import { childExitCode, createSignalPolicy, signalExitCode } from '../src/dev/signals.js'
 
 function clock(start = 0) {
   let time = start
@@ -39,6 +39,17 @@ describe('createSignalPolicy', () => {
     policy('SIGINT')
     c.advance(51)
     expect(policy('SIGINT')).toBe('kill')
+  })
+})
+
+describe('childExitCode', () => {
+  it('lets a non-zero app code win, then the forwarded signal, then the signal that ended it', () => {
+    expect(childExitCode({ exitCode: 3 }, 'SIGINT')).toBe(3)
+    expect(childExitCode({ exitCode: 0 }, 'SIGINT')).toBe(130)
+    expect(childExitCode({ signal: 'SIGKILL' }, 'SIGTERM')).toBe(143)
+    expect(childExitCode({ signal: 'SIGKILL' }, null)).toBe(137)
+    expect(childExitCode({ exitCode: 0 }, null)).toBe(0)
+    expect(childExitCode({ exitCode: 42 }, null)).toBe(42)
   })
 })
 

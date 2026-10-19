@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import ts from 'typescript'
@@ -137,6 +137,25 @@ describe('miia g', () => {
       'CREATE src/widgets/widgets.test.ts',
     ])
     expect(existsSync(join(root, 'src/widgets'))).toBe(false)
+  })
+
+  it('picks the module main.ts registers when src/ holds several', async () => {
+    const root = await project()
+    rmSync(join(root, 'src/app'), { recursive: true })
+    writeFileSync(
+      join(root, 'src/admin.module.ts'),
+      "import { Module } from '@miiajs/core'\n\n@Module({})\nexport class AdminModule {}\n",
+    )
+    writeFileSync(
+      join(root, 'src/root.module.ts'),
+      "import { Module } from '@miiajs/core'\n\n@Module({})\nexport class RootModule {}\n",
+    )
+    writeFileSync(
+      join(root, 'src/main.ts'),
+      "import { Miia } from '@miiajs/core'\nimport { RootModule } from './root.module.js'\n\nawait new Miia().register(RootModule).listen(3000)\n",
+    )
+    const { files } = generate(root, { schematic: 's', name: 'audit', flat: true })
+    expect(Object.keys(files).sort()).toEqual(['src/audit.service.ts', 'src/root.module.ts'])
   })
 
   it('needs src/', () => {

@@ -7,6 +7,7 @@ import { ProjectTree } from '../codemod/tree.js'
 import { loadTypeScript, type TS } from '../codemod/typescript.js'
 import { projectRuntime } from '../scaffold/add.js'
 import { applyTemplate, flavorOf } from '../scaffold/apply.js'
+import { detectLayout } from '../scaffold/layout.js'
 import { CliError } from '../utils/errors.js'
 import { formatFiles } from '../utils/format.js'
 import { logger } from '../utils/logger.js'
@@ -77,7 +78,8 @@ export function planGenerate(
   const registeredFile = posix.join(target, register.file(file))
   // The resource's own module is in its folder: search from the folder around it
   const searchFrom = schematic.name === 'resource' ? base : target
-  const parent = findParentModule(join(cwd, searchFrom), join(cwd, registeredFile))
+  const { rootModule } = detectLayout(tree, ts)
+  const parent = findParentModule(join(cwd, searchFrom), join(cwd, registeredFile), rootModule && join(cwd, rootModule))
   if (!parent) {
     warnings.push(`No parent module found. Register ${registered} manually.`)
     return { tree, warnings }

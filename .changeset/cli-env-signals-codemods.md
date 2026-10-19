@@ -1,0 +1,5 @@
+---
+'@miiajs/cli': patch
+---
+
+`JWT_SECRET` is empty in `.env.example` (a copied example no longer starts with a publicly known secret) and `NODE_ENV` is gone from it, so `bun run start` runs in production; scrypt passwords on Node.js and Deno use N=2^17 with the parameters stored in the hash; a Deno project gets a `miia` task, so `deno task miia ...` runs the project's CLI version. `miia dev` puts the watcher in its own process group on POSIX, so stopping it also stops the app under `node --watch`; `start` and `dev` exit with the app's non-zero code, else `128 + signal`. `miia build --runtime node` refuses a config with `noEmit` instead of reporting a build with no output. Warnings print before the install, formatters skip files they do not know (`.env`, `.gitignore`), and writes are staged, so a failed write leaves the project as it was. Codemods: an aliased import no longer counts as the name itself, specifiers with and without `.js` are one module (new imports follow the file's style), comments survive when a one-line array becomes multi-line, and `miia g` prefers the module `main.ts` registers when a folder has several

@@ -124,7 +124,7 @@ export function mainDeclares(ctx: AddonContext, name: string): boolean {
 /** A key in the env schema, .env.example and .env. `value` goes to .env (a generated secret), else `example`. */
 export function addEnv(
   ctx: AddonContext,
-  opts: { key: string; schema: string; example: string; value?: string },
+  opts: { key: string; schema: string; example: string; value?: string; comment?: string },
 ): void {
   const { envSchema, envExample, env } = ctx.layout
   if (envSchema) {
@@ -134,13 +134,15 @@ export function addEnv(
       status = result.status
       return result.text
     })
-    if (status === 'unsupported')
+    if (status === 'unsupported') {
       ctx.warn(`Could not edit ${envSchema}: add ${opts.key}: ${opts.schema} to the env schema`)
+    }
   } else {
     ctx.warn(`No env schema found: validate ${opts.key} yourself`)
   }
-  if (envExample) ctx.tree.update(envExample, (text) => addEnvEntries(text, [[opts.key, opts.example]]))
-  if (env) ctx.tree.update(env, (text) => addEnvEntries(text, [[opts.key, opts.value ?? opts.example]]))
+  const entry = (value: string): [string, string, string?] => [opts.key, value, opts.comment]
+  if (envExample) ctx.tree.update(envExample, (text) => addEnvEntries(text, [entry(opts.example)]))
+  if (env) ctx.tree.update(env, (text) => addEnvEntries(text, [entry(opts.value ?? opts.example)]))
   else if (opts.value !== undefined) ctx.warn(`No .env file: set ${opts.key} in your environment`)
 }
 

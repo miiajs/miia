@@ -53,11 +53,27 @@ describe.skipIf(process.platform === 'win32')('miia start', () => {
       await run.waitFor('app ready')
       const started = Date.now()
       run.child.kill('SIGTERM')
-      expect(await run.exited).toBe(0)
+      // A clean shutdown after a forwarded SIGTERM reports the signal
+      expect(await run.exited).toBe(143)
       expect(Date.now() - started).toBeGreaterThanOrEqual(6500)
     },
     { timeout: 20_000 },
   )
+
+  it('lets a non-zero exit code of the app win over the signal', async () => {
+    const cwd = fixture({
+      'main.ts': [
+        "process.on('SIGTERM', () => process.exit(3))",
+        "console.log('app ready')",
+        'setInterval(() => {}, 1000)',
+        '',
+      ].join('\n'),
+    })
+    const run = runCli(cwd, ['start', '--runtime', 'bun', '--entry', 'main.ts'])
+    await run.waitFor('app ready')
+    run.child.kill('SIGINT')
+    expect(await run.exited).toBe(3)
+  })
 
   it('fails with a message when the runtime is missing', async () => {
     const cwd = fixture({ 'main.ts': '' })

@@ -3,17 +3,17 @@
 exports[`add-ons jwt-auth on bun 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
+# At least 32 random characters, e.g. openssl rand -hex 32
 JWT_SECRET=abababababababababababababababababababababababababababababababab
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
-JWT_SECRET=change-me-to-a-random-string-of-at-least-32-chars
+# At least 32 random characters, e.g. openssl rand -hex 32
+JWT_SECRET=
 "
 ,
   "package.json": 
@@ -372,17 +372,17 @@ function toUser({ id, email }: StoredUser): User {
 exports[`add-ons jwt-auth on node 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
+# At least 32 random characters, e.g. openssl rand -hex 32
 JWT_SECRET=abababababababababababababababababababababababababababababababab
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
-JWT_SECRET=change-me-to-a-random-string-of-at-least-32-chars
+# At least 32 random characters, e.g. openssl rand -hex 32
+JWT_SECRET=
 "
 ,
   "package.json": 
@@ -594,23 +594,35 @@ describe('auth', () => {
 "
 ,
   "src/auth/password.ts": 
-"import { randomBytes, scrypt, timingSafeEqual } from 'node:crypto'
-import { promisify } from 'node:util'
+"import { randomBytes, type ScryptOptions, scrypt, timingSafeEqual } from 'node:crypto'
 
-const scryptAsync = promisify(scrypt) as (password: string, salt: Buffer, keylen: number) => Promise<Buffer>
+// OWASP minimum for scrypt: N=2^17, r=8, p=1 (128 MiB per hash)
+const COST = { N: 2 ** 17, r: 8, p: 1 }
+const KEY_LENGTH = 64
 
-// Stored as scrypt$<salt hex>$<hash hex>
+function derive(password: string, salt: Buffer, keylen: number, cost: typeof COST): Promise<Buffer> {
+  const options: ScryptOptions = { ...cost, maxmem: 256 * cost.N * cost.r }
+  return new Promise((resolve, reject) => {
+    scrypt(password, salt, keylen, options, (err, key) => (err ? reject(err) : resolve(key)))
+  })
+}
+
+// Stored as scrypt$<N>$<r>$<p>$<salt hex>$<hash hex>, so the cost can grow without breaking old hashes
 export async function hashPassword(password: string): Promise<string> {
   const salt = randomBytes(16)
-  const hash = await scryptAsync(password, salt, 64)
-  return \`scrypt$\${salt.toString('hex')}$\${hash.toString('hex')}\`
+  const hash = await derive(password, salt, KEY_LENGTH, COST)
+  return ['scrypt', COST.N, COST.r, COST.p, salt.toString('hex'), hash.toString('hex')].join('$')
 }
 
 export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [algorithm, salt, hash] = stored.split('$')
+  const [algorithm, N, r, p, salt, hash] = stored.split('$')
   if (algorithm !== 'scrypt' || !salt || !hash) return false
   const expected = Buffer.from(hash, 'hex')
-  const actual = await scryptAsync(password, Buffer.from(salt, 'hex'), expected.length)
+  const actual = await derive(password, Buffer.from(salt, 'hex'), expected.length, {
+    N: Number(N),
+    r: Number(r),
+    p: Number(p),
+  })
   return timingSafeEqual(actual, expected)
 }
 "
@@ -860,15 +872,13 @@ export class AppModule {}
 exports[`add-ons cors on bun 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 CORS_ORIGIN=*
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 CORS_ORIGIN=*
 "
@@ -905,15 +915,13 @@ await app.listen(config.get('PORT'), config.get('HOST'))
 exports[`add-ons cors on node 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 CORS_ORIGIN=*
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 CORS_ORIGIN=*
 "
@@ -1326,15 +1334,13 @@ exports[`add-ons biome on node 1`] = `
 exports[`add-ons drizzle-postgres on bun 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/demo_app
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/demo_app
 "
@@ -1455,15 +1461,13 @@ export type Env = z.infer<typeof envSchema>
 exports[`add-ons drizzle-postgres on node 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/demo_app
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/demo_app
 "
@@ -1587,15 +1591,13 @@ export type Env = z.infer<typeof envSchema>
 exports[`add-ons drizzle-mysql on bun 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=mysql://root:root@localhost:3306/demo_app
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=mysql://root:root@localhost:3306/demo_app
 "
@@ -1716,15 +1718,13 @@ export type Env = z.infer<typeof envSchema>
 exports[`add-ons drizzle-mysql on node 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=mysql://root:root@localhost:3306/demo_app
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=mysql://root:root@localhost:3306/demo_app
 "
@@ -1848,15 +1848,13 @@ export type Env = z.infer<typeof envSchema>
 exports[`add-ons drizzle-sqlite on bun 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=data.db
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=data.db
 "
@@ -1997,15 +1995,13 @@ export type Env = z.infer<typeof envSchema>
 exports[`add-ons drizzle-sqlite on node 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=data.db
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 DATABASE_URL=data.db
 "
@@ -2140,15 +2136,13 @@ export type Env = z.infer<typeof envSchema>
 exports[`add-ons papr on bun 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
 "
@@ -2226,15 +2220,13 @@ export type Env = z.infer<typeof envSchema>
 exports[`add-ons papr on node 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
 "
@@ -2315,15 +2307,13 @@ export type Env = z.infer<typeof envSchema>
 exports[`add-ons mongoose on bun 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
 "
@@ -2400,15 +2390,13 @@ export type Env = z.infer<typeof envSchema>
 exports[`add-ons mongoose on node 1`] = `
 {
   ".env": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
 "
 ,
   ".env.example": 
-"NODE_ENV=development
-HOST=0.0.0.0
+"HOST=0.0.0.0
 PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
 "

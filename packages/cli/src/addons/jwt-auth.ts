@@ -28,11 +28,13 @@ export const jwtAuth: Addon = {
       element: 'AuthModule',
       imports: [{ from: fromRootModule(ctx, 'src/auth/auth.module.ts'), names: ['AuthModule'] }],
     })
+    // Empty in .env.example: a copied example must not start the app with a publicly known HS256 secret
     addEnv(ctx, {
       key: 'JWT_SECRET',
       schema: 'z.string().min(32)',
-      example: 'change-me-to-a-random-string-of-at-least-32-chars',
+      example: '',
       value: ctx.random(32),
+      comment: 'At least 32 random characters, e.g. openssl rand -hex 32',
     })
   },
 }

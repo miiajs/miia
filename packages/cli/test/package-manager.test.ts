@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   addDevHint,
+  execCommand,
   detectPackageManager,
   installArgs,
   packageManagerFromUserAgent,
@@ -75,6 +76,8 @@ describe('commands', () => {
     expect(runScriptCommand('pnpm', 'dev')).toBe('pnpm dev')
     expect(runScriptCommand('yarn', 'test')).toBe('yarn test')
     expect(runScriptCommand('deno', 'check')).toBe('deno task check')
+    expect(execCommand('deno')).toBe('deno task miia')
+    expect(execCommand('pnpm')).toBe('pnpm exec miia')
   })
 
   it('addDevHint', () => {

@@ -62,24 +62,29 @@ export function addImport(
   const sf = parse(ts, text)
   const bindings = collectBindings(ts, sf)
   const wantsValue = !opts.type
+  const sameModule = (from: string | undefined) => from !== undefined && sameSpecifier(from, opts.from)
+  const from = specifierInFileStyle(ts, sf, opts.from)
 
   if (opts.namespace) {
     const local = bindings.locals.get(opts.namespace)
     if (local) {
-      const same = local.kind === 'namespace' && local.from === opts.from && (!wantsValue || !local.typeOnly)
+      const same = local.kind === 'namespace' && sameModule(local.from) && (!wantsValue || !local.typeOnly)
       return { text, status: same ? 'exists' : 'conflict' }
     }
-    const line = `import ${opts.type ? 'type ' : ''}* as ${opts.namespace} from ${quote(ts, sf, opts.from)}`
+    const line = `import ${opts.type ? 'type ' : ''}* as ${opts.namespace} from ${quote(ts, sf, from)}`
     return { text: insertImportLine(ts, sf, text, line), status: 'added' }
   }
 
   const missing: string[] = []
   for (const name of opts.names ?? []) {
-    const present = bindings.named.some(
-      (b) => b.from === opts.from && b.exported === name && (!wantsValue || !b.typeOnly),
-    )
-    if (present) continue
-    if (bindings.locals.has(name)) return { text, status: 'conflict' }
+    // Present only under its own name: `{ ConfigService as Config }` does not make `ConfigService` usable
+    const local = bindings.locals.get(name)
+    if (local) {
+      const present =
+        local.kind === 'named' && sameModule(local.from) && local.exported === name && (!wantsValue || !local.typeOnly)
+      if (present) continue
+      return { text, status: 'conflict' }
+    }
     missing.push(name)
   }
   if (missing.length === 0) return { text, status: 'exists' }
@@ -88,7 +93,7 @@ export function addImport(
   const typeOnly = !!opts.type && !!namedImportsOf(ts, sf, opts.from, true)
   const inline = !!opts.type && !typeOnly
   if (!namedImportsOf(ts, sf, opts.from, typeOnly)) {
-    const line = `import ${opts.type ? 'type ' : ''}{ ${missing.join(', ')} } from ${quote(ts, sf, opts.from)}`
+    const line = `import ${opts.type ? 'type ' : ''}{ ${missing.join(', ')} } from ${quote(ts, sf, from)}`
     return { text: insertImportLine(ts, sf, text, line), status: 'added' }
   }
 
@@ -109,7 +114,9 @@ export function addImport(
 // `import * as x`, default-only and bare imports from the same module are never merged into
 function namedImportsOf(ts: TS, sf: SourceFile, from: string, typeOnly: boolean): NamedImports | undefined {
   for (const stmt of sf.statements) {
-    if (!ts.isImportDeclaration(stmt) || moduleName(ts, stmt) !== from) continue
+    if (!ts.isImportDeclaration(stmt)) continue
+    const name = moduleName(ts, stmt)
+    if (name === undefined || !sameSpecifier(name, from)) continue
     const clause = stmt.importClause
     if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings) && clause.isTypeOnly === typeOnly) {
       return clause.namedBindings
@@ -127,7 +134,6 @@ interface Binding {
 
 function collectBindings(ts: TS, sf: SourceFile) {
   const locals = new Map<string, Binding>()
-  const named: Array<Binding & { exported: string }> = []
 
   for (const stmt of sf.statements) {
     if (ts.isImportDeclaration(stmt)) {
@@ -140,21 +146,19 @@ function collectBindings(ts: TS, sf: SourceFile) {
         locals.set(bindings.name.text, { kind: 'namespace', from, typeOnly: clause.isTypeOnly })
       } else if (bindings) {
         for (const el of bindings.elements) {
-          const binding = {
-            kind: 'named' as const,
+          locals.set(el.name.text, {
+            kind: 'named',
             from,
             exported: (el.propertyName ?? el.name).text,
             typeOnly: clause.isTypeOnly || el.isTypeOnly,
-          }
-          locals.set(el.name.text, binding)
-          named.push(binding)
+          })
         }
       }
       continue
     }
     for (const name of declaredNames(ts, stmt)) locals.set(name, { kind: 'declaration', typeOnly: false })
   }
-  return { locals, named }
+  return { locals }
 }
 
 function declaredNames(ts: TS, stmt: Statement): string[] {
@@ -183,6 +187,25 @@ function declaredNames(ts: TS, stmt: Statement): string[] {
 
 function moduleName(ts: TS, decl: ImportDeclaration): string | undefined {
   return ts.isStringLiteral(decl.moduleSpecifier) ? decl.moduleSpecifier.text : undefined
+}
+
+const SOURCE_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/
+
+// './env.schema' and './env.schema.js' name the same file
+function sameSpecifier(a: string, b: string): boolean {
+  if (a === b) return true
+  return a.startsWith('.') && b.startsWith('.') && a.replace(SOURCE_EXTENSION, '') === b.replace(SOURCE_EXTENSION, '')
+}
+
+// A file that writes its relative imports without extensions gets a new one without the extension too
+function specifierInFileStyle(ts: TS, sf: SourceFile, from: string): string {
+  if (!from.startsWith('.')) return from
+  const relative = sf.statements
+    .filter(ts.isImportDeclaration)
+    .map((decl) => moduleName(ts, decl))
+    .filter((name): name is string => !!name?.startsWith('.'))
+  const extensionless = relative.length > 0 && relative.every((name) => !SOURCE_EXTENSION.test(name))
+  return extensionless ? from.replace(SOURCE_EXTENSION, '') : from
 }
 
 // Quote and semicolon style of the file's first import
@@ -470,16 +493,17 @@ function insertIntoList(
   const listIsMultiline = !sameLine(text, list.open, items[0].getStart())
 
   if (!listIsMultiline) {
+    const segments = itemSegments(text, list)
     if (multiline) {
-      const texts = items.map((item) => item.getText())
+      // Each item with the comments around it, up to its comma
+      const texts = segments.map(([start, end]) => text.slice(start, end))
       texts.splice(index, 0, formatSnippet(snippet, inner, style))
       const body = texts.map((t) => `${style.eol}${inner}${t},`).join('') + style.eol + base
       return [{ start: list.open, end: list.close, text: body }]
     }
-    if (index < items.length)
-      return [{ start: items[index].getStart(), end: items[index].getStart(), text: `${snippet}, ` }]
-    const last = items[items.length - 1]
-    return [{ start: last.end, end: last.end, text: `, ${snippet}` }]
+    if (index < items.length) return [{ start: segments[index][0], end: segments[index][0], text: `${snippet}, ` }]
+    const end = segments[segments.length - 1][1]
+    return [{ start: end, end, text: `, ${snippet}` }]
   }
 
   if (index < items.length) {
@@ -505,6 +529,18 @@ function insertIntoList(
     edits.push({ start: pos, end: pos, text: `${style.eol}${indent}${element}${tail}` })
   }
   return edits
+}
+
+// [start, end) of every item with its comments, trimmed: from after the previous comma to before its own
+function itemSegments(text: string, list: ListTarget): Array<[number, number]> {
+  const { items } = list
+  return items.map((item, i) => {
+    let start = i === 0 ? list.open : trailingCommaEnd(text, items[i - 1].end)
+    let end = i < items.length - 1 || list.trailingComma ? trailingCommaEnd(text, item.end) - 1 : list.close
+    while (start < end && /\s/.test(text[start])) start++
+    while (end > start && /\s/.test(text[end - 1])) end--
+    return [start, end]
+  })
 }
 
 function trailingCommaEnd(text: string, from: number): number {

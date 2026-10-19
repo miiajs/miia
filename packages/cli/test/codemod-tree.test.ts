@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ProjectTree } from '../src/codemod/tree.js'
@@ -89,6 +89,18 @@ describe('ProjectTree', () => {
     expect(written).toEqual([join(root, 'package.json'), join(root, 'src/deep/a.ts'), join(root, 'src/z.ts')])
     expect(readFileSync(join(root, 'src/deep/a.ts'), 'utf-8')).toBe('a')
     expect(readFileSync(join(root, 'package.json'), 'utf-8')).toBe('{ "name": "x" }')
+  })
+
+  it('writes nothing when one write fails', async () => {
+    const root = project({ 'package.json': '{}', blocker: 'a file, not a folder' })
+    const tree = new ProjectTree(root)
+    tree.create('a/new.ts', 'x')
+    tree.create('blocker/x.ts', 'y')
+    tree.update('package.json', () => '{ "changed": true }')
+    await expect(tree.commit()).rejects.toThrow('Nothing was written')
+    expect(existsSync(join(root, 'a'))).toBe(false)
+    expect(readFileSync(join(root, 'package.json'), 'utf-8')).toBe('{}')
+    expect(readdirSync(root).sort()).toEqual(['blocker', 'package.json'])
   })
 
   it('works with a root that does not exist yet', async () => {

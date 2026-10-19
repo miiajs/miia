@@ -38,3 +38,14 @@ export function onTerminationSignals(handler: (signal: NodeJS.Signals) => void):
 export function signalExitCode(signal: NodeJS.Signals): number {
   return 128 + (constants.signals[signal] ?? 0)
 }
+
+/** The app's own non-zero exit code wins; otherwise the signal we forwarded, or the one that ended it, as 128 + n. */
+export function childExitCode(
+  result: { exitCode?: number; signal?: string },
+  forwarded: NodeJS.Signals | null,
+): number {
+  if (result.exitCode !== undefined && result.exitCode !== 0) return result.exitCode
+  if (forwarded) return signalExitCode(forwarded)
+  if (result.signal) return signalExitCode(result.signal as NodeJS.Signals)
+  return result.exitCode ?? 1
+}
