@@ -1,4 +1,14 @@
-import { Controller, Delete, Get, inject, Patch, Post, type RequestContext, Status } from '@miiajs/core'
+import {
+  Controller,
+  Delete,
+  Get,
+  inject,
+  NotFoundException,
+  Patch,
+  Post,
+  type RequestContext,
+  Status,
+} from '@miiajs/core'
 import { UserService } from './user.service'
 import { type CreateUserInput, CreateUserSchema, type UpdateUserInput, UpdateUserSchema } from './schemas'
 
@@ -18,7 +28,9 @@ export class UserController {
 
   @Get('/:id')
   async findOne(ctx: RequestContext) {
-    return this.userService.findById(ctx.params.id)
+    const user = await this.userService.findById(ctx.params.id)
+    if (!user) throw new NotFoundException(`User ${ctx.params.id} not found`)
+    return user
   }
 
   @Post('/', { body: CreateUserSchema })
@@ -29,12 +41,15 @@ export class UserController {
 
   @Patch('/:id', { body: UpdateUserSchema })
   async update(ctx: RequestContext) {
-    return this.userService.update(ctx.params.id, await ctx.json<UpdateUserInput>())
+    const user = await this.userService.update(ctx.params.id, await ctx.json<UpdateUserInput>())
+    if (!user) throw new NotFoundException(`User ${ctx.params.id} not found`)
+    return user
   }
 
   @Delete('/:id')
   async remove(ctx: RequestContext) {
     const deleted = await this.userService.delete(ctx.params.id)
+    if (!deleted) throw new NotFoundException(`User ${ctx.params.id} not found`)
     return { deleted }
   }
 }

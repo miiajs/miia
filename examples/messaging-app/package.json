@@ -15,6 +15,7 @@
     "@miiajs/core": "workspace:*",
     "@miiajs/messaging": "workspace:*",
     "@miiajs/messaging-redis": "workspace:*",
+    "@miiajs/node-server": "workspace:*",
     "ioredis": "^6.0.0",
     "zod": "^4.3.6"
   },

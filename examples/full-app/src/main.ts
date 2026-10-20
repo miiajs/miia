@@ -33,7 +33,14 @@ app.use(
 // Both opt out of the global prefix: assets stay at /static and the landing redirect
 // stays at /, instead of moving under /api.
 serveStatic(app, '/static', './public', { skipGlobalPrefix: true })
-app.addRoute('GET', '/', () => Response.redirect('/static', 302), { skipGlobalPrefix: true })
+app.addRoute(
+  'GET',
+  '/',
+  (ctx) => {
+    ctx.res.redirect('/static')
+  },
+  { skipGlobalPrefix: true },
+)
 
 const port = configService.get('PORT')
 const host = configService.get('HOST')

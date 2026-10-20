@@ -9,4 +9,9 @@ const configService = app.get(ConfigService<Env>)
 const port = configService.get('PORT')
 const host = configService.get('HOST')
 
-await app.listen(port, host)
+if ('Bun' in globalThis || 'Deno' in globalThis) {
+  await app.listen(port, host)
+} else {
+  const { serve } = await import('@miiajs/node-server')
+  await app.listen(port, host, serve)
+}
