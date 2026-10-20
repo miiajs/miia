@@ -31,7 +31,14 @@ export class RouterExplorer {
     private container: Container,
   ) {}
 
-  explore(instance: any, controller: Constructor, controllerPrefix: string, node: ModuleNode): void {
+  /** `owners`: the other modules that own the controller, e.g. the other names of its module class. */
+  explore(
+    instance: any,
+    controller: Constructor,
+    controllerPrefix: string,
+    node: ModuleNode,
+    owners: readonly ModuleNode[] = [],
+  ): void {
     const ctrlMws = getMeta<Middleware[]>(controller, CLASS_MW) ?? []
     const ctrlGuards = getMeta<Guard[]>(controller, CLASS_GUARDS) ?? []
     const routes = getMeta<RouteDefinition[]>(controller, ROUTES) ?? []
@@ -56,8 +63,8 @@ export class RouterExplorer {
       const bodyLimit = bodyLimitMap?.get(route.handlerName) ?? bodyLimitMap?.get('*')
 
       const skipSet = getSkipSet(controller, route.handlerName)
-      const ctrlGuardMws = this.resolveGuards(filterGuards(ctrlGuards, skipSet), controller, node)
-      const methodGuardMws = this.resolveGuards(filterGuards(methodGuards, skipSet), controller, node)
+      const ctrlGuardMws = this.resolveGuards(filterGuards(ctrlGuards, skipSet), controller, node, owners)
+      const methodGuardMws = this.resolveGuards(filterGuards(methodGuards, skipSet), controller, node, owners)
 
       const validation = createValidationMiddleware(
         {
@@ -89,12 +96,18 @@ export class RouterExplorer {
     }
   }
 
-  /** Checked from the module of the controller: the guard itself if a module declares it, else what it injects. */
-  private resolveGuards(guards: Guard[], controller: Constructor, consumer: ModuleNode): Middleware[] {
+  /** Checked from every module of the controller: the guard itself if a module declares it, else what it injects. */
+  private resolveGuards(
+    guards: Guard[],
+    controller: Constructor,
+    consumer: ModuleNode,
+    owners: readonly ModuleNode[],
+  ): Middleware[] {
     return guards.map((guardCtor) => {
       if (!this.container.has(guardCtor)) this.container.registerGuard(guardCtor)
       const instance = this.container.resolve<any>(guardCtor)
       this.container.checkGuard(guardCtor, consumer, controller)
+      for (const owner of owners) this.container.checkGuard(guardCtor, owner, controller)
       return guardToMiddleware((ctx) => instance.canActivate(ctx))
     })
   }

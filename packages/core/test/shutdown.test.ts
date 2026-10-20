@@ -156,6 +156,30 @@ describe('shutdown order', () => {
     await app.destroy()
     expect(events).toEqual(['Shared.onShutdown', 'Shared.onDestroy'])
   })
+
+  it('runs one shutdown for concurrent destroy() calls; a later call runs its own', async () => {
+    const events: string[] = []
+    const logged: string[] = []
+    const logger: LoggerService = {
+      log(message) {
+        logged.push(message)
+      },
+      warn() {},
+      error() {},
+    }
+
+    @Injectable()
+    class Service extends tracked(events, 'Service') {}
+
+    const app = new Miia({ logger }).provide(Service)
+    await app.init()
+    await Promise.all([app.destroy(), app.destroy()])
+    expect(events).toEqual(['Service.onShutdown', 'Service.onDestroy'])
+    expect(logged.filter((message) => message === 'Shutdown complete')).toHaveLength(1)
+
+    await app.destroy()
+    expect(logged.filter((message) => message === 'Shutdown complete')).toHaveLength(2)
+  })
 })
 
 describe('shutdown failures', () => {
@@ -271,6 +295,31 @@ describe('shutdown failures', () => {
     await app.destroy()
     expect(events).toEqual(['Failing.onShutdown'])
     expect(closes).toBe(1)
+  })
+
+  it('rejects concurrent destroy() calls with the same error, each hook having run once', async () => {
+    const events: string[] = []
+    const failure = new Error('disconnect failed')
+
+    @Injectable()
+    class Failing {
+      onShutdown() {
+        events.push('Failing.onShutdown')
+      }
+      onDestroy() {
+        events.push('Failing.onDestroy')
+        throw failure
+      }
+    }
+
+    const app = new Miia({ logger: false }).provide(Failing)
+    await app.init()
+    const results = await Promise.allSettled([app.destroy(), app.destroy()])
+    expect(results).toEqual([
+      { status: 'rejected', reason: failure },
+      { status: 'rejected', reason: failure },
+    ])
+    expect(events).toEqual(['Failing.onShutdown', 'Failing.onDestroy'])
   })
 
   it('logs each failure with its source', async () => {

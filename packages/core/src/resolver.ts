@@ -1,4 +1,4 @@
-import type { Container, View } from './di-container.js'
+import type { Container, ResolverView } from './di-container.js'
 import type { AbstractConstructor, AnyToken, Token } from './types.js'
 
 /**
@@ -17,8 +17,11 @@ import type { AbstractConstructor, AnyToken, Token } from './types.js'
  * that injects it, and it sees what that module sees: `has()` is `false` for a
  * token the module cannot see, `resolve()` and `resolveOptional()` of one are a
  * module boundary violation (`resolveOptional()` returns `null` only for a
- * token nothing registers). A provider without a module, a guard no module
- * declares and `app.get(Resolver)` get the resolver of the root.
+ * token nothing registers). A provider several modules declare (a shared
+ * provider, a provider of a module class configured under several names) gets
+ * a resolver over all of them: `has()` is `true` only for a token every one of
+ * them sees, and `resolve()` is checked from each. A provider without a module,
+ * a guard no module declares and `app.get(Resolver)` get the resolver of the root.
  *
  * `resolve()` of a request-scoped token throws - there is no request to keep the
  * instance on. Use `ctx.resolve()` in a handler, middleware or guard instead.
@@ -46,7 +49,7 @@ export class Resolver {
   /** @internal */
   constructor(
     private container: Container,
-    private view: View,
+    private view: ResolverView,
   ) {}
 
   has(token: AnyToken): boolean {

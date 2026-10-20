@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import type { Middleware, RequestContext } from '../src/index.js'
+import type { AnyToken, Middleware, RequestContext } from '../src/index.js'
 import {
   BadRequestException,
   Controller,
@@ -15,6 +15,7 @@ import {
   Use,
 } from '../src/index.js'
 import { Container } from '../src/di-container.js'
+import type { RequestScopeHolder } from '../src/di-container.js'
 
 function get(app: Miia, path: string): Promise<Response> {
   return Promise.resolve(app.fetch(new Request(`http://localhost${path}`)))
@@ -860,6 +861,138 @@ describe('app.destroy() after requests', () => {
     expect((await get(app, '/work')).status).toBe(200)
     await app.destroy()
     expect(events).toEqual(['UnitOfWork.onDestroy', 'Transaction.onDestroy', 'Pool.onShutdown', 'Pool.onDestroy'])
+  })
+
+  it('waits for every hook of a chain of three async onDestroy() hooks', async () => {
+    const events: string[] = []
+    const Pool = singletonHooks(events)
+
+    const step = (name: string) => {
+      @Injectable({ scope: 'request' })
+      class Step {
+        async onDestroy() {
+          await delay(5)
+          events.push(`${name}.onDestroy`)
+        }
+      }
+      return Step
+    }
+    const First = step('First')
+    const Second = step('Second')
+    const Third = step('Third')
+
+    @Controller('/')
+    class StepsController {
+      @Get('steps')
+      read(ctx: RequestContext) {
+        ctx.resolve(First)
+        ctx.resolve(Second)
+        ctx.resolve(Third)
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [StepsController], providers: [Pool, First, Second, Third] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    expect((await get(app, '/steps')).status).toBe(200)
+    await app.destroy()
+    expect(events).toEqual([
+      'Third.onDestroy',
+      'Second.onDestroy',
+      'First.onDestroy',
+      'Pool.onShutdown',
+      'Pool.onDestroy',
+    ])
+  })
+
+  it('runs the hooks of a request that ended in the same tick as a direct destroyAll()', async () => {
+    const events: string[] = []
+    const c = new Container()
+
+    class Pool {
+      onShutdown() {
+        events.push('Pool.onShutdown')
+      }
+    }
+
+    class Session {
+      async onDestroy() {
+        await delay(10)
+        events.push('Session.onDestroy')
+      }
+    }
+
+    c.registerClass(Pool)
+    c.registerClass(Session, 'request')
+    c.constructAll()
+    const holder: RequestScopeHolder = { _scope: null }
+    c.resolveInRequest(Session, holder)
+    // What the context does when the pipeline has finished, then shutdown in the same tick
+    c.destroyRequestScope(holder._scope as Map<AnyToken, unknown>, holder)
+    await c.destroyAll()
+    expect(events).toEqual(['Session.onDestroy', 'Pool.onShutdown'])
+  })
+
+  it('does not wait for a request that finishes after destroy() has started', async () => {
+    const events: string[] = []
+    const Pool = singletonHooks(events)
+    const early = Promise.withResolvers<void>()
+    const late = Promise.withResolvers<void>()
+
+    @Injectable({ scope: 'request' })
+    class Early {
+      async onDestroy() {
+        await early.promise
+        events.push('Early.onDestroy')
+      }
+    }
+
+    @Injectable({ scope: 'request' })
+    class Late {
+      async onDestroy() {
+        await late.promise
+        events.push('Late.onDestroy')
+      }
+    }
+
+    @Controller('/')
+    class HooksController {
+      @Get('early')
+      early(ctx: RequestContext) {
+        ctx.resolve(Early)
+        return { ok: true }
+      }
+
+      @Get('late')
+      late(ctx: RequestContext) {
+        ctx.resolve(Late)
+        return { ok: true }
+      }
+    }
+
+    @Module({ controllers: [HooksController], providers: [Pool, Early, Late] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    await app.init()
+    expect((await get(app, '/early')).status).toBe(200)
+    const destroyed = app.destroy().then(() => {
+      events.push('destroy() returned')
+    })
+    await settle()
+    // No server to close, e.g. serverless app.fetch: a request still comes in while destroy() waits for Early
+    expect((await get(app, '/late')).status).toBe(200)
+    await settle()
+    early.resolve()
+    await Promise.race([destroyed, delay(50)])
+    expect(events).toEqual(['Early.onDestroy', 'Pool.onShutdown', 'Pool.onDestroy', 'destroy() returned'])
+
+    late.resolve()
+    await destroyed
+    await settle()
+    expect(events.at(-1)).toBe('Late.onDestroy')
   })
 
   it('regression: a sync onDestroy() has run when destroy() follows the request at once', async () => {

@@ -61,7 +61,7 @@ export class PaprModule {
     const name = options?.name || undefined
     const serviceToken = getInternalServiceToken(name)
     const registryToken = getRegistryToken(name)
-    const shared = `connection '${name ?? 'default'}'`
+    const shared = name ? `connection '${name}'` : 'the default connection'
 
     const FeatureModule = class PaprFeatureModule {} as Constructor
     // How errors and the start-up log name this module

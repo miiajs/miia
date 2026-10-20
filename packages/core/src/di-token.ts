@@ -18,7 +18,7 @@ export function createToken<T>(name: string, options?: { hint?: string }): Token
  * `shared`: several modules may declare the token, each with a provider marked by the same key, and get one instance
  * that every declaring module owns and may export. The first declaration builds it; what it injects is checked from
  * every declaring module. A different key, or an unmarked declaration of the same token, is an error. The key also
- * names the variant in that error (e.g. `connection 'default'`).
+ * names the variant in that error (e.g. `connection 'analytics'`).
  */
 export function provider<T>(
   token: Token<T> | AbstractConstructor<T>,

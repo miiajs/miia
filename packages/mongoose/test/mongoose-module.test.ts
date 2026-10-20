@@ -421,7 +421,7 @@ describe('MongooseModule.register', () => {
 
       const error = await initError(createApp(UsersModule, ReportsModule))
       expect(error.message).toBe(
-        "[Miia] MongooseModel(User) is shared by MongooseModule.register([User]) in UsersModule (connection 'default') " +
+        '[Miia] MongooseModel(User) is shared by MongooseModule.register([User]) in UsersModule (the default connection) ' +
           "and MongooseModule.register([User], { name: 'analytics' }) in ReportsModule (connection 'analytics') - " +
           'a shared provider must be declared the same way in every module; use a separate token for each variant',
       )
@@ -429,6 +429,23 @@ describe('MongooseModule.register', () => {
     } finally {
       warnSpy.mockRestore()
     }
+  })
+
+  it('does not share a model between the unnamed connection and one named default', async () => {
+    const User = defineModel('User', userSchema())
+
+    @Module({ imports: [MongooseModule.register([User])] })
+    class UsersModule {}
+
+    @Module({ imports: [MongooseModule.register([User], { name: 'default' })] })
+    class ReportsModule {}
+
+    const error = await initError(createApp(UsersModule, ReportsModule))
+    expect(error.message).toBe(
+      '[Miia] MongooseModel(User) is shared by MongooseModule.register([User]) in UsersModule (the default connection) ' +
+        "and MongooseModule.register([User], { name: 'default' }) in ReportsModule (connection 'default') - " +
+        'a shared provider must be declared the same way in every module; use a separate token for each variant',
+    )
   })
 })
 

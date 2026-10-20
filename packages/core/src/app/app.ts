@@ -171,6 +171,8 @@ export class Miia {
   private shutdownHooksOption: boolean | NodeJS.Signals[]
   private shutdownHandlersRegistered = false
   private shutdownInProgress = false
+  /** The shutdown in progress: a concurrent destroy() shares it. */
+  private destroying?: Promise<void>
   /**
    * Tracks listeners we registered so destroy() can `process.off()` them
    * symmetrically. Without this, every Miia instance that calls listen()
@@ -447,7 +449,15 @@ export class Miia {
     this.registerShutdownHandlers()
   }
 
-  async destroy(): Promise<void> {
+  destroy(): Promise<void> {
+    // Cleared when it settles: a later destroy() runs again.
+    this.destroying ??= this.runDestroy().finally(() => {
+      this.destroying = undefined
+    })
+    return this.destroying
+  }
+
+  private async runDestroy(): Promise<void> {
     // Unregister signal listeners we added so repeated listen()+destroy() in
     // tests does not leak. Idempotent - no-op if registerShutdownHandlers
     // was never called or shutdownHooks: false.

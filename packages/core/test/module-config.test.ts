@@ -10,6 +10,7 @@ import {
   Module,
   overrideProvider,
   provider,
+  UseGuard,
 } from '../src/index.js'
 
 function get(app: Miia, path: string): Promise<Response> {
@@ -465,6 +466,108 @@ describe('a module class configured under several names', () => {
     const ab = await initError(new Miia({ logger: false }).register(RootAB))
     const ba = await initError(new Miia({ logger: false }).register(RootBA))
     expect(ab.message).toContain("Dyn (Dyn (name 'b') in HostB) injects X (XModule):")
+    expect(ba.message).toBe(ab.message)
+  })
+
+  it('checks a declared guard of its controller from every name, whatever the order of imports', async () => {
+    @Injectable()
+    class G {
+      canActivate() {
+        return true
+      }
+    }
+
+    @Module({ providers: [G], exports: [G] })
+    class GModule {}
+
+    @Controller('/dyn')
+    @UseGuard(G)
+    class DynController {
+      @Get('/')
+      read(_ctx: RequestContext) {
+        return {}
+      }
+    }
+
+    @Module({ controllers: [DynController] })
+    class Dyn {
+      static configure(name: Name): ConfiguredModule {
+        return { module: Dyn, name }
+      }
+    }
+
+    @Module({ imports: [GModule, Dyn.configure('a')] })
+    class HostA {}
+
+    @Module({ imports: [Dyn.configure('b')] })
+    class HostB {}
+
+    @Module({ imports: [HostA, HostB] })
+    class RootAB {}
+
+    @Module({ imports: [HostB, HostA] })
+    class RootBA {}
+
+    const ab = await initError(new Miia({ logger: false }).register(RootAB))
+    const ba = await initError(new Miia({ logger: false }).register(RootBA))
+    expect(ab.message).toBe(
+      '[Miia] 1 module boundary violation:\n\n' +
+        "DynController (Dyn (name 'b') in HostB) uses G (GModule):\n" +
+        '  - add GModule to HostB `imports`\n\n' +
+        'Docs: /docs/core-concepts/modules#boundaries',
+    )
+    expect(ba.message).toBe(ab.message)
+  })
+
+  it('checks what a guard of its controller no module declares injects from every name', async () => {
+    const X = createToken<string>('X')
+
+    @Module({ providers: [provider(X, () => 'x')], exports: [X] })
+    class XModule {}
+
+    class PeekGuard {
+      x = inject(X)
+      canActivate() {
+        return true
+      }
+    }
+
+    @Controller('/dyn')
+    @UseGuard(PeekGuard)
+    class DynController {
+      @Get('/')
+      read(_ctx: RequestContext) {
+        return {}
+      }
+    }
+
+    @Module({ controllers: [DynController] })
+    class Dyn {
+      static configure(name: Name): ConfiguredModule {
+        return { module: Dyn, name }
+      }
+    }
+
+    @Module({ imports: [XModule, Dyn.configure('a')] })
+    class HostA {}
+
+    @Module({ imports: [Dyn.configure('b')] })
+    class HostB {}
+
+    @Module({ imports: [HostA, HostB] })
+    class RootAB {}
+
+    @Module({ imports: [HostB, HostA] })
+    class RootBA {}
+
+    const ab = await initError(new Miia({ logger: false }).register(RootAB))
+    const ba = await initError(new Miia({ logger: false }).register(RootBA))
+    expect(ab.message).toBe(
+      '[Miia] 1 module boundary violation:\n\n' +
+        "PeekGuard (guard of DynController in Dyn (name 'b') in HostB) injects X (XModule):\n" +
+        '  - add XModule to HostB `imports`\n\n' +
+        'Docs: /docs/core-concepts/modules#boundaries',
+    )
     expect(ba.message).toBe(ab.message)
   })
 

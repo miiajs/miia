@@ -18,7 +18,8 @@ export class RoutesResolver {
     this.routerExplorer = new RouterExplorer(router, container)
   }
 
-  resolve(controller: Constructor, modulePrefix: string, node: ModuleNode): void {
+  /** `owners`: the other modules that own the controller; its guards are checked from them too. */
+  resolve(controller: Constructor, modulePrefix: string, node: ModuleNode, owners?: readonly ModuleNode[]): void {
     if (!this.container.has(controller)) {
       this.container.register(controller, () => new controller(), 'singleton', undefined, node)
     }
@@ -29,6 +30,6 @@ export class RoutesResolver {
 
     this.logger.log(`${controller.name} {/${joinPaths(this.router.globalPrefix, fullPrefix)}}`)
 
-    this.routerExplorer.explore(instance, controller, fullPrefix, node)
+    this.routerExplorer.explore(instance, controller, fullPrefix, node, owners)
   }
 }

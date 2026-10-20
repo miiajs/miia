@@ -161,7 +161,7 @@ export class ModuleLoader {
         }
         for (const owner of owners) this.container.addOwner(controller, owner)
       }
-      this.routesResolver.resolve(controller, prefix, node)
+      this.routesResolver.resolve(controller, prefix, node, owners)
       const ctrlPrefix = getMeta<string>(controller, PREFIX) ?? ''
       const resolvedPrefix = joinPaths(prefix, ctrlPrefix)
       // Expose the fully-resolved prefix as class metadata so DiscoveryService

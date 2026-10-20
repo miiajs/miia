@@ -12,6 +12,8 @@ import type { ModuleGraph, ModuleNode } from './app/module-graph.js'
 
 /** Where a check looks from: a module, or the root for what has none. */
 export type View = ModuleNode | 'root'
+/** What a Resolver looks from: a view, or every module that declares the entry it was injected into. */
+export type ResolverView = View | readonly ModuleNode[]
 
 interface ContainerEntry {
   factory: ((resolve: Resolve) => unknown) | (() => unknown)
@@ -69,6 +71,10 @@ export interface RequestScopeHolder {
   _scope: Map<AnyToken, unknown> | typeof CLOSED | null
 }
 
+function isModuleList(view: ResolverView): view is readonly ModuleNode[] {
+  return Array.isArray(view)
+}
+
 function isThenable(value: unknown): value is PromiseLike<unknown> {
   return (
     value !== null &&
@@ -99,7 +105,7 @@ export class Container {
   /** Every constructed singleton: a request does not own one its factory returns. */
   private singletons = new WeakSet<object>()
   private requestLogger = new Logger('RequestScope')
-  /** The async onDestroy() chains of finished requests; destroyAll() waits for them. */
+  /** The async onDestroy() chains of finished requests, one per request; destroyAll() waits for them. */
   private pendingRequestDestroys = new Set<Promise<void>>()
   private stack: Frame[] = []
   /** Violations of the start-up window; null outside it, where a violation throws at once. */
@@ -107,9 +113,13 @@ export class Container {
   /** Requester -> dependency, between singletons, keyed by token: an override replaces the entry, not the token. */
   private edges = new Map<AnyToken, Set<AnyToken>>()
   private hookOrder: HookTarget[] | null = null
-  /** The built-in Resolver, bound to the root; while it is registered, inject(Resolver) gets one for its module. */
+  /**
+   * The built-in Resolver, bound to the root; while it is registered, inject(Resolver) gets one for its module, or
+   * for every module of an entry several declare.
+   */
   private resolverEntry: ContainerEntry | null = null
-  private resolvers = new Map<ModuleNode, Resolver>()
+  /** By module, or by the live `owners` of an entry several modules declare. */
+  private resolvers = new WeakMap<ModuleNode | readonly ModuleNode[], Resolver>()
   /** Guard -> the modules it is already checked from. */
   private checkedGuards = new Map<AnyToken, Set<View>>()
 
@@ -181,21 +191,22 @@ export class Container {
   }
 
   /**
-   * Resolver.has(): registered and visible from `view`.
+   * Resolver.has(): registered and visible from `view` - from each of its modules for a list.
    * @internal
    */
-  visible(view: View, token: AnyToken): boolean {
+  visible(view: ResolverView, token: AnyToken): boolean {
     const entry = this.registry.get(token)
     if (!entry) return false
-    return this.graph === null || entry.owner === null || this.sees(view, token)
+    if (this.graph === null || entry.owner === null) return true
+    return isModuleList(view) ? view.every((node) => this.sees(node, token)) : this.sees(view, token)
   }
 
   /**
-   * Resolver.resolve() / resolveOptional(): checked from `view`. A request-scoped token throws even inside a
-   * request - Resolver has no request to keep the instance on.
+   * Resolver.resolve() / resolveOptional(): checked from `view`, from each of its modules for a list. A request-scoped
+   * token throws even inside a request - Resolver has no request to keep the instance on.
    * @internal
    */
-  resolveFrom(view: View, token: AnyToken, optional: boolean): unknown {
+  resolveFrom(view: ResolverView, token: AnyToken, optional: boolean): unknown {
     const entry = this.registry.get(token)
     if (!entry) {
       if (optional) return null
@@ -209,11 +220,21 @@ export class Container {
     }
     if (entry === this.resolverEntry && view !== 'root') return this.resolverOf(view)
     const owner = entry.owner
-    if (this.graph !== null && owner !== null && !this.sees(view, token)) {
-      const from = view === 'root' ? null : view
-      this.violate({ requester: Resolver, from, provided: false, token, owner, via: 'resolve', controller: null })
+    if (this.graph !== null && owner !== null) {
+      if (isModuleList(view)) {
+        for (let i = 0; i < view.length; i++) this.checkResolve(view[i]!, token, owner)
+      } else {
+        this.checkResolve(view, token, owner)
+      }
     }
     return this.instantiate(token, entry, this.stack.at(-1))
+  }
+
+  /** A Resolver of `view` resolving `token`, declared by `owner`. */
+  private checkResolve(view: View, token: AnyToken, owner: ModuleNode): void {
+    if (this.sees(view, token)) return
+    const from = view === 'root' ? null : view
+    this.violate({ requester: Resolver, from, provided: false, token, owner, via: 'resolve', controller: null })
   }
 
   /**
@@ -282,7 +303,7 @@ export class Container {
   /**
    * The end of a request: onDestroy() on the instances it owns, newest first, in a microtask after the caller has
    * returned. Not the context itself, a singleton a request factory returned, or a lazy proxy. Nothing to destroy,
-   * nothing scheduled. destroyAll() waits for the hooks still running.
+   * nothing scheduled. destroyAll() waits for the hooks of requests that finished before it started.
    * @internal
    */
   destroyRequestScope(scope: Map<AnyToken, unknown>, ctx: object): void {
@@ -402,9 +423,14 @@ export class Container {
     return failures
   }
 
-  /** Until no request onDestroy() chain is pending: a chain that settles may have started the next one. */
+  /**
+   * The onDestroy() chains of requests that finished before shutdown started. The microtask of a request that ended
+   * in this tick runs before the continuation of `await null` and registers its chain; one that ends later is not
+   * waited for, so requests that keep coming in (app.fetch without a server to close) cannot hold shutdown.
+   */
   private async settleRequestScopes(): Promise<void> {
-    while (this.pendingRequestDestroys.size > 0) await Promise.all([...this.pendingRequestDestroys])
+    await null
+    if (this.pendingRequestDestroys.size > 0) await Promise.all([...this.pendingRequestDestroys])
   }
 
   /** Hooks from `targets[from]` down to the oldest; after a hook that returns a thenable the rest wait for it. */
@@ -428,13 +454,22 @@ export class Container {
     }
   }
 
+  /** The rest of the hooks of a request after `targets[at]` returned a thenable: one chain, which never rejects. */
   private async awaitRequestDestroy(pending: PromiseLike<unknown>, targets: HookTarget[], at: number): Promise<void> {
     try {
       await pending
     } catch (error) {
       this.requestDestroyFailed(targets[at]!.token, error)
     }
-    this.runRequestDestroy(targets, at - 1)
+    for (let i = at - 1; i >= 0; i--) {
+      const target = targets[i]!
+      try {
+        const result = (target.instance as { onDestroy: () => unknown }).onDestroy()
+        if (isThenable(result)) await result
+      } catch (error) {
+        this.requestDestroyFailed(target.token, error)
+      }
+    }
   }
 
   /** A logger that throws must not escape the microtask. */
@@ -545,8 +580,10 @@ export class Container {
       if (optional) return null
       throw new Error(this.noProviderMessage(token, describe(frame.token, frame.entry.owner)))
     }
-    // The built-in Resolver comes bound to the module of the requester; one without a module gets the root one.
-    if (entry === this.resolverEntry && frame.entry.owner !== null) return this.resolverOf(frame.entry.owner)
+    // The built-in Resolver comes bound to the module of the requester, or to all of them for an entry several modules
+    // declare; one without a module gets the root one.
+    const owners = frame.entry.owners
+    if (entry === this.resolverEntry && owners !== null) return this.resolverOf(owners.length > 1 ? owners : owners[0]!)
     if (this.graph !== null && entry.owner !== null) {
       if (frame.entry.guard) (frame.entry.injected ??= new Set()).add(token)
       else this.checkVisible(frame, token, entry.owner, 'inject')
@@ -554,9 +591,9 @@ export class Container {
     return this.instantiate(token, entry, frame)
   }
 
-  private resolverOf(node: ModuleNode): Resolver {
-    let resolver = this.resolvers.get(node)
-    if (!resolver) this.resolvers.set(node, (resolver = new Resolver(this, node)))
+  private resolverOf(view: ModuleNode | readonly ModuleNode[]): Resolver {
+    let resolver = this.resolvers.get(view)
+    if (!resolver) this.resolvers.set(view, (resolver = new Resolver(this, view)))
     return resolver
   }
 
