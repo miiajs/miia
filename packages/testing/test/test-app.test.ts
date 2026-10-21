@@ -135,7 +135,7 @@ describe('TestApp', () => {
       const app = await TestApp.create(AppModule)
         .override(UserService, {
           findAll: () => [{ id: 99, name: 'Mock User' }],
-          findById: () => null,
+          findById: (id: string) => ({ id, name: 'Mock User' }),
           create: () => null,
         })
         .compile()
@@ -150,7 +150,7 @@ describe('TestApp', () => {
     it('should return mock from resolve()', async () => {
       const mockService = {
         findAll: () => [],
-        findById: () => null,
+        findById: (id: string) => ({ id, name: 'Mock User' }),
         create: () => null,
       }
 

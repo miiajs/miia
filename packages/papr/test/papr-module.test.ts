@@ -99,8 +99,24 @@ describe('defineModel', () => {
     expect(Post.name).toBe('PaprModel(posts)')
   })
 
-  it('hints at PaprModule.register()', () => {
-    expect(defineModel('posts', fakeSchema).hint).toBe('PaprModule.register([...])')
+  it('hints at PaprModule.register() with the model', () => {
+    expect(defineModel('posts', fakeSchema).hint).toBe('PaprModule.register([posts])')
+  })
+
+  it('names the register() call in the error for a model nobody registered', () => {
+    const User = defineModel('users', fakeSchema)
+
+    @Injectable()
+    class UsersService {
+      users = inject(User)
+    }
+
+    const app = createApp(PaprModule.configure({ connection: { url: 'mongodb://localhost/test' } }))
+    app.provide(UsersService)
+
+    expect(() => app.get(UsersService)).toThrow(
+      'PaprModel(users) is provided by PaprModule.register([users]); import that module where PaprModel(users) is used',
+    )
   })
 
   it('returns a fresh token on each call (no memoization)', () => {
@@ -495,7 +511,9 @@ describe('PaprService', () => {
   it('throws a helpful error when getModel is called for an unknown token', () => {
     const Unknown = defineModel('unknown', fakeSchema)
     const service = new PaprService({ connection: { url: 'mongodb://localhost/test' } }, new Map())
-    expect(() => service.getModel(Unknown)).toThrow(/not initialized/)
+    expect(() => service.getModel(Unknown)).toThrow(
+      '[Miia/Papr] Model "unknown" not initialized. Did you forget to register it with PaprModule.register([unknown])?',
+    )
   })
 
   it('exposes onInit and onDestroy lifecycle methods', () => {

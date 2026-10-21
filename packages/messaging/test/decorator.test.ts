@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { getMeta } from '@miiajs/core'
-import { On, ON, type OnMeta } from '../src/decorators.js'
+import { IDEMPOTENT, Idempotent, type IdempotentMeta, On, ON, type OnMeta } from '../src/decorators.js'
+import type { MessageMeta } from '../src/types.js'
 
 describe('@On decorator', () => {
   it('writes metadata with topic and handlerName', () => {
@@ -89,5 +90,29 @@ describe('@On decorator', () => {
 
     expect(getMeta<OnMeta[]>(Parent, ON)!.map((i) => i.topic)).toEqual(['a'])
     expect(getMeta<OnMeta[]>(Child, ON)!.map((i) => i.topic)).toEqual(['a', 'b'])
+  })
+})
+
+describe('@Idempotent decorator', () => {
+  interface Payment {
+    id: string
+  }
+
+  it('takes a key typed by the payload', () => {
+    class S {
+      @Idempotent({ ttl: 60_000, key: (p: Payment) => `payment:${p.id}` })
+      onPayment(_payment: Payment) {}
+
+      @Idempotent({ ttl: 60_000, key: (_p, meta) => `at:${meta.timestamp}` })
+      onAny() {}
+
+      // @ts-expect-error - key must return a string
+      @Idempotent({ ttl: 60_000, key: (p: Payment) => p.id.length })
+      onWrongKey() {}
+    }
+
+    const meta = getMeta<Map<string, IdempotentMeta>>(S, IDEMPOTENT)!
+    expect(meta.get('onPayment')!.key!({ id: 'p1' }, {} as MessageMeta)).toBe('payment:p1')
+    expect(meta.get('onAny')!.ttl).toBe(60_000)
   })
 })

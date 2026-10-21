@@ -15,11 +15,11 @@ export class ConfigService<T extends Record<string, any> = Record<string, string
     return this.#config[key]
   }
 
-  getOrThrow<K extends keyof T>(key: K): T[K] {
+  getOrThrow<K extends keyof T>(key: K): Exclude<T[K], undefined> {
     const value = this.#config[key]
     if (value === undefined) {
       throw new Error(`[Miia] Config key "${String(key)}" not found`)
     }
-    return value
+    return value as Exclude<T[K], undefined>
   }
 }

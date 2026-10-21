@@ -7,7 +7,7 @@ import { MessageBus } from '../src/message-bus.js'
 import { InMemoryTransport, inMemoryTransport } from '../src/in-memory-transport.js'
 import { MessagingModule } from '../src/messaging.module.js'
 import { messageBus, transportToken } from '../src/tokens.js'
-import type { Subscription } from '../src/types.js'
+import type { MessageTransport, Subscription } from '../src/types.js'
 
 function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -85,7 +85,7 @@ describe('MessagingModule.configure', () => {
   })
 
   it('calls the options factory once per bus and gives the bus the transport it built', async () => {
-    const built: InMemoryTransport[] = []
+    const built: MessageTransport[] = []
     const factory = () => {
       const transport = inMemoryTransport()
       built.push(transport)

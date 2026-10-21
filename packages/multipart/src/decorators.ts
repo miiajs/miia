@@ -1,4 +1,4 @@
-import { addToMapMeta, BODY_LIMITS, BODY_READERS, createMethodDecorator, METHOD_MW, setInMapMeta } from '@miiajs/core'
+import { BODY_LIMITS, BODY_READERS, createMethodDecorator, METHOD_MW, setInMapMeta } from '@miiajs/core'
 import type { BodyReader, Middleware, RequestContext } from '@miiajs/core'
 import { collectForm } from './form.js'
 import { createPartStream, DEFAULT_FIELDS_BUDGET } from './parser.js'
@@ -8,6 +8,9 @@ import type { FormResult, MultipartOptions, MultipartPart } from './types.js'
 export const MULTIPART_OPTIONS = Symbol('multipartOptions')
 
 const MULTIPART_STATE = Symbol('multipartState')
+
+/** The middleware each `@Multipart` installs, told apart from the handler's other middleware. */
+const multipartMiddlewares = new WeakSet<Middleware>()
 
 type Metadata = Record<string | symbol, any>
 
@@ -69,8 +72,12 @@ type StatefulContext = RequestContext & {
  * becomes the budget, and without one only the adapter ceiling applies. The
  * route limit belongs to whichever decorator wrote it last, so do not put
  * `@Multipart` and `@BodyLimit` on the same method.
+ *
+ * On an override in a subclass controller, `@Multipart` replaces the one the
+ * handler inherited, options and all.
  */
 export const Multipart = createMethodDecorator<[options?: MultipartOptions]>((_target, context, options = {}) => {
+  assertAllowedTypes(options.allowedTypes)
   const name = String(context.name)
   const metadata = metadataOf(context, 'Multipart')
   setInMapMeta(metadata, MULTIPART_OPTIONS, name, options)
@@ -83,7 +90,23 @@ export const Multipart = createMethodDecorator<[options?: MultipartOptions]>((_t
   // Options come from the metadata, not from this closure: a @BodyLimit
   // applied after @Multipart can still become the budget.
   const mw: Middleware = (ctx, next) => withMultipartState(ctx, runtimeOptions(metadata, name), () => next())
-  addToMapMeta(metadata, METHOD_MW, name, [mw])
+  multipartMiddlewares.add(mw)
+
+  // On an override this replaces the @Multipart the handler inherited, in its
+  // place among the parent's middleware. The list is written anew, so the
+  // parent's own stays as it was.
+  const inherited = (metadata[METHOD_MW] as Map<string, Middleware[]> | undefined)?.get(name) ?? []
+  const middlewares: Middleware[] = []
+  let placed = false
+  for (const entry of inherited) {
+    if (!multipartMiddlewares.has(entry)) middlewares.push(entry)
+    else if (!placed) {
+      middlewares.push(mw)
+      placed = true
+    }
+  }
+  if (!placed) middlewares.push(mw)
+  setInMapMeta(metadata, METHOD_MW, name, middlewares)
 })
 
 /**
@@ -190,6 +213,26 @@ function runtimeOptions(metadata: Metadata, name: string): MultipartOptions {
   const limits = metadata[BODY_LIMITS] as Map<string, number> | undefined
   const bodyLimit = limits?.get(name) ?? limits?.get('*')
   return bodyLimit === undefined ? options : { ...options, bodyLimit }
+}
+
+const MEDIA_TYPE = /^[^\s/]+\/[^\s/]+$/
+
+/** A list that can match no file is a mistake in the options, not a policy: it would refuse every upload with 415. */
+function assertAllowedTypes(allowed: string[] | undefined): void {
+  if (allowed === undefined) return
+  if (allowed.length === 0) {
+    throw new TypeError(
+      '@Multipart allowedTypes is empty, so every file part would be refused with 415. Leave it out to allow any type, or set maxFiles: 0 to accept no files.',
+    )
+  }
+  for (const entry of allowed) {
+    // A type and a subtype, as the part's media type is read: `image/` or ` / ` can match nothing
+    if (typeof entry !== 'string' || !MEDIA_TYPE.test(entry.trim())) {
+      throw new TypeError(
+        `@Multipart allowedTypes entry '${String(entry)}' is not a media type. List an exact type like 'image/png' or a wildcard like 'image/*'.`,
+      )
+    }
+  }
 }
 
 function deriveBodyLimit(options: MultipartOptions): number | undefined {

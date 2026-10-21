@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { BODY_READERS, BodyLimit, Controller, getMeta, Miia, Module, Post } from '@miiajs/core'
+import { BODY_READERS, BodyLimit, Controller, getMeta, METHOD_MW, Miia, Module, Post, Use } from '@miiajs/core'
 import type { BodyReader, Constructor, ZodLike, ZodLikeIssue } from '@miiajs/core'
 import { Multipart } from '../src/index.js'
 import type { MultipartContext } from '../src/index.js'
@@ -403,6 +403,138 @@ describe('@Multipart - allowedTypes', () => {
       expect(res.status).toBe(200)
       expect(await res.json()).toEqual({ seen: ['image/png'] })
     }
+  })
+
+  it('throws TypeError on an empty list when the class is defined', () => {
+    const define = () => {
+      class Empty {
+        @Multipart({ allowedTypes: [] })
+        upload() {}
+      }
+      return Empty
+    }
+    expect(define).toThrow(TypeError)
+    expect(define).toThrow(
+      '@Multipart allowedTypes is empty, so every file part would be refused with 415. Leave it out to allow any type, or set maxFiles: 0 to accept no files.',
+    )
+  })
+
+  it('throws TypeError on an entry that is not a media type', () => {
+    const define = () => {
+      class Bare {
+        @Multipart({ allowedTypes: ['image/png', 'jpeg'] })
+        upload() {}
+      }
+      return Bare
+    }
+    expect(define).toThrow(TypeError)
+    expect(define).toThrow(
+      "@Multipart allowedTypes entry 'jpeg' is not a media type. List an exact type like 'image/png' or a wildcard like 'image/*'.",
+    )
+  })
+
+  it('throws TypeError on an entry with an empty type or subtype', () => {
+    for (const entry of ['image/', '/png', ' / ', 'image / png']) {
+      const define = () => {
+        class Half {
+          @Multipart({ allowedTypes: [entry] })
+          upload() {}
+        }
+        return Half
+      }
+      expect(define).toThrow(
+        `@Multipart allowedTypes entry '${entry}' is not a media type. List an exact type like 'image/png' or a wildcard like 'image/*'.`,
+      )
+    }
+  })
+
+  it('takes an entry with whitespace around it, as the list is read', () => {
+    class Padded {
+      @Multipart({ allowedTypes: [' image/png ', 'Image/*'] })
+      upload() {}
+    }
+    expect(Padded).toBeDefined()
+  })
+})
+
+describe('@Multipart on an override', () => {
+  class Base {
+    @Multipart({ allowedTypes: ['image/*'], maxFileSize: 1000 })
+    @Post('/up')
+    async upload(ctx: MultipartContext) {
+      const { files } = await ctx.form()
+      return { files: Object.keys(files) }
+    }
+  }
+
+  function upload(type: string, size: number): FormData {
+    const form = new FormData()
+    form.append('f', new File([new Uint8Array(size)], 'f', { type }))
+    return form
+  }
+
+  it("replaces the parent's: its stricter limits apply", async () => {
+    @Controller('/child')
+    class Child extends Base {
+      @Multipart({ allowedTypes: ['image/png'], maxFileSize: 10 })
+      override async upload(ctx: MultipartContext) {
+        return super.upload(ctx)
+      }
+    }
+
+    const app = bootstrap(Child)
+    expect((await postForm(app, '/child/up', upload('image/jpeg', 5))).status).toBe(415)
+    expect((await postForm(app, '/child/up', upload('image/png', 500))).status).toBe(413)
+    expect((await postForm(app, '/child/up', upload('image/png', 5))).status).toBe(200)
+  })
+
+  it("replaces the parent's when the override declares its own route too", async () => {
+    @Controller('/child')
+    class Child extends Base {
+      @Multipart({ allowedTypes: ['image/png'] })
+      @Post('/up')
+      override async upload(ctx: MultipartContext) {
+        return super.upload(ctx)
+      }
+    }
+
+    expect((await postForm(bootstrap(Child), '/child/up', upload('image/jpeg', 5))).status).toBe(415)
+  })
+
+  it("keeps its place among the parent's middleware and leaves the parent as it was", async () => {
+    const seen: string[] = []
+    class Parent {
+      @Use(async (ctx, next) => {
+        seen.push(`parts:${'parts' in ctx}`)
+        await next()
+      })
+      @Multipart({ allowedTypes: ['image/*'] })
+      @Post('/up')
+      async upload(ctx: MultipartContext) {
+        await ctx.form()
+        return { ok: true }
+      }
+    }
+
+    @Controller('/child')
+    class Child extends Parent {
+      @Multipart({ allowedTypes: ['image/png'] })
+      override upload(ctx: MultipartContext) {
+        return super.upload(ctx)
+      }
+    }
+
+    @Controller('/parent')
+    class Own extends Parent {}
+
+    const app = bootstrap(Child, Own)
+    expect((await postForm(app, '/child/up', upload('image/png', 5))).status).toBe(200)
+    // The parent's @Use, applied after its @Multipart, still runs inside it
+    expect(seen).toEqual(['parts:true'])
+    expect(getMeta<Map<string, unknown[]>>(Child, METHOD_MW)?.get('upload')).toHaveLength(2)
+    expect((await postForm(app, '/child/up', upload('image/jpeg', 5))).status).toBe(415)
+    expect((await postForm(app, '/parent/up', upload('image/jpeg', 5))).status).toBe(200)
+    expect(getMeta<Map<string, unknown[]>>(Parent, METHOD_MW)?.get('upload')).toHaveLength(2)
   })
 })
 

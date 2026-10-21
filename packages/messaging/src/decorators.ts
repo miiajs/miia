@@ -174,11 +174,14 @@ export const On = createMethodDecorator<
  * @throws at app startup if any `@Idempotent` handler exists but no
  *   `IdempotencyStore` was passed to `MessagingModule.configure()`.
  */
-export const Idempotent = createMethodDecorator<
-  [options: { ttl: number; key?: (payload: unknown, meta: MessageMeta) => string }]
+export const Idempotent: <T = unknown>(options: {
+  ttl: number
+  key?: (payload: T, meta: MessageMeta) => string
+}) => (target: Function, context: ClassMethodDecoratorContext) => void = createMethodDecorator<
+  [options: { ttl: number; key?: (payload: never, meta: MessageMeta) => string }]
 >((_target, ctx, options) => {
   setInMapMeta(ctx.metadata!, IDEMPOTENT, String(ctx.name), {
     ttl: options.ttl,
-    key: options.key,
+    key: options.key as IdempotentMeta['key'],
   } satisfies IdempotentMeta)
 })

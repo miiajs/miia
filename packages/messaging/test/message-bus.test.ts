@@ -401,7 +401,7 @@ describe('MessageBus', () => {
       class H {
         calls: unknown[] = []
         @On('payment')
-        @Idempotent({ ttl: 60_000, key: (p: { txId: string }) => `txn:${p.txId}` })
+        @Idempotent({ ttl: 60_000, key: (p) => `txn:${(p as { txId: string }).txId}` })
         async run(p: { txId: string }) {
           this.calls.push(p)
         }

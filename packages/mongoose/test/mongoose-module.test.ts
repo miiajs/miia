@@ -531,7 +531,9 @@ describe('MongooseService', () => {
   it('throws a helpful error when getModel is called for an unknown token', () => {
     const Unknown = defineModel('Unknown', userSchema())
     const service = new MongooseService({ uri: 'mongodb://localhost/test' }, new Map())
-    expect(() => service.getModel(Unknown)).toThrow(/not initialized/)
+    expect(() => service.getModel(Unknown)).toThrow(
+      '[Miia/Mongoose] Model "Unknown" not initialized. Did you forget to register it with MongooseModule.register([Unknown])?',
+    )
   })
 
   it('exposes onInit and onDestroy lifecycle methods', () => {

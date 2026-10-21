@@ -194,6 +194,45 @@ describe('SpecBuilder', () => {
     })
   })
 
+  it('documents a subclass with the routes and schemas of its overrides', () => {
+    const RenameSchema = z.object({ name: z.string() })
+
+    @Controller('/base')
+    class BaseController {
+      @Post('/', { body: CreateUserSchema })
+      create(_ctx: RequestContext) {}
+
+      @Get('/:id', { query: SearchSchema })
+      findOne(_ctx: RequestContext) {}
+    }
+
+    @Controller('/users')
+    class UserController extends BaseController {
+      @Post('/', { body: RenameSchema })
+      override create(_ctx: RequestContext) {}
+
+      @Get('/by-email/:email')
+      override findOne(_ctx: RequestContext) {}
+    }
+
+    const info = { title: 'Test', version: '1.0.0' }
+    const spec = new SpecBuilder().build([{ controller: UserController, prefix: 'users' }], info)
+
+    expect(Object.keys(spec.paths).sort()).toEqual(['/users', '/users/by-email/{email}'])
+    const body = spec.paths['/users'].post.requestBody.content['application/json'].schema
+    expect(Object.keys(body.properties)).toEqual(['name'])
+    const findOne = spec.paths['/users/by-email/{email}'].get
+    expect(findOne.parameters).toEqual([{ name: 'email', in: 'path', required: true, schema: { type: 'string' } }])
+    expect(findOne.responses['422']).toBeUndefined()
+
+    const base = new SpecBuilder().build([{ controller: BaseController, prefix: 'base' }], info)
+    expect(Object.keys(base.paths).sort()).toEqual(['/base', '/base/{id}'])
+    const baseBody = base.paths['/base'].post.requestBody.content['application/json'].schema
+    expect(Object.keys(baseBody.properties)).toEqual(['name', 'email', 'password'])
+    expect(base.paths['/base/{id}'].get.parameters.map((p: { name: string }) => p.name)).toEqual(['id', 'q', 'limit'])
+    expect(base.paths['/base/{id}'].get.responses['422']).toBeDefined()
+  })
+
   it('should support multipart/form-data via @ApiBody options', () => {
     @Controller('/users')
     class UserController {

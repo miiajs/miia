@@ -21,8 +21,9 @@ export interface MultipartOptions {
    * Only **file** parts are checked. RFC 7578 reads a part that declares no
    * `Content-Type` as `text/plain`, so a list like `['image/png']` would
    * otherwise reject the form's ordinary text fields; a file declaring nothing
-   * is compared as `application/octet-stream`. An empty list allows no file at
-   * all.
+   * is compared as `application/octet-stream`. An empty list, or an entry
+   * that is not a type and a subtype (`png`, `image/`), throws a `TypeError`
+   * when the class is defined.
    *
    * The check runs at the start of a part, before its body is read, and a part
    * outside the list ends the request with a `415`. The header is written by

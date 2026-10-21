@@ -40,7 +40,7 @@ export class PaprService {
     if (!m) {
       throw new Error(
         `[Miia/Papr] Model "${token.collectionName}" not initialized. ` +
-          `Did you forget to register it with PaprModule.register([${token.name}])?`,
+          `Did you forget to register it with PaprModule.register([${token.collectionName}])?`,
       )
     }
     return m

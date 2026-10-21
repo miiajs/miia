@@ -271,6 +271,43 @@ d('RedisStreamsTransport', () => {
     await shutdown
   })
 
+  it('rejects a subscribe() that shutdown starts during, and closes its lanes', async () => {
+    // The lane connect is the last await of `subscribe()`: hold it there while the whole shutdown drain runs.
+    let reached!: () => void
+    const atLane = new Promise<void>((r) => {
+      reached = r
+    })
+    let release!: () => void
+    const gate = new Promise<void>((r) => {
+      release = r
+    })
+    const lanes: Redis[] = []
+    const duplicate = client.duplicate.bind(client)
+    const spy = spyOn(client, 'duplicate').mockImplementation((override) => {
+      const lane = duplicate(override)
+      const connect = lane.connect.bind(lane)
+      lane.connect = async () => {
+        await connect()
+        reached()
+        await gate
+      }
+      lanes.push(lane)
+      return lane
+    })
+    try {
+      const pending = transport.subscribe(topic, async () => ({ status: 'ack' }), { group: 'g' })
+      await atLane
+      await transport.onShutdown()
+      release()
+
+      await expect(pending).rejects.toThrow('[messaging-redis] subscribe() after shutdown started')
+      expect(lanes).toHaveLength(1)
+      await waitFor(() => lanes[0]!.status === 'end', 'the lane connection to close')
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
   describe('connection isolation', () => {
     // Each test below builds its own standalone transport because the shared
     // beforeEach uses blockMs: 200, which would mask the contention these

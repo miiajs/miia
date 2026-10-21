@@ -691,12 +691,13 @@ describe('createPartStream - a throw out of the parser', () => {
       seen.push(reason)
     }
 
+    const emitter: NodeJS.EventEmitter = process
     process.on('unhandledRejection', record)
     try {
       await statusOf(deadline(collect(chunkedRequest(contentType, [malformed('payload')])), 1000, 'the request'))
       await new Promise((resolve) => setTimeout(resolve, 50))
     } finally {
-      process.off('unhandledRejection', record)
+      emitter.off('unhandledRejection', record)
     }
 
     expect(seen).toEqual([])

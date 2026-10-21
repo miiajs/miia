@@ -65,6 +65,15 @@ describe('ConfigService', () => {
       expect(service.getOrThrow('FALSE')).toBe(false)
       expect(service.getOrThrow('NULL')).toBe(null)
     })
+
+    it('drops undefined from the type of the value', () => {
+      const service = createService<AppConfig>({ PORT: '3000', HOST: 'localhost', DEBUG: 'true' })
+      const debug: string = service.getOrThrow('DEBUG')
+      // @ts-expect-error - get() keeps undefined in the type
+      const maybe: string = service.get('DEBUG')
+      expect(debug).toBe('true')
+      expect(maybe).toBe('true')
+    })
   })
 
   describe('private state', () => {

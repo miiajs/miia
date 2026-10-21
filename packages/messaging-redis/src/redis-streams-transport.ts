@@ -152,13 +152,6 @@ interface LuaCommands {
   moveToDlq(streamKey: string, dlqKey: string, group: string, entryId: string, envelopeJson: string): Promise<number>
 }
 
-// ioredis types don't cover `XPENDING ... IDLE`, so it - and `XCLAIM` with
-// its variadic ids - goes through an untyped view.
-interface RawCommands {
-  xpending(...args: unknown[]): Promise<unknown>
-  xclaim(...args: unknown[]): Promise<unknown>
-}
-
 /**
  * Redis Streams transport for `@miiajs/messaging`. `publish()` is `XADD`; `subscribe()` joins a consumer group -
  * creating it at the subscription's `initialPosition` when it does not exist - and reads it with
@@ -320,10 +313,6 @@ export class RedisStreamsTransport implements MessageTransport {
 
   private get lua(): LuaCommands {
     return this.client as unknown as LuaCommands
-  }
-
-  private get raw(): RawCommands {
-    return this.client as unknown as RawCommands
   }
 
   async onInit(): Promise<void> {
@@ -858,6 +847,11 @@ export class RedisStreamsTransport implements MessageTransport {
       for (const lane of lanes) this.closeLane(lane)
       throw err
     }
+    // Shutdown may have started during an await above and stopped what `subs` held then - this one would read on.
+    if (this.stopping) {
+      for (const lane of lanes) this.closeLane(lane)
+      throw new Error('[messaging-redis] subscribe() after shutdown started')
+    }
 
     const abort = new AbortController()
     const sub: ActiveSub = {
@@ -1174,7 +1168,7 @@ export class RedisStreamsTransport implements MessageTransport {
     let cursor = '-'
 
     while (!this.stopping && !sub.abort.signal.aborted) {
-      const window = (await this.raw.xpending(topic, group, 'IDLE', this.horizonMs, cursor, '+', PENDING_PAGE)) as
+      const window = (await this.client.xpending(topic, group, 'IDLE', this.horizonMs, cursor, '+', PENDING_PAGE)) as
         | PendingEntry[]
         | null
       if (!window || window.length === 0) return
@@ -1237,7 +1231,7 @@ export class RedisStreamsTransport implements MessageTransport {
    * instead of a second delivery.
    */
   private async claim(topic: string, group: string, consumer: string, id: string): Promise<[string, string[]] | null> {
-    const reply = (await this.raw.xclaim(topic, group, consumer, this.horizonMs, id)) as [string, string[]][] | null
+    const reply = (await this.client.xclaim(topic, group, consumer, this.horizonMs, id)) as [string, string[]][] | null
     return reply?.[0] ?? null
   }
 
@@ -1280,7 +1274,7 @@ export class RedisStreamsTransport implements MessageTransport {
     for (const [consumer, ids] of byConsumer) {
       for (let i = 0; i < ids.length; i += HEARTBEAT_BATCH) {
         const chunk = ids.slice(i, i + HEARTBEAT_BATCH)
-        await this.raw.xclaim(topic, group, consumer, 0, ...chunk, 'IDLE', 0, 'JUSTID')
+        await this.client.xclaim(topic, group, consumer, 0, ...chunk, 'IDLE', 0, 'JUSTID')
       }
     }
   }

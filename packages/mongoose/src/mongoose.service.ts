@@ -32,7 +32,7 @@ export class MongooseService {
     if (!m) {
       throw new Error(
         `[Miia/Mongoose] Model "${token.modelName}" not initialized. ` +
-          `Did you forget to register it with MongooseModule.register([${token.name}])?`,
+          `Did you forget to register it with MongooseModule.register([${token.modelName}])?`,
       )
     }
     return m
