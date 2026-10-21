@@ -139,6 +139,14 @@ The admin seed is skipped in production. Create your first admin via `POST /api/
 UPDATE users SET role = 'admin' WHERE email = 'you@example.com';
 ```
 
+## Tests
+
+```sh
+DATABASE_TEST_URL=postgres://postgres:postgres@localhost:5432/miia_test bun test
+```
+
+`src/app.module.test.ts` applies the migrations to the database it is given and is skipped without `DATABASE_TEST_URL`; the other tests replace the database with a stub.
+
 ## Further reading
 
 - [MiiaJS source](../..)

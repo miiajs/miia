@@ -25,12 +25,10 @@ export class UserService {
   }
 
   async update(id: string, data: Record<string, any>) {
-    const { ObjectId } = await import('mongodb')
     return this.users.findOneAndUpdate({ _id: new ObjectId(id) }, { $set: data }, { returnDocument: 'after' })
   }
 
   async delete(id: string) {
-    const { ObjectId } = await import('mongodb')
     const result = await this.users.deleteOne({ _id: new ObjectId(id) })
     return result.deletedCount > 0
   }

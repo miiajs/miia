@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { BadRequestException, inject, Injectable, Logger, NotFoundException } from '@miiajs/core'
+import { BadRequestException, ConflictException, inject, Injectable, Logger, NotFoundException } from '@miiajs/core'
 import { hash } from '@node-rs/argon2'
 import { db } from '../db.js'
 import { type NewUser, publicUserColumns, users } from './user.table.js'
-import { count, desc, eq } from 'drizzle-orm'
+import { count, desc, DrizzleQueryError, eq } from 'drizzle-orm'
 import type { ListUsersQuery, UpdateUserInput } from './schemas/index.js'
 import { ConfigService } from '@miiajs/config'
 import { usersConfig } from './users.config.js'
@@ -16,6 +16,7 @@ const AVATAR_EXTENSIONS: Record<string, string> = {
   'image/jpeg': '.jpg',
   'image/webp': '.webp',
 }
+const UNIQUE_VIOLATION = '23505'
 
 @Injectable()
 export class UsersService {
@@ -34,7 +35,7 @@ export class UsersService {
       role: 'admin',
       passwordHash: await hash(password),
     })
-    this.logger.log(`Seeded admin user (${email} / ${password})`)
+    this.logger.log(`Seeded admin user ${email}, password from SEED_ADMIN_PASSWORD (default in users.config.ts)`)
   }
 
   public async findByEmail(email: string) {
@@ -54,8 +55,17 @@ export class UsersService {
   }
 
   public async create(input: NewUser) {
-    const [user] = await this.db.insert(users).values(input).returning(publicUserColumns)
-    return user
+    try {
+      const [user] = await this.db.insert(users).values(input).returning(publicUserColumns)
+      return user
+    } catch (err) {
+      if (!(err instanceof DrizzleQueryError)) throw err
+      // A concurrent insert of the same email passes the existence check and fails here instead
+      const code = (err.cause as { code?: unknown } | undefined)?.code
+      if (code === UNIQUE_VIOLATION) throw new ConflictException('User with this email already exists')
+      // The message of a DrizzleQueryError lists the query parameters, the password hash among them
+      throw new Error(`Failed to create user${typeof code === 'string' ? ` (code ${code})` : ''}`)
+    }
   }
 
   public async remove(id: number) {

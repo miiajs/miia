@@ -2,7 +2,7 @@ import { Controller, Get, Post, Put, Delete, Status, inject, NotFoundException }
 import type { RequestContext } from '@miiajs/core'
 import type { z } from 'zod'
 import { UserService } from './user.service'
-import { CreateUserSchema, UpdateUserSchema } from './schemas'
+import { CreateUserSchema, UpdateUserSchema, type UserIdParams, UserIdParamsSchema } from './schemas'
 
 type CreateUserInput = z.infer<typeof CreateUserSchema>
 type UpdateUserInput = z.infer<typeof UpdateUserSchema>
@@ -16,10 +16,11 @@ export class UserController {
     return this.userService.findAll()
   }
 
-  @Get('/:id')
+  @Get('/:id', { params: UserIdParamsSchema })
   async findOne(ctx: RequestContext) {
-    const user = await this.userService.findById(Number(ctx.params.id))
-    if (!user) throw new NotFoundException(`User ${ctx.params.id} not found`)
+    const { id } = ctx.params as UserIdParams
+    const user = await this.userService.findById(id)
+    if (!user) throw new NotFoundException(`User ${id} not found`)
     return user
   }
 
@@ -29,17 +30,19 @@ export class UserController {
     return this.userService.create(await ctx.json<CreateUserInput>())
   }
 
-  @Put('/:id', { body: UpdateUserSchema })
+  @Put('/:id', { params: UserIdParamsSchema, body: UpdateUserSchema })
   async update(ctx: RequestContext) {
-    const user = await this.userService.update(Number(ctx.params.id), await ctx.json<UpdateUserInput>())
-    if (!user) throw new NotFoundException(`User ${ctx.params.id} not found`)
+    const { id } = ctx.params as UserIdParams
+    const user = await this.userService.update(id, await ctx.json<UpdateUserInput>())
+    if (!user) throw new NotFoundException(`User ${id} not found`)
     return user
   }
 
-  @Delete('/:id')
+  @Delete('/:id', { params: UserIdParamsSchema })
   async remove(ctx: RequestContext) {
-    const deleted = await this.userService.delete(Number(ctx.params.id))
-    if (!deleted) throw new NotFoundException(`User ${ctx.params.id} not found`)
+    const { id } = ctx.params as UserIdParams
+    const deleted = await this.userService.delete(id)
+    if (!deleted) throw new NotFoundException(`User ${id} not found`)
     return { deleted }
   }
 }

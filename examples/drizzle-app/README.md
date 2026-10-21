@@ -29,6 +29,14 @@ curl -X POST http://localhost:3000/users \
 curl http://localhost:3000/users
 ```
 
+## Tests
+
+```sh
+DATABASE_TEST_URL=postgres://postgres:postgres@localhost:5432/miia_test bun test
+```
+
+The tests apply the migrations to the database they are given and are skipped without `DATABASE_TEST_URL`.
+
 ## Project structure
 
 | File | Description |

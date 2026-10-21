@@ -95,7 +95,7 @@ curl -s -X POST http://localhost:3000/orders/duplicate-notification \
   -d '{"orderId":"order-42","customerEmail":"alice@example.com"}' | jq
 ```
 
-Server emits the `notification.send` event twice with identical `orderId`. The handler's `@Idempotent({ key: p => 'notification:' + p.orderId })` claims `notification:order-42` on the first delivery; the second is silently skipped. You see exactly **one** `[memory] sent confirmation` log line.
+Server emits the `notification.send` event twice with identical `orderId`. The handler's `@Idempotent({ key: (p: NotificationSend) => 'notification:' + p.orderId })` claims `notification:order-42` on the first delivery; the second is silently skipped. You see exactly **one** `[memory] sent confirmation` log line.
 
 ### 3. Retry → DLQ (redis bus)
 
