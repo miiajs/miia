@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@miiajs/cli": "workspace:*",
+    "@miiajs/testing": "workspace:*",
     "typescript": "^6.0.2"
   }
 }

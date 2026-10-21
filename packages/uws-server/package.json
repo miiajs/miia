@@ -45,6 +45,9 @@
   "dependencies": {
     "uWebSockets.js": "github:uNetworking/uWebSockets.js#v20.70.0"
   },
+  "devDependencies": {
+    "@miiajs/core": "workspace:*"
+  },
   "scripts": {
     "build": "tsc --build",
     "clean": "tsc --build --clean"
