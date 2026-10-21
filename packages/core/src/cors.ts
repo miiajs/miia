@@ -1,3 +1,4 @@
+import type { ResponseBuilder } from './response.js'
 import type { Middleware } from './types.js'
 
 export interface CorsOptions {
@@ -39,6 +40,10 @@ export function cors(options: CorsOptions = {}): Middleware {
     )
   }
 
+  // Dynamic origin requires Vary header for correct CDN/proxy caching - on a
+  // refused or missing Origin too, or a cache hands that answer to an allowed origin
+  const varies = origin !== '*'
+
   return async (ctx, next) => {
     const requestOrigin = ctx.req.headers.get('origin') ?? ''
 
@@ -52,17 +57,14 @@ export function cors(options: CorsOptions = {}): Middleware {
       allowOrigin = origin(requestOrigin) ? requestOrigin : ''
     }
 
+    if (varies) varyOnOrigin(ctx.res)
+
     if (!allowOrigin) {
       await next()
       return
     }
 
     ctx.res.header('Access-Control-Allow-Origin', allowOrigin)
-
-    // Dynamic origin requires Vary header for correct CDN/proxy caching
-    if (typeof origin !== 'string' || origin !== '*') {
-      ctx.res.header('Vary', 'Origin')
-    }
 
     if (credentials) {
       ctx.res.header('Access-Control-Allow-Credentials', 'true')
@@ -72,8 +74,8 @@ export function cors(options: CorsOptions = {}): Middleware {
       ctx.res.header('Access-Control-Expose-Headers', exposedHeaders.join(', '))
     }
 
-    // Preflight
-    if (ctx.req.method === 'OPTIONS') {
+    // Preflight, as the Fetch spec defines it: any other OPTIONS goes on to its route
+    if (ctx.req.method === 'OPTIONS' && requestOrigin && ctx.req.headers.has('access-control-request-method')) {
       ctx.res.header('Access-Control-Allow-Methods', methods.join(', '))
       ctx.res.header('Access-Control-Allow-Headers', allowedHeaders.join(', '))
       ctx.res.header('Access-Control-Max-Age', String(maxAge))
@@ -83,4 +85,16 @@ export function cors(options: CorsOptions = {}): Middleware {
 
     await next()
   }
+}
+
+/** Adds `Origin` to the `Vary` an earlier middleware may have set, instead of replacing it. */
+function varyOnOrigin(res: ResponseBuilder): void {
+  const vary = res.getHeaders().get('vary')
+  if (vary === null) {
+    res.header('Vary', 'Origin')
+    return
+  }
+  const names = vary.split(',').map((name) => name.trim().toLowerCase())
+  if (names.includes('*') || names.includes('origin')) return
+  res.header('Vary', `${vary}, Origin`)
 }

@@ -1,16 +1,19 @@
 import { describe, expect, it } from 'bun:test'
 import type { Middleware, RequestContext } from '../src/index.js'
-import { compose, ResponseBuilder } from '../src/index.js'
+import { compose, CookieJar, ResponseBuilder } from '../src/index.js'
 
 function createMockContext(overrides: Partial<RequestContext> = {}): RequestContext {
+  const req = new Request('http://localhost/')
+  const res = new ResponseBuilder()
   return {
-    req: new Request('http://localhost/'),
-    res: new ResponseBuilder(),
+    req,
+    res,
     params: {},
     query: {},
     rawQuery: new URLSearchParams(),
     conn: {},
     ip: undefined,
+    cookies: new CookieJar(req, res),
     json: async <T = any>() => null as T,
     text: async () => '',
     _setBody: () => {},

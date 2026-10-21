@@ -28,7 +28,8 @@ export function countingLimitStream(limit: number): TransformStream<Uint8Array, 
  * runtime has no native body size limit.
  */
 export function applyBodyCeiling(req: Request, ceiling: number): Request {
-  if (req.body === null || req.headers.has('content-length')) return req
+  // Content-Length first: on Deno `req.body` makes a stream, which a CL-framed body read with `json()` never needs
+  if (req.headers.has('content-length') || req.body === null) return req
   return new Request(req, {
     body: req.body.pipeThrough(countingLimitStream(ceiling)),
     // `duplex` is required for stream bodies but missing from RequestInit

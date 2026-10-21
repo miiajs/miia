@@ -206,7 +206,7 @@ export class ModuleLoader {
           const cls = formatToken(moduleCtor)
           throw new Error(
             `[Miia] ${node.label} is configured twice (${node.host!.importer}, ${host.importer}) - configure it once; ` +
-              'for another connection use a different name; ' +
+              'a module that takes a name can be configured again under a different one; ' +
               `in tests, replace it with TestApp.override(${cls}, ${cls}.configure(...))`,
           )
         }
@@ -332,7 +332,7 @@ export class ModuleLoader {
       this.moduleClassOwners.set(moduleCtor, node)
     }
 
-    this.logger.log(`${moduleCtor.name} dependencies initialized`)
+    this.logger.log(`${node.label} dependencies initialized`)
   }
 
   /**
@@ -406,7 +406,13 @@ export class ModuleLoader {
         `[Miia] provide(${name}): ${name} is declared by ${node.where} - replace it with override() instead`,
       )
     }
-    // A built-in token declared by a module keeps the built-in.
+    if (token === REQUEST_CONTEXT) {
+      throw new Error(
+        `[Miia] ${node.where} declares REQUEST_CONTEXT in providers - it is built in and seeded by every request, ` +
+          'so it takes no provider; remove it from providers',
+      )
+    }
+    // Any other built-in token declared by a module keeps the built-in.
     if (this.container.has(token)) return
 
     // An overridden provider still has its owner and key: a second module declaring it is a duplicate, or joins it.

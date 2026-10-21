@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { Miia } from '@miiajs/core'
+import { Miia, NotFoundException } from '@miiajs/core'
 import { type ServeStaticOptions, serveStatic } from '../src/index.js'
 
 let base: string
@@ -45,6 +45,9 @@ beforeAll(async () => {
   writeFileSync(join(tmpRoot, 'hello.txt'), 'hello world')
   writeFileSync(join(secretDir, 'passwd'), 'root:x:0:0')
   symlinkSync(join(secretDir, 'passwd'), join(tmpRoot, 'escape.txt'))
+  // A sibling whose name starts with the root's, with a link back into the root
+  mkdirSync(join(base, 'public2'))
+  symlinkSync(join(tmpRoot, 'hello.txt'), join(base, 'public2', 'back.txt'))
 
   writeFileSync(join(tmpRoot, 'index.html'), '<!doctype html><title>home</title>')
   writeFileSync(join(tmpRoot, 'styles.css'), 'body { color: red }')
@@ -166,6 +169,12 @@ describe('serve-static - percent-encoded paths', () => {
     expect((await dotfilesApp.fetch(new Request('http://localhost/static/..%2fsecret%2fpasswd'))).status).toBe(404)
     expect((await defaultApp.fetch(new Request('http://localhost/static/foo%2f.git%2fHEAD'))).status).toBe(404)
     expect((await defaultApp.fetch(new Request('http://localhost/static/%2eenv'))).status).toBe(404)
+  })
+
+  it('turns a sibling directory that starts with the root name away on the path alone', async () => {
+    // public2/back.txt resolves into the root, so the realpath check alone would serve it
+    const res = await dotfilesApp.fetch(new Request('http://localhost/static/..%2fpublic2%2fback.txt'))
+    expect(res.status).toBe(404)
   })
 
   it('reads an encoded slash as a path separator inside root', async () => {
@@ -557,6 +566,48 @@ describe('serve-static - global prefix', () => {
     const api = await spaOutsidePrefixApp.fetch(new Request('http://localhost/api/users'))
     expect(api.status).toBe(200)
     expect(await api.json()).toEqual({ ok: true })
+  })
+
+  it('lets an unknown API path fall through to the root mount', async () => {
+    const unknown = await spaOutsidePrefixApp.fetch(
+      new Request('http://localhost/api/nope', { headers: { Accept: '*/*' } }),
+    )
+    expect(unknown.status).toBe(200)
+    expect(await unknown.text()).toContain('<title>spa</title>')
+
+    const json = await spaOutsidePrefixApp.fetch(
+      new Request('http://localhost/api/nope', { headers: { Accept: 'application/json' } }),
+    )
+    expect(json.status).toBe(404)
+  })
+
+  it('keeps unknown API paths 404 with a catch-all under the prefix', async () => {
+    const app = new Miia({ logger: false, globalPrefix: '/api' })
+    app.addRoute('GET', '/users', () => ({ ok: true }))
+    app.addRoute(
+      'GET',
+      '/*',
+      () => {
+        throw new NotFoundException()
+      },
+      { skipGlobalGuards: true },
+    )
+    serveStatic(app, '/', spaRoot, { fallback: 'index.html', skipGlobalPrefix: true })
+    await app.init()
+
+    try {
+      for (const path of ['/api', '/api/nope', '/api/users/42']) {
+        const res = await app.fetch(new Request(`http://localhost${path}`, { headers: { Accept: '*/*' } }))
+        expect(res.status).toBe(404)
+        expect(await res.json()).toEqual({ statusCode: 404, error: 'Not Found', message: 'Not Found' })
+      }
+
+      const deepLink = await app.fetch(new Request('http://localhost/about', { headers: { Accept: 'text/html' } }))
+      expect(await deepLink.text()).toContain('<title>spa</title>')
+      expect(await (await app.fetch(new Request('http://localhost/api/users'))).json()).toEqual({ ok: true })
+    } finally {
+      await app.destroy()
+    }
   })
 })
 

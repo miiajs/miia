@@ -1,5 +1,4 @@
 import type { Container } from '../di-container.js'
-import { Logger } from '../logger.js'
 import {
   BODY_LIMITS,
   BODY_READERS,
@@ -24,8 +23,6 @@ import { createValidationMiddleware, jsonBodyReader } from '../validation.js'
 import type { ModuleNode } from './module-graph.js'
 
 export class RouterExplorer {
-  private logger = new Logger(RouterExplorer.name)
-
   constructor(
     private router: Router,
     private container: Container,
@@ -50,7 +47,6 @@ export class RouterExplorer {
     const querySchemaMap = getMeta<Map<string, ZodLike>>(controller, QUERY_SCHEMAS)
     const paramsSchemaMap = getMeta<Map<string, ZodLike>>(controller, PARAMS_SCHEMAS)
     const bodyReaderMap = getMeta<Map<string, BodyReader>>(controller, BODY_READERS)
-    const logPrefix = this.router.globalPrefix
 
     for (const route of routes) {
       const fullPath = joinPaths(controllerPrefix, route.path)
@@ -91,8 +87,6 @@ export class RouterExplorer {
         skippedGuardClasses: skipSet,
         bodyLimit,
       })
-
-      this.logger.log(`Mapped {/${joinPaths(logPrefix, fullPath)}, ${route.method}} route`)
     }
   }
 

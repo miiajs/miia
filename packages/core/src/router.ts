@@ -1,5 +1,6 @@
 import { DEFAULT_BODY_LIMIT } from './body-limit.js'
 import { GUARD_FACTORY } from './decorators/metadata.js'
+import { Logger } from './logger.js'
 import { compose } from './middleware.js'
 import type { HttpMethod, Middleware, RequestContext } from './types.js'
 import { joinPaths } from './utils/index.js'
@@ -13,6 +14,11 @@ interface RouteEntry {
   skippedGuardClasses: Set<unknown> | null
   bodyLimit: number | false
   compiledPipeline?: Middleware
+  /** `:param` names of this route; each is read from the path segment at the same index in `paramIndexes`. */
+  paramNames: string[]
+  paramIndexes: number[]
+  /** Segment index of a trailing `*`, or -1. */
+  wildcardIndex: number
 }
 
 export interface MatchResult {
@@ -57,10 +63,12 @@ export interface GlobalGuardBinding {
 
 // ─── Trie ───────────────────────────────────────────────────────
 
+// Param nodes carry no name: routes that share one (`/u/:id`, `/u/:userId/posts`)
+// each keep their own names on the entry.
 interface TrieNode {
   children: Map<string, TrieNode>
-  param: { name: string; node: TrieNode } | null
-  wildcard: { name: string; entry: RouteEntry } | null
+  param: TrieNode | null
+  wildcard: RouteEntry | null
   entry: RouteEntry | null
 }
 
@@ -68,9 +76,39 @@ function createNode(): TrieNode {
   return { children: new Map(), param: null, wildcard: null, entry: null }
 }
 
+// Depth-first in priority order. A node sits at one depth only, so a lookup visits each node
+// of the method's tree at most once: linear in the size of the route table, never exponential.
+function search(node: TrieNode, segments: string[], i: number): RouteEntry | null {
+  if (i === segments.length) return node.entry ?? node.wildcard
+
+  const child = node.children.get(segments[i])
+  if (child !== undefined) {
+    const found = search(child, segments, i + 1)
+    if (found !== null) return found
+  }
+  if (node.param !== null) {
+    const found = search(node.param, segments, i + 1)
+    if (found !== null) return found
+  }
+  return node.wildcard
+}
+
+function routeParams(entry: RouteEntry, segments: string[]): Record<string, string> {
+  const params: Record<string, string> = {}
+  const names = entry.paramNames
+  for (let i = 0; i < names.length; i++) {
+    params[names[i]] = segments[entry.paramIndexes[i]]
+  }
+  if (entry.wildcardIndex !== -1) {
+    params['*'] = segments.slice(entry.wildcardIndex).join('/')
+  }
+  return params
+}
+
 // ─── Router ─────────────────────────────────────────────────────
 
 export class Router {
+  private logger = new Logger(Router.name)
   private staticRoutes = new Map<string, RouteEntry>()
   private tries = new Map<string, TrieNode>()
   private allEntries: RouteEntry[] = []
@@ -149,6 +187,21 @@ export class Router {
     if (typeof bodyLimit === 'number' && bodyLimit > this.maxRouteBodyLimit) {
       this.maxRouteBodyLimit = bodyLimit
     }
+
+    const paramNames: string[] = []
+    const paramIndexes: number[] = []
+    let wildcardIndex = -1
+    for (let i = 0; i < segments.length; i++) {
+      if (segments[i] === '*') {
+        wildcardIndex = i
+        break
+      }
+      if (segments[i].startsWith(':')) {
+        paramNames.push(segments[i].slice(1))
+        paramIndexes.push(i)
+      }
+    }
+
     const entry: RouteEntry = {
       method,
       pattern: normalized,
@@ -157,9 +210,13 @@ export class Router {
       skipGlobalGuards,
       skippedGuardClasses,
       bodyLimit,
+      paramNames,
+      paramIndexes,
+      wildcardIndex,
     }
 
     this.allEntries.push(entry)
+    this.logger.log(`Mapped {/${normalized}, ${method}} route`)
 
     if (isStatic) {
       this.staticRoutes.set(method + ':' + normalized, entry)
@@ -176,13 +233,13 @@ export class Router {
       const seg = segments[i]
 
       if (seg === '*') {
-        node.wildcard = { name: '*', entry }
+        node.wildcard = entry
         return
       }
 
       if (seg.startsWith(':')) {
-        if (!node.param) node.param = { name: seg.slice(1), node: createNode() }
-        node = node.param.node
+        if (!node.param) node.param = createNode()
+        node = node.param
       } else {
         let child = node.children.get(seg)
         if (!child) {
@@ -265,53 +322,50 @@ export class Router {
     }
   }
 
+  /**
+   * At every segment a static child beats the param child, which beats a wildcard. The walk
+   * follows the best branch only, so a hit costs one pass; when it dead-ends after passing
+   * over a lower-priority branch, `search()` backs up to the first such node and tries the rest.
+   * The walk stays inline on purpose: moved into a helper, it measured slower on every lookup,
+   * static hits included (a small `matchTrie()` gets inlined into `match()`).
+   */
   private matchTrie(method: string, pathSegments: string[]): MatchResult | null {
     const root = this.tries.get(method)
     if (!root) return null
 
-    const params: Record<string, string> = {}
     let node = root
-
-    for (let i = 0; i < pathSegments.length; i++) {
-      const seg = pathSegments[i]
-
-      const exactChild = node.children.get(seg)
-      if (exactChild) {
-        node = exactChild
-        continue
-      }
-
-      if (node.param) {
-        params[node.param.name] = seg
-        node = node.param.node
-        continue
-      }
-
-      if (node.wildcard) {
-        params[node.wildcard.name] = pathSegments.slice(i).join('/')
-        const e = node.wildcard.entry
-        return { handler: e.handler, params, bodyLimit: e.bodyLimit, compiledPipeline: e.compiledPipeline }
-      }
-
-      return null
-    }
-
-    if (node.entry) {
-      return {
-        handler: node.entry.handler,
-        params,
-        bodyLimit: node.entry.bodyLimit,
-        compiledPipeline: node.entry.compiledPipeline,
+    let from: TrieNode | null = null
+    let fromIndex = 0
+    let i = 0
+    for (; i < pathSegments.length; i++) {
+      const child = node.children.get(pathSegments[i])
+      if (child !== undefined) {
+        if (from === null && (node.param !== null || node.wildcard !== null)) {
+          from = node
+          fromIndex = i
+        }
+        node = child
+      } else if (node.param !== null) {
+        if (from === null && node.wildcard !== null) {
+          from = node
+          fromIndex = i
+        }
+        node = node.param
+      } else {
+        break
       }
     }
 
-    if (node.wildcard) {
-      params[node.wildcard.name] = ''
-      const e = node.wildcard.entry
-      return { handler: e.handler, params, bodyLimit: e.bodyLimit, compiledPipeline: e.compiledPipeline }
-    }
+    let entry = i === pathSegments.length ? (node.entry ?? node.wildcard) : node.wildcard
+    if (entry === null && from !== null) entry = search(from, pathSegments, fromIndex)
+    if (entry === null) return null
 
-    return null
+    return {
+      handler: entry.handler,
+      params: routeParams(entry, pathSegments),
+      bodyLimit: entry.bodyLimit,
+      compiledPipeline: entry.compiledPipeline,
+    }
   }
 
   /**
@@ -326,11 +380,11 @@ export class Router {
   ): RouteEntry | null {
     if (isStatic) return this.staticRoutes.get(method + ':' + normalized) ?? null
 
-    let node = this.tries.get(method)
+    let node: TrieNode | null | undefined = this.tries.get(method)
     for (const seg of segments) {
       if (!node) return null
-      if (seg === '*') return node.wildcard?.entry ?? null
-      node = seg.startsWith(':') ? node.param?.node : node.children.get(seg)
+      if (seg === '*') return node.wildcard
+      node = seg.startsWith(':') ? node.param : node.children.get(seg)
     }
     return node?.entry ?? null
   }

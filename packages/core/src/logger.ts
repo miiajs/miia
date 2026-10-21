@@ -25,11 +25,13 @@ export interface LoggerConfig {
   level?: LogLevel
   json?: boolean
   appName?: string
+  /** ANSI colors in the text format. Default: on, unless `NO_COLOR` is set. */
+  colors?: boolean
 }
 
 // ─── ANSI Colors ─────────────────────────────────────────────────
 
-const color = {
+const ansi = {
   reset: '\x1b[0m',
   bold: '\x1b[1m',
   green: '\x1b[32m',
@@ -41,23 +43,36 @@ const color = {
   white: '\x1b[37m',
 } as const
 
+type Palette = Record<keyof typeof ansi, string>
+
+const plain = Object.fromEntries(Object.keys(ansi).map((key) => [key, ''])) as Palette
+
+/** `NO_COLOR` (no-color.org) set to anything but an empty string. Deno reads it without `--allow-env`. */
+function noColor(): boolean {
+  if ('Deno' in globalThis) return globalThis.Deno.noColor
+  const value = typeof process !== 'undefined' ? process.env?.NO_COLOR : undefined
+  return value !== undefined && value !== ''
+}
+
 // ─── Default Console Logger (colored format) ────────────────────
 
 export class ConsoleLogger implements LoggerService {
   private level: LogLevel
   private json: boolean
   private appName: string
+  private color: Palette
   private lastTimestamp = Date.now()
 
   constructor(config?: LoggerConfig) {
     this.level = config?.level ?? LogLevel.LOG
     this.json = config?.json ?? false
     this.appName = config?.appName ?? 'Miia'
+    this.color = (config?.colors ?? !noColor()) ? ansi : plain
   }
 
   log(message: string, context?: string): void {
     if (LogLevel.LOG > this.level) return
-    this.json ? this.printJson('LOG', message, context) : this.print('LOG', message, context, color.green)
+    this.json ? this.printJson('LOG', message, context) : this.print('LOG', message, context, this.color.green)
   }
 
   error(message: string, trace?: string, context?: string): void {
@@ -67,20 +82,21 @@ export class ConsoleLogger implements LoggerService {
 
   warn(message: string, context?: string): void {
     if (LogLevel.WARN > this.level) return
-    this.json ? this.printJson('WARN', message, context) : this.print('WARN', message, context, color.yellow)
+    this.json ? this.printJson('WARN', message, context) : this.print('WARN', message, context, this.color.yellow)
   }
 
   debug(message: string, context?: string): void {
     if (LogLevel.DEBUG > this.level) return
-    this.json ? this.printJson('DEBUG', message, context) : this.print('DEBUG', message, context, color.magenta)
+    this.json ? this.printJson('DEBUG', message, context) : this.print('DEBUG', message, context, this.color.magenta)
   }
 
   private printError(message: string, trace?: string, context?: string): void {
-    this.print('ERROR', message, context, color.red)
-    if (trace) console.error(`${color.red}${trace}${color.reset}`)
+    this.print('ERROR', message, context, this.color.red)
+    if (trace) console.error(`${this.color.red}${trace}${this.color.reset}`)
   }
 
   private print(level: string, message: string, context?: string, levelColor: string = ''): void {
+    const color = this.color
     const pid = typeof process !== 'undefined' ? process.pid : 0
     const now = Date.now()
     const d = new Date(now)

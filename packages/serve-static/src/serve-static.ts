@@ -86,8 +86,8 @@ export function createStaticHandler(
   async function resolvePath(relativePath: string): Promise<{ realPath: string; stats: Stats } | null> {
     const filePath = normalize(join(resolvedRoot, relativePath))
 
-    // Lexical traversal protection
-    if (!filePath.startsWith(resolvedRoot)) return null
+    // Lexical traversal protection - the separator keeps out a sibling that merely starts with the root's name
+    if (filePath !== resolvedRoot && !filePath.startsWith(resolvedRoot + sep)) return null
 
     // Resolve symlinks inside root and re-check prefix - prevents symlink escape
     // where a file inside root links to something outside.

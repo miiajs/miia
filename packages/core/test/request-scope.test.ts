@@ -226,6 +226,33 @@ describe('REQUEST_CONTEXT', () => {
       '[Miia] Request-scoped RequestContext can only be resolved inside a request (ctx.resolve)',
     )
   })
+
+  it('rejects a module that declares it in providers, naming the module', async () => {
+    @Module({ providers: [provider(REQUEST_CONTEXT, () => ({}) as RequestContext)] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    await expect(app.init()).rejects.toThrow(
+      '[Miia] AppModule declares REQUEST_CONTEXT in providers - it is built in and seeded by every request, so it takes no provider; remove it from providers',
+    )
+  })
+
+  it('names the host of a configure() result that declares it', async () => {
+    @Module({})
+    class ContextModule {
+      static configure() {
+        return { module: ContextModule, providers: [provider(REQUEST_CONTEXT, () => ({}) as RequestContext)] }
+      }
+    }
+
+    @Module({ imports: [ContextModule.configure()] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    await expect(app.init()).rejects.toThrow(
+      '[Miia] ContextModule in AppModule declares REQUEST_CONTEXT in providers - it is built in and seeded by every request, so it takes no provider; remove it from providers',
+    )
+  })
 })
 
 describe('the end of a request', () => {

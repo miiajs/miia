@@ -14,6 +14,8 @@ import {
 import type { LoggerConfig, LoggerService } from '../logger.js'
 import { ConsoleLogger, Logger } from '../logger.js'
 import { CookieJar } from '../cookies.js'
+import { getMeta, INJECTABLE } from '../decorators/index.js'
+import type { InjectableMeta } from '../decorators/index.js'
 import { ModuleLoader } from './module-loader.js'
 import { isBoundaryReport } from './boundary-report.js'
 import type { OverrideDescriptor } from './overrides.js'
@@ -253,7 +255,8 @@ export class Miia {
     }
     for (const provider of providers) {
       if (typeof provider === 'function') {
-        this.container.register(provider, () => new provider(), 'singleton')
+        const scope = getMeta<InjectableMeta>(provider, INJECTABLE)?.scope ?? 'singleton'
+        this.container.register(provider, () => new provider(), scope)
         this.moduleLoader.provided.add(provider)
       } else {
         this.container.register(provider.token, provider.factory, provider.scope, provider.deps)
@@ -416,19 +419,13 @@ export class Miia {
         })
         this.closeServer = () => server.stop()
       } else if ('Deno' in globalThis) {
-        // Deno.serve has no body size option - cap chunked bodies (no
-        // Content-Length) by re-wrapping the request with a counting stream.
-        const fetchFn =
-          ceiling === false
-            ? this.fetch
-            : (req: Request, info?: unknown) => this.fetch(applyBodyCeiling(req, ceiling), info)
         const server = globalThis.Deno.serve(
           {
             port,
             hostname,
             onListen: () => {},
           },
-          fetchFn,
+          denoListenFetch(this.fetch, ceiling),
         )
         this.closeServer = () => server.shutdown()
       } else {
@@ -616,11 +613,7 @@ export class Miia {
       })
     }
 
-    if (result != null) {
-      if (!ctx.res.getHeaders().has('content-type')) {
-        ctx.res.json(result)
-      }
-    }
+    if (result != null && !hasBody(ctx.res)) sendJson(ctx.res, result)
 
     return ctx.res.build()
   }
@@ -697,9 +690,7 @@ export class Miia {
     }
 
     // Normal path: middleware modified response (or handler returned null/undefined)
-    if (rawResult != null && !ctx.res.getHeaders().has('content-type')) {
-      ctx.res.json(rawResult)
-    }
+    if (rawResult != null && !hasBody(ctx.res)) sendJson(ctx.res, rawResult)
 
     if (req.method === 'HEAD') {
       return new Response(null, {
@@ -901,6 +892,32 @@ class Context implements RequestContext {
   }
 }
 
+type FetchHandler = (req: Request, info?: unknown) => Response | Promise<Response>
+
+/**
+ * The app's fetch as listen() hands it to Deno. Deno.serve has no body size option, so a chunked body (no
+ * Content-Length) is capped at `ceiling` by re-wrapping the request with a counting stream. Deno hands a GET or a HEAD
+ * no body, so they go to the app as they are.
+ * @internal Exported for tests, not from the package.
+ */
+export function denoListenFetch(fetch: FetchHandler, ceiling: number | false): FetchHandler {
+  if (ceiling === false) return fetch
+  return (req, info) =>
+    req.method === 'GET' || req.method === 'HEAD' ? fetch(req, info) : fetch(applyBodyCeiling(req, ceiling), info)
+}
+
+/** Whether the handler or a middleware already gave the response a body - `_body` is private to ResponseBuilder. */
+function hasBody(res: ResponseBuilder): boolean {
+  return (res as unknown as { _body: BodyInit | null })._body !== null
+}
+
+/** A returned value goes out as JSON, under the Content-Type the handler set if it set one. */
+function sendJson(res: ResponseBuilder, value: unknown): void {
+  const type = res.getHeaders().get('content-type')
+  res.json(value)
+  if (type !== null) res.header('Content-Type', type)
+}
+
 /** An empty body is no body; anything else that does not parse is the client's mistake. */
 function parseJsonBody(text: string): unknown {
   if (text === '') return undefined
@@ -959,7 +976,8 @@ function resolveConn(req: Request, env: unknown): ConnInfo {
 
 /** Lightweight URL parse for HTTP request URLs (always have pathname, never have fragment) */
 function fastUrlParse(url: string): { pathname: string; search: string } {
-  const pathStart = url.indexOf('/', url.indexOf('//') + 2)
+  // Bun hands a request with an invalid Host over with a relative url
+  const pathStart = url.charCodeAt(0) === 47 ? 0 : url.indexOf('/', url.indexOf('//') + 2)
   const searchStart = url.indexOf('?', pathStart)
   if (searchStart === -1) {
     return { pathname: url.substring(pathStart), search: '' }

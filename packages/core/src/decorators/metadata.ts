@@ -66,3 +66,7 @@ export function addToMapMeta<T>(meta: Meta, key: symbol, name: string, items: T[
 export function setInMapMeta<T>(meta: Meta, key: symbol, name: string, value: T): void {
   ownMap<T>(meta, key).set(name, value)
 }
+
+export function deleteFromMapMeta(meta: Meta, key: symbol, name: string): void {
+  if ((meta[key] as Map<string, unknown> | undefined)?.has(name)) ownMap(meta, key).delete(name)
+}

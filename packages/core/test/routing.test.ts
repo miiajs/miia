@@ -1,11 +1,22 @@
 import { describe, expect, it } from 'bun:test'
-import type { RequestContext } from '../src/index.js'
-import { Controller, Get, getMeta, Miia, Module, RESOLVED_PREFIX, Router } from '../src/index.js'
+import type { CanActivate, RequestContext } from '../src/index.js'
+import {
+  Controller,
+  Get,
+  getMeta,
+  Head,
+  Miia,
+  Module,
+  NotFoundException,
+  Post,
+  RESOLVED_PREFIX,
+  Router,
+} from '../src/index.js'
 
 const noop = (_ctx: RequestContext) => {}
 
-function request(app: Miia, method: string, path: string) {
-  return app.fetch(new Request(`http://localhost${path}`, { method }))
+function request(app: Miia, method: string, path: string, init?: RequestInit) {
+  return app.fetch(new Request(`http://localhost${path}`, { method, ...init }))
 }
 
 describe('Router', () => {
@@ -160,6 +171,285 @@ describe('Router', () => {
       const result = router.match('OPTIONS', '/users')
       expect(result).not.toBeNull()
       expect(result!.handler).toBe(handler)
+    })
+  })
+})
+
+// Each handler returns its own label, so a match says which route won.
+function routes(...table: [string, string][]): Router {
+  const router = new Router()
+  for (const [method, path] of table) {
+    router.add(method as 'GET', path, () => `${method} ${path}`)
+  }
+  return router
+}
+
+function matched(router: Router, method: string, path: string) {
+  const result = router.match(method, path)
+  return result && { route: result.handler({} as RequestContext), params: result.params }
+}
+
+describe('Backtracking', () => {
+  it('should keep static > param > wildcard and fall back to the wildcard when the param branch dead-ends', () => {
+    const router = routes(['GET', '/users/me'], ['GET', '/users/:id'], ['GET', '/users/*'])
+
+    expect(matched(router, 'GET', '/users/me')).toEqual({ route: 'GET /users/me', params: {} })
+    expect(matched(router, 'GET', '/users/42')).toEqual({ route: 'GET /users/:id', params: { id: '42' } })
+    expect(matched(router, 'GET', '/users/42/posts/1')).toEqual({
+      route: 'GET /users/*',
+      params: { '*': '42/posts/1' },
+    })
+  })
+
+  it('should fall back to the param branch when the static branch dead-ends', () => {
+    const router = routes(['GET', '/users/me/settings'], ['GET', '/users/:id/posts'])
+
+    expect(matched(router, 'GET', '/users/me/posts')).toEqual({ route: 'GET /users/:id/posts', params: { id: 'me' } })
+    expect(matched(router, 'GET', '/users/me/settings')).toEqual({ route: 'GET /users/me/settings', params: {} })
+  })
+
+  it('should fall back when the path ends on a node that has no route', () => {
+    const router = routes(['GET', '/users/:id/posts'], ['GET', '/users/*'])
+
+    expect(matched(router, 'GET', '/users/42')).toEqual({ route: 'GET /users/*', params: { '*': '42' } })
+  })
+
+  it('should back up to a wildcard several levels above the dead end', () => {
+    const router = routes(['GET', '/api/users/:id'], ['GET', '/api/*'])
+
+    expect(matched(router, 'GET', '/api/users/42/unknown')).toEqual({
+      route: 'GET /api/*',
+      params: { '*': 'users/42/unknown' },
+    })
+    expect(matched(router, 'GET', '/api/users/42')).toEqual({ route: 'GET /api/users/:id', params: { id: '42' } })
+  })
+
+  it('should try the nearest lower-priority branch before a wildcard further up', () => {
+    const router = routes(['GET', '/a/b/c/x'], ['GET', '/a/:p/c/y'], ['GET', '/a/*'])
+
+    expect(matched(router, 'GET', '/a/b/c/y')).toEqual({ route: 'GET /a/:p/c/y', params: { p: 'b' } })
+    expect(matched(router, 'GET', '/a/b/c/z')).toEqual({ route: 'GET /a/*', params: { '*': 'b/c/z' } })
+  })
+
+  it('should decide on the first segment that differs, not on the number of static segments', () => {
+    const router = routes(['GET', '/a/b/:x'], ['GET', '/a/:y/c'])
+
+    expect(matched(router, 'GET', '/a/b/c')).toEqual({ route: 'GET /a/b/:x', params: { x: 'c' } })
+  })
+
+  it('should not let a deeper route of another method block the fallback', () => {
+    const router = routes(['POST', '/users/:id/avatar'], ['GET', '/users/:id'], ['GET', '/users/*'])
+
+    expect(matched(router, 'GET', '/users/42/avatar')).toEqual({ route: 'GET /users/*', params: { '*': '42/avatar' } })
+    expect(matched(router, 'POST', '/users/42/avatar')).toEqual({
+      route: 'POST /users/:id/avatar',
+      params: { id: '42' },
+    })
+    expect(matched(router, 'POST', '/users/42/other')).toBeNull()
+  })
+
+  it('should backtrack in the GET fallback of a HEAD request', () => {
+    const router = routes(['GET', '/files/:id'], ['GET', '/files/*'])
+
+    expect(matched(router, 'HEAD', '/files/a/b')).toEqual({ route: 'GET /files/*', params: { '*': 'a/b' } })
+  })
+
+  it('should search the HEAD routes before falling back to GET', () => {
+    const router = routes(['HEAD', '/files/:id/meta'], ['GET', '/files/*'])
+
+    expect(matched(router, 'HEAD', '/files/a/meta')).toEqual({ route: 'HEAD /files/:id/meta', params: { id: 'a' } })
+    expect(matched(router, 'HEAD', '/files/a/b')).toEqual({ route: 'GET /files/*', params: { '*': 'a/b' } })
+  })
+
+  it('should still return null when no branch matches', () => {
+    const router = routes(['GET', '/users/me/settings'], ['GET', '/users/:id/posts'])
+
+    expect(router.match('GET', '/users/me/other')).toBeNull()
+    expect(router.match('GET', '/users')).toBeNull()
+    expect(router.match('GET', '/nope')).toBeNull()
+  })
+
+  it('should find the route a full search of a dense table picks', () => {
+    // Every mix of `s` / `:pN` over 6 levels: each node has both a static and a param child.
+    const table: [string, string][] = []
+    for (let mask = 0; mask < 1 << 6; mask++) {
+      const segs = Array.from({ length: 6 }, (_, l) => (mask & (1 << l) ? `:p${l}` : 's'))
+      table.push(['GET', `/${segs.join('/')}/${mask === 0b101010 ? 'target' : 'end'}`])
+    }
+    const router = routes(...table)
+
+    expect(matched(router, 'GET', '/s/s/s/s/s/s/target')).toEqual({
+      route: 'GET /s/:p1/s/:p3/s/:p5/target',
+      params: { p1: 's', p3: 's', p5: 's' },
+    })
+    expect(router.match('GET', '/s/s/s/s/s/s/miss')).toBeNull()
+  })
+})
+
+describe('Param names per route', () => {
+  it('should give each route its own names when routes share a param position', () => {
+    const router = routes(['GET', '/users/:id'], ['GET', '/users/:userId/posts/:postId'])
+
+    expect(matched(router, 'GET', '/users/42')!.params).toEqual({ id: '42' })
+    expect(matched(router, 'GET', '/users/42/posts/7')!.params).toEqual({ userId: '42', postId: '7' })
+  })
+
+  it('should not depend on registration order', () => {
+    const router = routes(['GET', '/u/:userId/posts'], ['GET', '/u/:id'])
+
+    expect(matched(router, 'GET', '/u/1')!.params).toEqual({ id: '1' })
+    expect(matched(router, 'GET', '/u/1/posts')!.params).toEqual({ userId: '1' })
+  })
+
+  it('should name the params of a wildcard route from its own pattern', () => {
+    const router = routes(['GET', '/files/:id/meta'], ['GET', '/files/:name/*'])
+
+    expect(matched(router, 'GET', '/files/a/b/c')).toEqual({
+      route: 'GET /files/:name/*',
+      params: { name: 'a', '*': 'b/c' },
+    })
+    expect(matched(router, 'GET', '/files/a/meta')!.params).toEqual({ id: 'a' })
+  })
+
+  it('should name the params of a route reached by backtracking', () => {
+    const router = routes(['GET', '/a/:x/b/c'], ['GET', '/a/:y/*'])
+
+    expect(matched(router, 'GET', '/a/1/b/d')).toEqual({ route: 'GET /a/:y/*', params: { y: '1', '*': 'b/d' } })
+  })
+})
+
+describe('Backtracking through the app', () => {
+  it('should give controller routes their own param names under module and global prefixes', async () => {
+    @Controller('/users')
+    class UsersController {
+      @Get('/:id')
+      findOne(ctx: RequestContext) {
+        return ctx.params
+      }
+
+      @Get('/:userId/posts/:postId')
+      getPost(ctx: RequestContext) {
+        return ctx.params
+      }
+
+      @Get('/*')
+      rest(ctx: RequestContext) {
+        return { rest: ctx.params['*'] }
+      }
+    }
+
+    @Module({ prefix: 'v1', controllers: [UsersController] })
+    class V1Module {}
+
+    const app = new Miia({ logger: false, globalPrefix: '/api' }).register(V1Module)
+
+    expect(await (await request(app, 'GET', '/api/v1/users/42')).json()).toEqual({ id: '42' })
+    expect(await (await request(app, 'GET', '/api/v1/users/42/posts/7')).json()).toEqual({ userId: '42', postId: '7' })
+    expect(await (await request(app, 'GET', '/api/v1/users/42/likes')).json()).toEqual({ rest: '42/likes' })
+  })
+
+  it('should backtrack for HEAD through the GET fallback and keep explicit HEAD routes first', async () => {
+    @Controller('/files')
+    class FilesController {
+      @Head('/:id/meta')
+      meta(ctx: RequestContext) {
+        ctx.res.header('x-route', 'head-meta')
+      }
+
+      @Get('/:id')
+      one(ctx: RequestContext) {
+        ctx.res.header('x-route', 'get-one')
+      }
+
+      @Get('/*')
+      rest(ctx: RequestContext) {
+        ctx.res.header('x-route', 'get-rest')
+      }
+    }
+
+    @Module({ controllers: [FilesController] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+
+    expect((await request(app, 'HEAD', '/files/a/meta')).headers.get('x-route')).toBe('head-meta')
+    expect((await request(app, 'HEAD', '/files/a')).headers.get('x-route')).toBe('get-one')
+    expect((await request(app, 'HEAD', '/files/a/b')).headers.get('x-route')).toBe('get-rest')
+  })
+
+  describe('a root wildcard next to a prefixed API', () => {
+    @Controller('/users')
+    class UsersController {
+      @Get('/:id')
+      findOne(ctx: RequestContext) {
+        return { id: ctx.params.id }
+      }
+
+      @Post('/')
+      create() {
+        return { created: true }
+      }
+    }
+
+    @Module({ controllers: [UsersController] })
+    class AppModule {}
+
+    // Stands in for serveStatic(app, '/', dist, { fallback, skipGlobalPrefix: true }).
+    function withSpa(app: Miia): Miia {
+      return app.addRoute(
+        'GET',
+        '/*',
+        (ctx) => {
+          ctx.res.html(`<title>spa</title>${ctx.params['*']}`)
+        },
+        { skipGlobalPrefix: true, skipGlobalGuards: true },
+      )
+    }
+
+    it('should let an unknown API path fall through to the root wildcard', async () => {
+      const app = withSpa(new Miia({ logger: false, globalPrefix: '/api' }).register(AppModule))
+
+      const unknown = await request(app, 'GET', '/api/nope')
+      expect(unknown.status).toBe(200)
+      expect(await unknown.text()).toBe('<title>spa</title>api/nope')
+
+      const deadEnd = await request(app, 'GET', '/api/users/42/nope')
+      expect(await deadEnd.text()).toBe('<title>spa</title>api/users/42/nope')
+
+      expect(await (await request(app, 'GET', '/api/users/42')).json()).toEqual({ id: '42' })
+      expect((await request(app, 'POST', '/api/nope')).status).toBe(404)
+    })
+
+    it('should keep unknown API paths a plain 404 with a catch-all under the prefix', async () => {
+      class RequireToken implements CanActivate {
+        canActivate(ctx: RequestContext) {
+          return ctx.req.headers.has('authorization')
+        }
+      }
+
+      const app = withSpa(new Miia({ logger: false, globalPrefix: '/api' }).register(AppModule))
+      app.useGuard(RequireToken)
+      app.addRoute(
+        'GET',
+        '/*',
+        () => {
+          throw new NotFoundException()
+        },
+        { skipGlobalGuards: true },
+      )
+
+      for (const path of ['/api', '/api/nope', '/api/users/42/nope']) {
+        const res = await request(app, 'GET', path)
+        expect(res.status).toBe(404)
+        expect(await res.json()).toEqual({ statusCode: 404, error: 'Not Found', message: 'Not Found' })
+        expect((await request(app, 'HEAD', path)).status).toBe(404)
+      }
+
+      const authorized = { headers: { authorization: 'Bearer t' } }
+      expect((await request(app, 'GET', '/api/users/42')).status).toBe(403)
+      expect(await (await request(app, 'GET', '/api/users/42', authorized)).json()).toEqual({ id: '42' })
+      expect((await request(app, 'POST', '/api/users', authorized)).status).toBe(200)
+      expect(await (await request(app, 'GET', '/about')).text()).toBe('<title>spa</title>about')
     })
   })
 })
@@ -415,6 +705,23 @@ describe('Duplicate routes', () => {
     expect(() => router.add('GET', '/files/*', noop)).toThrow('[Miia] Route GET /files/* conflicts with GET /files/*')
   })
 
+  it('should reject a wildcard route that differs only in the param name before it', () => {
+    const router = new Router()
+    router.add('GET', '/u/:id/*', noop)
+
+    expect(() => router.add('GET', '/u/:other/*', noop)).toThrow(
+      '[Miia] Route GET /u/:other/* conflicts with GET /u/:id/*',
+    )
+  })
+
+  it('should accept different param names on one path for different methods, each with its own', () => {
+    const router = routes(['GET', '/u/:id'], ['POST', '/u/:userId'], ['HEAD', '/u/:key'])
+
+    expect(matched(router, 'GET', '/u/1')!.params).toEqual({ id: '1' })
+    expect(matched(router, 'POST', '/u/1')!.params).toEqual({ userId: '1' })
+    expect(matched(router, 'HEAD', '/u/1')!.params).toEqual({ key: '1' })
+  })
+
   it('should reject a controller route that lands on an addRoute() path', async () => {
     @Controller('/users')
     class UsersController {
@@ -454,5 +761,23 @@ describe('Duplicate routes', () => {
 
     expect(() => router.add('POST', '/upload', noop, { bodyLimit: 50 * 1024 * 1024 })).toThrow(/conflicts with/)
     expect(router.adapterBodyCeiling).toBe(ceiling)
+  })
+})
+
+describe('Relative request url', () => {
+  // Bun gives a request with an invalid Host (`x/y`, `x?q`, empty) a url without scheme and host
+  function relative(app: Miia, url: string) {
+    return app.fetch({ method: 'GET', url, headers: new Headers() } as Request)
+  }
+
+  it('routes by the whole path, not past its first segment', async () => {
+    const app = new Miia({ logger: false })
+    app.addRoute('GET', '/admin/x', () => 'ADMIN')
+    app.addRoute('GET', '/foo/admin/x', () => 'FOO')
+    await app.init()
+    expect(await (await relative(app, '/foo/admin/x')).json()).toBe('FOO')
+    expect(await (await relative(app, '/foo/admin/x?q=1')).json()).toBe('FOO')
+    expect((await relative(app, '/x//admin/x')).status).toBe(404)
+    expect(await (await request(app, 'GET', '/foo/admin/x')).json()).toBe('FOO')
   })
 })

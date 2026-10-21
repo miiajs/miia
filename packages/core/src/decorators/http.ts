@@ -1,5 +1,13 @@
 import type { HttpMethod, RouteDefinition, RouteOptions, RouteOptionsWithoutBody, ZodLike } from '../types.js'
-import { BODY_SCHEMAS, PARAMS_SCHEMAS, QUERY_SCHEMAS, ROUTES, pushMeta, setInMapMeta } from './metadata.js'
+import {
+  BODY_SCHEMAS,
+  PARAMS_SCHEMAS,
+  QUERY_SCHEMAS,
+  ROUTES,
+  deleteFromMapMeta,
+  pushMeta,
+  setInMapMeta,
+} from './metadata.js'
 import { createMethodDecorator } from './create-decorator.js'
 
 type RouteMethodDecorator = (target: Function, context: ClassMethodDecoratorContext) => void
@@ -17,6 +25,27 @@ const SCHEMA_SLOTS = [
   ['body', BODY_SCHEMAS],
 ] as const
 
+// An override with route decorators of its own replaces the routes and schemas its handler
+// inherited (without them it keeps both). Runs before the first of them, so the checks below
+// compare routes of this class only; what this class wrote itself stays.
+function dropInherited(meta: DecoratorMetadataObject, handlerName: string): void {
+  const parent = Object.getPrototypeOf(meta) as DecoratorMetadataObject | null
+  if (!parent) return
+  const inherited = parent[ROUTES] as RouteDefinition[] | undefined
+  const routes = meta[ROUTES] as RouteDefinition[] | undefined
+  if (routes?.some((route) => route.handlerName === handlerName && !inherited?.includes(route))) return
+
+  if (routes?.some((route) => route.handlerName === handlerName)) {
+    meta[ROUTES] = routes.filter((route) => route.handlerName !== handlerName)
+  }
+  for (const [, slot] of SCHEMA_SLOTS) {
+    const schema = (parent[slot] as Map<string, ZodLike> | undefined)?.get(handlerName)
+    if (schema !== undefined && (meta[slot] as Map<string, ZodLike> | undefined)?.get(handlerName) === schema) {
+      deleteFromMapMeta(meta, slot, handlerName)
+    }
+  }
+}
+
 function createRouteDecorator<O extends RouteOptions | RouteOptionsWithoutBody>(method: HttpMethod): RouteDecorator<O> {
   const decorator = `@${method[0]}${method.slice(1).toLowerCase()}`
   const bodyless = BODYLESS.has(method)
@@ -28,6 +57,8 @@ function createRouteDecorator<O extends RouteOptions | RouteOptionsWithoutBody>(
       const isOptions = typeof pathOrOptions === 'object' && pathOrOptions !== null
       const path = isOptions ? '' : (pathOrOptions ?? '')
       const options = (isOptions ? pathOrOptions : maybeOptions) ?? {}
+
+      dropInherited(meta, handlerName)
 
       if (bodyless) {
         if (options.body !== undefined) {

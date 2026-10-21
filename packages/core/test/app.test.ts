@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import type { CanActivate, Middleware, RequestContext, ZodLike } from '../src/index.js'
+import type { CanActivate, ListenInfo, Middleware, RequestContext, ZodLike } from '../src/index.js'
 import {
   BadRequestException,
   Controller,
@@ -1578,7 +1578,7 @@ describe('Miia Application', () => {
       }
     }
 
-    const noopAdapter = (info: { port: number; hostname: string; fetch: (req: Request) => Promise<Response> }) => {
+    const noopAdapter = (info: ListenInfo) => {
       void info
       return { close() {} }
     }
@@ -1589,7 +1589,6 @@ describe('Miia Application', () => {
       // No throw - handler is `void handler(signal)` from process.once, so a
       // throw would surface as an unhandled rejection in the test runner.
       // Recording a no-op exit lets the handler complete naturally.
-      // @ts-expect-error - overriding process.exit signature
       process.exit = (code?: number) => {
         exitCalled = true
         exitCode = code ?? 0
@@ -1607,11 +1606,12 @@ describe('Miia Application', () => {
       // Remove only listeners added during this test - preserves Bun test
       // runner internal SIGINT for test isolation.
       if (listenerSnapshot) {
+        const emitter: NodeJS.EventEmitter = process
         for (const sig of SIGNALS) {
           const before = new Set(listenerSnapshot[sig])
           for (const l of process.listeners(sig) as ListenerFn[]) {
             if (!before.has(l)) {
-              process.off(sig, l as NodeJS.SignalsListener)
+              emitter.off(sig, l)
             }
           }
         }
@@ -1777,5 +1777,19 @@ describe('Miia Application', () => {
       await app.destroy()
       expect(process.listeners('SIGTERM').length).toBe(initial)
     })
+  })
+})
+
+describe('app.provide()', () => {
+  it('keeps the scope a class declares with @Injectable', async () => {
+    @Injectable({ scope: 'transient' })
+    class Stamp {}
+    @Injectable()
+    class Single {}
+
+    const app = new Miia({ logger: false }).provide(Stamp, Single)
+    await app.init()
+    expect(app.get(Stamp)).not.toBe(app.get(Stamp))
+    expect(app.get(Single)).toBe(app.get(Single))
   })
 })

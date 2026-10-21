@@ -5,6 +5,7 @@ import {
   createClassDecorator,
   createLazyProxy,
   createMethodDecorator,
+  createToken,
   DiscoveryService,
   Get,
   getMeta,
@@ -20,7 +21,7 @@ import {
 } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { Container } from '../src/di-container.js'
-import { createToken } from '../src/di-token.js'
+import { createToken as createSrcToken } from '../src/di-token.js'
 // The Container from src only recognises proxies made by the src module
 import { createLazyProxy as createSrcLazyProxy } from '../src/utils/lazy-proxy.js'
 
@@ -49,7 +50,7 @@ describe('Container.singletonInstances', () => {
   it('includes an instance registered under a token object', async () => {
     class Options {}
     const options = new Options()
-    c.register(createToken<Options>('Options'), () => options)
+    c.register(createSrcToken<Options>('Options'), () => options)
     await c.initAll()
 
     const list = c.singletonInstances()
@@ -60,7 +61,7 @@ describe('Container.singletonInstances', () => {
   it('lists an instance registered under two tokens once', async () => {
     class Shared {}
     c.registerClass(Shared)
-    c.register(createToken<Shared>('SharedAlias'), (r) => r(Shared))
+    c.register(createSrcToken<Shared>('SharedAlias'), (r) => r(Shared))
     await c.initAll()
 
     const list = c.singletonInstances()
@@ -71,10 +72,10 @@ describe('Container.singletonInstances', () => {
   it('skips null, primitives and functions', async () => {
     class A {}
     c.registerClass(A)
-    c.register(createToken('Nothing'), () => null)
-    c.register(createToken('Name'), () => 'miia')
-    c.register(createToken('Port'), () => 3000)
-    c.register(createToken('Callback'), () => function callback() {})
+    c.register(createSrcToken('Nothing'), () => null)
+    c.register(createSrcToken('Name'), () => 'miia')
+    c.register(createSrcToken('Port'), () => 3000)
+    c.register(createSrcToken('Callback'), () => function callback() {})
     await c.initAll()
 
     const list = c.singletonInstances()
@@ -107,7 +108,7 @@ describe('Container.singletonInstances', () => {
     class Target {
       value = 1
     }
-    const LAZY = createToken<Target>('LazyTarget')
+    const LAZY = createSrcToken<Target>('LazyTarget')
     c.registerClass(Target)
     c.register(LAZY, (r) => createSrcLazyProxy(() => r(Target)))
     await c.initAll()
@@ -129,12 +130,12 @@ describe('Container.bootstrapAll', () => {
 
   it('calls onReady on all singletons that define it', async () => {
     const calls: string[] = []
-    c.register(createToken('a'), () => ({
+    c.register(createSrcToken('a'), () => ({
       onReady: async () => {
         calls.push('a-ready')
       },
     }))
-    c.register(createToken('b'), () => ({
+    c.register(createSrcToken('b'), () => ({
       onReady: async () => {
         calls.push('b-ready')
       },
@@ -148,7 +149,7 @@ describe('Container.bootstrapAll', () => {
 
   it('runs onReady strictly after all onInit hooks', async () => {
     const order: string[] = []
-    c.register(createToken('a'), () => ({
+    c.register(createSrcToken('a'), () => ({
       onInit: async () => {
         order.push('a-init')
       },
@@ -156,7 +157,7 @@ describe('Container.bootstrapAll', () => {
         order.push('a-ready')
       },
     }))
-    c.register(createToken('b'), () => ({
+    c.register(createSrcToken('b'), () => ({
       onInit: async () => {
         order.push('b-init')
       },
@@ -175,7 +176,7 @@ describe('Container.bootstrapAll', () => {
   })
 
   it('skips providers without onReady', async () => {
-    c.register(createToken('noop'), () => ({}))
+    c.register(createSrcToken('noop'), () => ({}))
     await c.initAll()
     await expect(c.bootstrapAll()).resolves.toBeUndefined()
   })
@@ -183,7 +184,7 @@ describe('Container.bootstrapAll', () => {
   it('skips transient providers', async () => {
     const calls: string[] = []
     c.register(
-      createToken('t'),
+      createSrcToken('t'),
       () => ({
         onReady: async () => {
           calls.push('transient-ready')

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { Controller, Get, Injectable, Module, SkipGuard } from '../src/decorators/index.js'
+import { Controller, Get, Injectable, Module, Post, SkipGuard, UseGuard } from '../src/decorators/index.js'
 import { getMeta, INJECTABLE, PREFIX, MODULE, ROUTES, SKIP_GUARDS } from '../src/decorators/index.js'
+import { BODY_SCHEMAS, PARAMS_SCHEMAS, QUERY_SCHEMAS } from '../src/decorators/index.js'
 import { addToMapMeta, createMethodDecorator, pushMeta, setInMapMeta } from '../src/decorators/index.js'
 import type { InjectableMeta } from '../src/decorators/index.js'
 import { Miia } from '../src/index.js'
-import type { ModuleOptions, RouteDefinition } from '../src/types.js'
+import type { Constructor, ModuleOptions, RequestContext, RouteDefinition, ZodLike } from '../src/types.js'
 
 describe('Decorators', () => {
   describe('@Injectable', () => {
@@ -241,6 +242,401 @@ describe('Decorators', () => {
       expect(await (await request('/child/a')).json()).toEqual({ route: 'a' })
       expect(await (await request('/child/b')).json()).toEqual({ route: 'b' })
       await app.destroy()
+    })
+  })
+
+  describe('a handler overridden in a subclass', () => {
+    function tagged(tag: string) {
+      const schema = {
+        calls: 0,
+        safeParse(data: unknown) {
+          schema.calls++
+          return { success: true as const, data: { tag, data } }
+        },
+      }
+      return schema
+    }
+
+    class Deny {
+      canActivate() {
+        return false
+      }
+    }
+
+    class Allow {
+      canActivate() {
+        return true
+      }
+    }
+
+    const routesOf = (controller: Constructor) =>
+      getMeta<RouteDefinition[]>(controller, ROUTES)!.map((r) => `${r.method} ${r.path} ${r.handlerName}`)
+    const schemaOf = (controller: Constructor, slot: symbol, handlerName: string) =>
+      getMeta<Map<string, ZodLike>>(controller, slot)?.get(handlerName)
+
+    function serve(...controllers: Constructor[]) {
+      @Module({ controllers })
+      class AppModule {}
+
+      const app = new Miia({ logger: false }).register(AppModule)
+      const request = (method: string, path: string, body?: unknown) =>
+        app.fetch(
+          new Request(`http://localhost${path}`, {
+            method,
+            body: body === undefined ? undefined : JSON.stringify(body),
+            headers: body === undefined ? {} : { 'content-type': 'application/json' },
+          }),
+        )
+      return { app, request }
+    }
+
+    it('route decorators on the override replace the body schema it inherited', async () => {
+      const baseBody = tagged('base')
+      const subBody = tagged('sub')
+
+      class Base {
+        @Post('/', { body: baseBody })
+        async create(ctx: RequestContext) {
+          return ctx.json()
+        }
+      }
+
+      @Controller('/items')
+      class Items extends Base {
+        @Post('/', { body: subBody })
+        override async create(ctx: RequestContext) {
+          return ctx.json()
+        }
+      }
+
+      expect(routesOf(Items)).toEqual(['POST / create'])
+      expect(routesOf(Base)).toEqual(['POST / create'])
+      expect(schemaOf(Base, BODY_SCHEMAS, 'create')).toBe(baseBody)
+
+      const { app, request } = serve(Items)
+      expect(await (await request('POST', '/items', { a: 1 })).json()).toEqual({ tag: 'sub', data: { a: 1 } })
+      expect(baseBody.calls).toBe(0)
+      await app.destroy()
+    })
+
+    it('an override that repeats the inherited route serves it once, from the subclass', async () => {
+      class Base {
+        @Get(':id')
+        find(ctx: RequestContext) {
+          return { from: 'base', id: ctx.params.id }
+        }
+      }
+
+      @Controller('/items')
+      class Items extends Base {
+        @Get(':id')
+        override find(ctx: RequestContext) {
+          return { from: 'sub', id: ctx.params.id }
+        }
+      }
+
+      expect(routesOf(Items)).toEqual(['GET :id find'])
+
+      const { app, request } = serve(Items)
+      expect(await (await request('GET', '/items/1')).json()).toEqual({ from: 'sub', id: '1' })
+      await app.destroy()
+    })
+
+    it('an override with another path serves only the new one', async () => {
+      class Base {
+        @Get(':id')
+        find(ctx: RequestContext) {
+          return { from: 'base', id: ctx.params.id }
+        }
+      }
+
+      @Controller('/items')
+      class Items extends Base {
+        @Get('by/:id')
+        override find(ctx: RequestContext) {
+          return { from: 'sub', id: ctx.params.id }
+        }
+      }
+
+      const { app, request } = serve(Items)
+      expect((await request('GET', '/items/1')).status).toBe(404)
+      expect(await (await request('GET', '/items/by/1')).json()).toEqual({ from: 'sub', id: '1' })
+      await app.destroy()
+    })
+
+    it('an override without route decorators keeps the routes and schemas it inherited', async () => {
+      const query = tagged('base')
+
+      class Base {
+        @Get(':id', { query })
+        find(ctx: RequestContext) {
+          return { from: 'base', query: ctx.query }
+        }
+      }
+
+      @Controller('/items')
+      class Items extends Base {
+        override find(ctx: RequestContext) {
+          return { from: 'sub', query: ctx.query }
+        }
+      }
+
+      expect(routesOf(Items)).toEqual(['GET :id find'])
+
+      const { app, request } = serve(Items)
+      expect(await (await request('GET', '/items/1?page=2')).json()).toEqual({
+        from: 'sub',
+        query: { tag: 'base', data: { page: '2' } },
+      })
+      await app.destroy()
+    })
+
+    it('an override can change the method, with or without a body schema', async () => {
+      const body = tagged('sub')
+
+      class ReadBase {
+        @Get(':id')
+        find(ctx: RequestContext): unknown {
+          return { from: 'base', id: ctx.params.id }
+        }
+      }
+
+      @Controller('/write')
+      class Write extends ReadBase {
+        @Post(':id', { body })
+        override async find(ctx: RequestContext) {
+          return ctx.json()
+        }
+      }
+
+      class WriteBase {
+        @Post(':id', { body: tagged('base') })
+        async update(ctx: RequestContext) {
+          return ctx.json()
+        }
+      }
+
+      @Controller('/read')
+      class Read extends WriteBase {
+        @Get(':id')
+        override async update(ctx: RequestContext) {
+          return { from: 'sub', id: ctx.params.id }
+        }
+      }
+
+      expect(routesOf(Write)).toEqual(['POST :id find'])
+      expect(routesOf(Read)).toEqual(['GET :id update'])
+      expect(schemaOf(Read, BODY_SCHEMAS, 'update')).toBeUndefined()
+      expect(schemaOf(WriteBase, BODY_SCHEMAS, 'update')).toBeDefined()
+
+      const { app, request } = serve(Write, Read)
+      expect(await (await request('POST', '/write/1', { a: 1 })).json()).toEqual({ tag: 'sub', data: { a: 1 } })
+      expect((await request('GET', '/write/1')).status).toBe(404)
+      expect(await (await request('GET', '/read/1')).json()).toEqual({ from: 'sub', id: '1' })
+      await app.destroy()
+    })
+
+    it('stacked routes on the override share its schemas and may still not disagree', async () => {
+      const baseQuery = tagged('base')
+      const subQuery = tagged('sub')
+
+      class Base {
+        @Get(':id', { query: baseQuery })
+        find(ctx: RequestContext): unknown {
+          return ctx.query
+        }
+      }
+
+      @Controller('/items')
+      class Items extends Base {
+        @Get('a')
+        @Get('b', { query: subQuery })
+        override find(ctx: RequestContext) {
+          return ctx.query
+        }
+      }
+
+      expect(routesOf(Items)).toEqual(['GET b find', 'GET a find'])
+
+      const { app, request } = serve(Items)
+      expect(await (await request('GET', '/items/a?x=1')).json()).toEqual({ tag: 'sub', data: { x: '1' } })
+      expect(await (await request('GET', '/items/b?x=2')).json()).toEqual({ tag: 'sub', data: { x: '2' } })
+      expect(baseQuery.calls).toBe(0)
+      await app.destroy()
+
+      expect(() => {
+        class Mixed extends Base {
+          @Get('a', { query: baseQuery })
+          @Get('b', { query: subQuery })
+          override find() {}
+        }
+        return Mixed
+      }).toThrow("@Get declares a different query schema than another route on handler 'find'")
+    })
+
+    it('guards still accumulate across an override, route decorators or not', async () => {
+      @Controller('/base')
+      class Base {
+        @UseGuard(Deny)
+        @Get('g')
+        g() {
+          return { from: 'base' }
+        }
+      }
+
+      @Controller('/plain')
+      class Plain extends Base {
+        @UseGuard(Allow)
+        override g() {
+          return { from: 'sub' }
+        }
+      }
+
+      @Controller('/moved')
+      class Moved extends Base {
+        @UseGuard(Allow)
+        @Get('moved')
+        override g() {
+          return { from: 'sub' }
+        }
+      }
+
+      const { app, request } = serve(Base, Plain, Moved)
+      expect((await request('GET', '/base/g')).status).toBe(403)
+      expect((await request('GET', '/plain/g')).status).toBe(403)
+      expect((await request('GET', '/moved/moved')).status).toBe(403)
+      expect((await request('GET', '/moved/g')).status).toBe(404)
+      await app.destroy()
+    })
+
+    it('@SkipGuard on the override removes a guard it inherited', async () => {
+      @Controller('/base')
+      class Base {
+        @UseGuard(Deny)
+        @Get('g')
+        g() {
+          return { from: 'base' }
+        }
+      }
+
+      @Controller('/open')
+      class Open extends Base {
+        @SkipGuard(Deny)
+        override g() {
+          return { from: 'sub' }
+        }
+      }
+
+      @Controller('/moved')
+      class Moved extends Base {
+        @SkipGuard(Deny)
+        @Get('moved')
+        override g() {
+          return { from: 'sub' }
+        }
+      }
+
+      const { app, request } = serve(Base, Open, Moved)
+      expect((await request('GET', '/base/g')).status).toBe(403)
+      expect(await (await request('GET', '/open/g')).json()).toEqual({ from: 'sub' })
+      expect(await (await request('GET', '/moved/moved')).json()).toEqual({ from: 'sub' })
+      await app.destroy()
+    })
+
+    it('replaces level by level and leaves every ancestor as it was', async () => {
+      const params = tagged('a')
+      const body = tagged('d')
+
+      @Controller('/a')
+      class A {
+        @Get('/')
+        list() {
+          return { from: 'a' }
+        }
+
+        @Get(':id', { params })
+        find(ctx: RequestContext): unknown {
+          return { from: 'a', params: ctx.params }
+        }
+      }
+
+      @Controller('/b')
+      class B extends A {
+        @Get('extra')
+        extra() {
+          return { from: 'b' }
+        }
+
+        @Get('b/:id')
+        override find(ctx: RequestContext): unknown {
+          return { from: 'b', params: ctx.params }
+        }
+      }
+
+      @Controller('/c')
+      class C extends B {}
+
+      @Controller('/d')
+      class D extends B {
+        @Post('d/:id', { body })
+        override async find(ctx: RequestContext) {
+          return ctx.json()
+        }
+      }
+
+      expect(routesOf(A)).toEqual(['GET / list', 'GET :id find'])
+      expect(routesOf(B)).toEqual(['GET / list', 'GET extra extra', 'GET b/:id find'])
+      expect(routesOf(C)).toEqual(routesOf(B))
+      expect(routesOf(D)).toEqual(['GET / list', 'GET extra extra', 'POST d/:id find'])
+      expect(schemaOf(A, PARAMS_SCHEMAS, 'find')).toBe(params)
+      expect(schemaOf(B, PARAMS_SCHEMAS, 'find')).toBeUndefined()
+      expect(schemaOf(B, BODY_SCHEMAS, 'find')).toBeUndefined()
+
+      const { app, request } = serve(A, B, C, D)
+      expect(await (await request('GET', '/a/1')).json()).toEqual({
+        from: 'a',
+        params: { tag: 'a', data: { id: '1' } },
+      })
+      expect(await (await request('GET', '/b/b/1')).json()).toEqual({ from: 'b', params: { id: '1' } })
+      expect(await (await request('GET', '/c/b/1')).json()).toEqual({ from: 'b', params: { id: '1' } })
+      expect((await request('GET', '/c/1')).status).toBe(404)
+      expect(await (await request('POST', '/d/d/1', { a: 1 })).json()).toEqual({ tag: 'd', data: { a: 1 } })
+      expect((await request('GET', '/d/b/1')).status).toBe(404)
+      expect(params.calls).toBe(1)
+      await app.destroy()
+    })
+
+    it('sibling subclasses override the same handler independently', () => {
+      const query = tagged('base')
+      const rightParams = tagged('right')
+
+      class Base {
+        @Get(':id', { query })
+        find() {}
+      }
+
+      class Left extends Base {
+        @Get('left/:id')
+        override find() {}
+      }
+
+      class Right extends Base {
+        @Get('right/:id', { params: rightParams })
+        override find() {}
+      }
+
+      class Same extends Base {}
+
+      expect(routesOf(Base)).toEqual(['GET :id find'])
+      expect(routesOf(Left)).toEqual(['GET left/:id find'])
+      expect(routesOf(Right)).toEqual(['GET right/:id find'])
+      expect(routesOf(Same)).toEqual(['GET :id find'])
+      expect(schemaOf(Base, QUERY_SCHEMAS, 'find')).toBe(query)
+      expect(schemaOf(Base, PARAMS_SCHEMAS, 'find')).toBeUndefined()
+      expect(schemaOf(Left, QUERY_SCHEMAS, 'find')).toBeUndefined()
+      expect(schemaOf(Right, QUERY_SCHEMAS, 'find')).toBeUndefined()
+      expect(schemaOf(Right, PARAMS_SCHEMAS, 'find')).toBe(rightParams)
+      expect(schemaOf(Same, QUERY_SCHEMAS, 'find')).toBe(query)
     })
   })
 })

@@ -592,6 +592,23 @@ describe('applyBodyCeiling', () => {
     expect(applyBodyCeiling(req, 100)).toBe(req)
   })
 
+  it('reads no body of a request with a Content-Length - on Deno `req.body` makes a stream', () => {
+    const req = new Request('http://localhost/items', {
+      method: 'POST',
+      body: 'hello',
+      headers: { 'content-length': '5' },
+    })
+    let reads = 0
+    Object.defineProperty(req, 'body', {
+      get() {
+        reads++
+        return null
+      },
+    })
+    expect(applyBodyCeiling(req, 100)).toBe(req)
+    expect(reads).toBe(0)
+  })
+
   it('returns the same Request object for bodyless requests', () => {
     const req = new Request('http://localhost/items', { method: 'GET' })
     expect(applyBodyCeiling(req, 100)).toBe(req)

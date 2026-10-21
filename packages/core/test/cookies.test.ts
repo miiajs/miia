@@ -141,8 +141,8 @@ describe('parseCookieHeader', () => {
 
   it('parses cookie names that collide with Object.prototype members', () => {
     const parsed = parseCookieHeader('toString=abc; constructor=1')
-    expect(parsed.toString).toBe('abc')
-    expect(parsed.constructor).toBe('1')
+    expect(parsed['toString']).toBe('abc')
+    expect(parsed['constructor']).toBe('1')
   })
 
   it('stores __proto__ as an own property without mutating the prototype', () => {

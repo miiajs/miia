@@ -111,7 +111,7 @@ describe('configured modules', () => {
     const err = thrownBy(() => app.get(CONFIG))
     expect(err.message).toBe(
       '[Miia] ConfigLikeModule is configured twice (RootModule, FeatureModule) - configure it once; ' +
-        'for another connection use a different name; ' +
+        'a module that takes a name can be configured again under a different one; ' +
         'in tests, replace it with TestApp.override(ConfigLikeModule, ConfigLikeModule.configure(...))',
     )
     expect(err.constructor).toBe(Error)
