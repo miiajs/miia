@@ -1,0 +1,5 @@
+---
+'@miiajs/uws-server': patch
+---
+
+`close()` on the handle waits for the requests in flight. It stops listening, then resolves once every request that has started has its response out, a streamed one included, or has lost its client; a request that arrives on a kept-alive connection meanwhile is served and waited for too. After that it closes every connection left, so nothing is served once it has resolved. A streamed body goes out in pieces that wait for the socket, so a large streamed response is not cut off by a process that exits after `close()`; what can still sit in uWS's buffer is the end of the last piece of a stream, or what a slow client has not taken yet of a body in memory, which goes to uWS whole. An endless stream such as server-sent events holds `close()` until it ends. Before, `close()` resolved at once, so under `app.listen(port, serve)` a SIGTERM cut off a response still being produced, where node-server, Bun and Deno finish it. As with `node:http`'s `server.close()`, there is no timeout.

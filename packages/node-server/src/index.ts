@@ -125,6 +125,36 @@ function createHeadersProxy(pairs: [string, string][]): Headers {
 // Properties accessed on the hot path (url, method) are simple reads.
 // Everything else is lazy - created only when accessed.
 
+/** What Node's own Request rejects a second body consumer with. */
+function bodyUsedError(): TypeError {
+  return new TypeError('Body is unusable: Body has already been read')
+}
+
+/** What Node's own Request throws from clone() once its body is used or locked. */
+function cloneError(): TypeError {
+  return new TypeError('unusable')
+}
+
+/**
+ * A Host header that makes no valid URL (`x:99999`, `[::1`) would make `new Request()` throw, where Bun and Deno
+ * serve the request: it is then built on `http://localhost` and its own path.
+ */
+function toRequest(url: string, target: string, init: RequestInit): Request {
+  try {
+    return new GlobalRequest(url, init)
+  } catch (error) {
+    if (URL.canParse(url)) throw error
+    return new GlobalRequest(`http://localhost${target}`, init)
+  }
+}
+
+/**
+ * The Host native mode builds the URL on: host[:port] or [IPv6]:port. A path, a query, a fragment, userinfo or a
+ * backslash in it would move the request off its own path (`Host: x/admin` turns `GET /public` into
+ * `/admin/public`), so such a Host gives way to `localhost`.
+ */
+const PLAIN_HOST = /^(?:[\w.~!$&'()*+,;=%-]+|\[[\w:.%]+\])(?::\d*)?$/
+
 const requestProto: Record<string | symbol, any> = {
   get method() {
     return this._incoming.method || 'GET'
@@ -209,7 +239,7 @@ const requestProto: Record<string | symbol, any> = {
       if (this._abortController) {
         init.signal = this._abortController.signal
       }
-      this._real = new GlobalRequest(this.url, init)
+      this._real = toRequest(this.url, this._incoming.url || '/', init)
     }
     return this._real
   },
@@ -223,10 +253,20 @@ const requestProto: Record<string | symbol, any> = {
     return this._bodyBuffer
   },
 
+  /** Buffer path: one consumer gets the body, as with a real Request - false once a consumer or `body` took it. */
+  _claimBody(): boolean {
+    const stream = this._bodyStream
+    if (this._bodyUsed || stream?.locked) return false
+    this._bodyUsed = true
+    stream?.getReader() // a stream handed out before stays locked, as on a real Request
+    return true
+  },
+
   // ── Body consumers: buffer fast path, stream fallback ──
 
   async json() {
     if (this._bodyPromise) {
+      if (!this._claimBody()) throw bodyUsedError()
       const buf = await this._getBuffer()
       return JSON.parse(textDecoder.decode(buf))
     }
@@ -234,6 +274,7 @@ const requestProto: Record<string | symbol, any> = {
   },
   async text() {
     if (this._bodyPromise) {
+      if (!this._claimBody()) throw bodyUsedError()
       const buf = await this._getBuffer()
       return textDecoder.decode(buf)
     }
@@ -241,28 +282,43 @@ const requestProto: Record<string | symbol, any> = {
   },
   async arrayBuffer() {
     if (this._bodyPromise) {
+      if (!this._claimBody()) throw bodyUsedError()
       const buf = await this._getBuffer()
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
     }
     return this._getReal().arrayBuffer()
   },
+  async bytes() {
+    if (this._bodyPromise) {
+      if (!this._claimBody()) throw bodyUsedError()
+      const buf = await this._getBuffer()
+      return buf.slice()
+    }
+    return this._getReal().bytes()
+  },
 
   get body() {
-    // Buffer path - lazy stream from buffer (cached)
+    // Buffer path - lazy stream from buffer (cached), read on demand so reading it is what uses the body
     if (this._bodyPromise) {
       if (!this._bodyStream) {
         const self = this
-        this._bodyStream = new ReadableStream({
-          async start(controller) {
-            try {
-              const buf = await self._getBuffer()
-              if (buf.byteLength > 0) controller.enqueue(buf)
-              controller.close()
-            } catch (e) {
-              controller.error(e)
-            }
+        this._bodyStream = new ReadableStream(
+          {
+            async pull(controller) {
+              self._bodyUsed = true
+              try {
+                const buf = await self._getBuffer()
+                if (buf.byteLength > 0) controller.enqueue(buf)
+                controller.close()
+              } catch (e) {
+                controller.error(e)
+              }
+            },
           },
-        })
+          { highWaterMark: 0 },
+        )
+        // Taken by a consumer already: locked, like a real Request's body
+        if (this._bodyUsed) this._bodyStream.getReader()
       }
       return this._bodyStream
     }
@@ -272,17 +328,22 @@ const requestProto: Record<string | symbol, any> = {
     return this._getReal().body
   },
   get bodyUsed() {
-    return this._bodyBuffer !== null || (this._real?.bodyUsed ?? false)
+    return this._bodyUsed || (this._real?.bodyUsed ?? false)
   },
 
   // Rare path - delegate to real Request
   blob() {
+    if (this._bodyPromise && !this._claimBody()) return Promise.reject(bodyUsedError())
     return this._getReal().blob()
   },
   formData() {
+    if (this._bodyPromise && !this._claimBody()) return Promise.reject(bodyUsedError())
     return this._getReal().formData() // needs Content-Type boundary parsing
   },
   clone() {
+    // Buffer path: once a consumer or a read of `body` took the body, a Request built from the buffer would hand it
+    // out again
+    if (this._bodyPromise && (this._bodyUsed || this._bodyStream?.locked)) throw cloneError()
     return this._getReal().clone()
   },
 
@@ -339,6 +400,7 @@ function createRequestProxy(
   proxy._bodyPromise = null
   proxy._bodyBuffer = null
   proxy._bodyStream = null
+  proxy._bodyUsed = false
   proxy._bodyReject = null
   proxy._bodyLimit = null
   proxy._connCache = null
@@ -530,6 +592,20 @@ async function sendFullResponse(nodeRes: ServerResponse, response: Response): Pr
   }
 }
 
+/**
+ * The answer to a request native mode cannot build a `Request` for: a method fetch refuses (`TRACE` - Node's parser
+ * itself answers `TRACK` and leaves `CONNECT` to the server's `connect` event), which Bun and Deno hand to the app,
+ * gets a 501 - the request is valid, this mode cannot carry it; anything else a 400.
+ */
+function sendRefusal(nodeRes: ServerResponse, method: string): void {
+  if (nodeRes.headersSent || nodeRes.closed) return
+  const status = method === 'CONNECT' || method === 'TRACE' || method === 'TRACK' ? 501 : 400
+  const error = status === 501 ? 'Not Implemented' : 'Bad Request'
+  const body = JSON.stringify({ statusCode: status, error, message: error })
+  nodeRes.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) })
+  nodeRes.end(body)
+}
+
 function sendError(nodeRes: ServerResponse, error: unknown, logger: LoggerLike): void {
   if (nodeRes.headersSent || nodeRes.closed) return
   logger.error('Unhandled error', error instanceof Error ? (error.stack ?? error.message) : String(error), 'NodeServer')
@@ -552,10 +628,19 @@ function closeIfBodyUnread(incoming: IncomingMessage, nodeRes: ServerResponse, h
   nodeRes.setHeader('Connection', 'close')
 }
 
+/**
+ * The 413 for a declared Content-Length over the cap, before any of the body is read. It keeps the connection: with
+ * `Connection: close` Node destroys the socket once the response is written, and a destroy with the upload still
+ * unread resets the connection - a client still uploading could lose the 413 to the reset (up to a third of fetch
+ * and a tenth of node:http uploads of 64 MB, measured). The caller drains the body instead (drainIncoming), which
+ * leaves the connection reusable, or destroys it at DRAIN_TIMEOUT or MAX_DRAIN_BYTES.
+ */
 function send413(nodeRes: ServerResponse): void {
   if (nodeRes.headersSent || nodeRes.closed) return
-  nodeRes.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' })
-  nodeRes.end(JSON.stringify({ statusCode: 413, error: 'Payload Too Large', message: 'Payload Too Large' }))
+  const body = JSON.stringify({ statusCode: 413, error: 'Payload Too Large', message: 'Payload Too Large' })
+  // A kept connection would get it chunked otherwise
+  nodeRes.writeHead(413, { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) })
+  nodeRes.end(body)
 }
 
 /** Recognized by @miiajs/core's error handler and mapped to a 413 response. */
@@ -862,7 +947,14 @@ function createNativeListener(
           return
         }
       }
-      const request = toWebRequest(nodeReq, port, hostname, maxBodySize)
+      let request: Request
+      try {
+        request = toWebRequest(nodeReq, port, hostname, maxBodySize)
+      } catch {
+        closeIfBodyUnread(nodeReq, nodeRes, method !== 'GET' && method !== 'HEAD')
+        sendRefusal(nodeRes, method)
+        return
+      }
       const response = await handler(request)
       closeIfBodyUnread(nodeReq, nodeRes, method !== 'GET' && method !== 'HEAD')
       await sendFullResponse(nodeRes, response)
@@ -873,8 +965,9 @@ function createNativeListener(
 }
 
 function toWebRequest(nodeReq: IncomingMessage, port: number, hostname: string, maxBodySize: number | false): Request {
-  const host = nodeReq.headers.host ?? `${hostname}:${port}`
-  const url = `http://${host}${nodeReq.url ?? '/'}`
+  const header = nodeReq.headers.host
+  const host = !header ? `${hostname}:${port}` : PLAIN_HOST.test(header) ? header : 'localhost'
+  const target = nodeReq.url ?? '/'
 
   const headers = new Headers()
   for (const [key, value] of Object.entries(nodeReq.headers)) {
@@ -896,7 +989,7 @@ function toWebRequest(nodeReq: IncomingMessage, port: number, hostname: string, 
     body = limitStream(body, maxBodySize, () => drainIncoming(nodeReq))
   }
 
-  const request = new GlobalRequest(url, {
+  const request = toRequest(`http://${host}${target}`, target, {
     method,
     headers,
     body,

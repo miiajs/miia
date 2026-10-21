@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test'
+import { once } from 'node:events'
 import * as http from 'node:http'
+import * as net from 'node:net'
+import { Miia, type RequestContext } from '@miiajs/core'
 import { serve, type ServerHandle } from '../src/index.js'
 
 function request(
@@ -403,6 +406,51 @@ describe('node-server', () => {
     })
   })
 
+  // ── Host header that makes no valid URL ───────────────────
+
+  describe('a Host header that makes no valid URL', () => {
+    /** A chunked `hello` under `host`, on a connection of its own - the answer is read to the close. */
+    async function post(port: number, host: string): Promise<{ status: number; body: string }> {
+      const socket = net.connect(port, '127.0.0.1')
+      await once(socket, 'connect')
+      const chunks: Buffer[] = []
+      socket.on('data', (chunk: Buffer) => chunks.push(chunk))
+      const closed = once(socket, 'close')
+      socket.write(
+        `POST /p?q=1 HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\nTransfer-Encoding: chunked\r\n\r\n` +
+          '5\r\nhello\r\n0\r\n\r\n',
+      )
+      await closed
+      const text = Buffer.concat(chunks).toString()
+      const sep = text.indexOf('\r\n\r\n')
+      return { status: Number(text.split(' ')[1]), body: text.slice(sep + 4) }
+    }
+
+    /** Answers with the URL and the body it read, under a Content-Length so that native mode does not chunk it. */
+    async function echo(req: Request): Promise<Response> {
+      const json = JSON.stringify({ url: req.url, text: await req.text() })
+      return new Response(json, { headers: { 'content-length': String(Buffer.byteLength(json)) } })
+    }
+
+    for (const host of ['x:99999', '[::1']) {
+      it(`optimized mode: the body is read under Host ${host}, and req.url keeps it as Bun and Deno do`, async () => {
+        const port = nextPort++
+        server = await serve({ port, fetch: echo })
+        const res = await post(port, host)
+        expect(res.status).toBe(200)
+        expect(JSON.parse(res.body)).toEqual({ url: `http://${host}/p?q=1`, text: 'hello' })
+      })
+
+      it(`native mode: the request under Host ${host} is built on http://localhost`, async () => {
+        const port = nextPort++
+        server = await serve({ port, mode: 'native', fetch: echo })
+        const res = await post(port, host)
+        expect(res.status).toBe(200)
+        expect(JSON.parse(res.body)).toEqual({ url: 'http://localhost/p?q=1', text: 'hello' })
+      })
+    }
+  })
+
   // ── Request body consumers ────────────────────────────────
 
   describe('request body consumers', () => {
@@ -481,6 +529,182 @@ describe('node-server', () => {
       })
       const body = JSON.parse(res.body)
       expect(body.text).toBe('stream from body getter')
+    })
+  })
+
+  // ── Body read once ────────────────────────────────────────
+
+  describe('body read once, like a real Request', () => {
+    // One part goes out with Content-Length (buffer path), several with chunked framing (stream path)
+    const paths = [
+      ['buffer', ['hello'], ['"hello"']],
+      ['stream', ['hel', 'lo'], ['"hel', 'lo"']],
+    ] as const
+
+    async function exchange(parts: readonly string[], handler: (ctx: RequestContext) => unknown): Promise<any> {
+      const app = new Miia({ logger: false })
+      app.addRoute('POST', '/', handler)
+      const port = nextPort++
+      server = await serve({ port, fetch: app.fetch })
+      const res = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+        const req = http.request(
+          {
+            hostname: 'localhost',
+            port,
+            path: '/',
+            method: 'POST',
+            headers:
+              parts.length > 1
+                ? { 'Transfer-Encoding': 'chunked' }
+                : { 'Content-Length': String(Buffer.byteLength(parts[0]!)) },
+          },
+          (res) => {
+            let body = ''
+            res.on('data', (chunk: Buffer) => (body += chunk))
+            res.on('end', () => resolve({ status: res.statusCode!, body }))
+          },
+        )
+        req.on('error', reject)
+        for (const part of parts) req.write(part)
+        req.end()
+      })
+      expect(res.status).toBe(200)
+      return JSON.parse(res.body)
+    }
+
+    async function readAll(stream: ReadableStream<Uint8Array>): Promise<string> {
+      const reader = stream.getReader()
+      let text = ''
+      const decoder = new TextDecoder()
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) return text + decoder.decode()
+        text += decoder.decode(value, { stream: true })
+      }
+    }
+
+    /** How a body read settled: its value, or the error it rejected with. */
+    async function outcome(read: () => Promise<unknown>): Promise<string> {
+      try {
+        const value = await read()
+        return `resolved ${value instanceof ArrayBuffer ? value.byteLength : String(value)}`
+      } catch (error) {
+        return `${(error as Error).name}: ${(error as Error).message}`
+      }
+    }
+
+    // The buffer path rejects with Node's own message; the stream path hands over the runtime's Request, whose
+    // message differs (Bun: "Body already used")
+    const BODY_USED = /^TypeError: Body (is unusable|already used)/
+
+    for (const [path, parts, jsonParts] of paths) {
+      it(`${path} path: ctx.req.arrayBuffer() after ctx.text() rejects with a TypeError`, async () => {
+        const body = await exchange(parts, async (ctx) => {
+          const text = await ctx.text()
+          return { text, second: await outcome(() => ctx.req.arrayBuffer()), bodyUsed: ctx.req.bodyUsed }
+        })
+        expect(body.text).toBe('hello')
+        expect(body.second).toMatch(BODY_USED)
+        expect(body.bodyUsed).toBe(true)
+      })
+
+      it(`${path} path: ctx.req.text() twice - the second call rejects`, async () => {
+        const body = await exchange(parts, async (ctx) => {
+          const first = await ctx.req.text()
+          return { first, second: await outcome(() => ctx.req.text()) }
+        })
+        expect(body.first).toBe('hello')
+        expect(body.second).toMatch(BODY_USED)
+      })
+
+      it(`${path} path: a read of ctx.req.body takes the body, ctx.text() after it rejects`, async () => {
+        const body = await exchange(parts, async (ctx) => {
+          const before = ctx.req.bodyUsed
+          const raw = await readAll(ctx.req.body!)
+          return { raw, before, after: ctx.req.bodyUsed, text: await outcome(() => ctx.text()) }
+        })
+        expect(body).toMatchObject({ raw: 'hello', before: false, after: true })
+        expect(body.text).toMatch(BODY_USED)
+      })
+
+      it(`${path} path: ctx.req.body handed out but not read leaves the body to ctx.text()`, async () => {
+        const body = await exchange(parts, async (ctx) => {
+          const stream = ctx.req.body!
+          return { text: await ctx.text(), bodyUsed: ctx.req.bodyUsed, locked: stream.locked }
+        })
+        expect(body).toMatchObject({ text: 'hello', bodyUsed: true })
+        // Bun's own Request leaves a consumed stream body unlocked
+        if (path === 'buffer') expect(body.locked).toBe(true)
+      })
+
+      it(`${path} path: ctx.json() and ctx.text() still share one read`, async () => {
+        const body = await exchange(jsonParts, async (ctx) => ({
+          json: await ctx.json(),
+          text: await ctx.text(),
+          again: await ctx.json(),
+        }))
+        expect(body).toEqual({ json: 'hello', text: '"hello"', again: 'hello' })
+      })
+
+      it(`${path} path: ctx.req.bytes() reads the body into bytes of its own, once`, async () => {
+        const body = await exchange(parts, async (ctx) => {
+          const bytes = await ctx.req.bytes()
+          return {
+            text: new TextDecoder().decode(bytes),
+            own: bytes instanceof Uint8Array && bytes.buffer.byteLength === bytes.byteLength,
+            second: await outcome(() => ctx.req.bytes()),
+          }
+        })
+        expect(body).toMatchObject({ text: 'hello', own: true })
+        expect(body.second).toMatch(BODY_USED)
+      })
+
+      it(`${path} path: clone() after ctx.text() throws a TypeError`, async () => {
+        const body = await exchange(parts, async (ctx) => {
+          await ctx.text()
+          return { clone: await outcome(async () => ctx.req.clone()) }
+        })
+        // Bun's own Request words it differently from Node's
+        expect(body.clone).toMatch(/^TypeError: (unusable|Body is disturbed or locked)$/)
+      })
+
+      it(`${path} path: a clone taken before the body is read reads it too`, async () => {
+        const body = await exchange(parts, async (ctx) => {
+          const copy = ctx.req.clone()
+          return { text: await ctx.text(), copy: await copy.text() }
+        })
+        expect(body).toEqual({ text: 'hello', copy: 'hello' })
+      })
+    }
+
+    it('buffer path: every consumer after ctx.text() rejects and the body stream is locked', async () => {
+      const body = await exchange(['hello'], async (ctx) => {
+        await ctx.text()
+        let reader: string
+        try {
+          ctx.req.body!.getReader()
+          reader = 'unlocked'
+        } catch (error) {
+          reader = (error as Error).name
+        }
+        return {
+          json: await outcome(() => ctx.req.json()),
+          text: await outcome(() => ctx.req.text()),
+          arrayBuffer: await outcome(() => ctx.req.arrayBuffer()),
+          blob: await outcome(() => ctx.req.blob()),
+          formData: await outcome(() => ctx.req.formData()),
+          reader,
+        }
+      })
+      const message = 'TypeError: Body is unusable: Body has already been read'
+      expect(body).toEqual({
+        json: message,
+        text: message,
+        arrayBuffer: message,
+        blob: message,
+        formData: message,
+        reader: 'TypeError',
+      })
     })
   })
 
@@ -723,6 +947,46 @@ describe('node-server', () => {
       })
       expect(handlerCalled).toBe(false)
     })
+
+    // On Node this is test/early-413.node.test.ts (`bun run test:node-server`); here it keeps Bun's node:http, which
+    // handles the socket its own way, from losing the 413 to what the adapter does with the body
+    for (const mode of ['optimized', 'native'] as const) {
+      it(`${mode} mode: a client uploading the body gets the 413, every time`, async () => {
+        const port = nextPort++
+        server = await serve({ port, mode, maxBodySize: 1000, fetch: () => new Response('ok') })
+        const size = 64_000_000
+        const chunk = Buffer.alloc(65_536, 97)
+        for (let attempt = 1; attempt <= 10; attempt++) {
+          const socket = net.connect(port, '127.0.0.1')
+          await once(socket, 'connect')
+          let received = ''
+          let closed = false
+          socket.setEncoding('latin1')
+          socket.on('data', (data: string) => {
+            received += data
+          })
+          socket.on('error', () => {})
+          socket.on('close', () => {
+            closed = true
+          })
+          socket.write(`POST /upload HTTP/1.1\r\nHost: localhost\r\nContent-Length: ${size}\r\n\r\n`)
+          for (let sent = 0; sent < size && socket.writable; sent += chunk.length) {
+            if (!socket.write(chunk.subarray(0, size - sent))) {
+              await new Promise((resolve) => {
+                socket.once('drain', resolve)
+                socket.once('close', resolve)
+              })
+            }
+          }
+          const started = Date.now()
+          while (!received.includes('"message":"Payload Too Large"}') && !closed && Date.now() - started < 3000) {
+            await new Promise((resolve) => setTimeout(resolve, 5))
+          }
+          socket.destroy()
+          expect(received).toMatch(/^HTTP\/1\.1 413 /)
+        }
+      }, 30_000)
+    }
 
     it('should error chunked bodies past the cap with PayloadTooLargeError', async () => {
       const port = nextPort++

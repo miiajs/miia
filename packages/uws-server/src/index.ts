@@ -1,4 +1,4 @@
-import type { us_listen_socket } from 'uWebSockets.js'
+import type { HttpResponse, us_listen_socket } from 'uWebSockets.js'
 
 /**
  * @miiajs/uws-server - uWebSockets.js HTTP server for Web API frameworks.
@@ -50,10 +50,14 @@ import type { us_listen_socket } from 'uWebSockets.js'
 const CACHE = Symbol('responseCache')
 
 const textDecoder = new TextDecoder()
+const textEncoder = new TextEncoder()
 const EMPTY_U8 = new Uint8Array(0)
 const DEFAULT_BUFFER_THRESHOLD = 102_400 // 100KB
 const DEFAULT_BODY_HIGH_WATER_MARK = 262_144 // 256KB
 const DEFAULT_MAX_BODY_SIZE = 1_048_576 // 1MB
+// A streamed response body goes to uWS in pieces of at most this, so what waits in its buffer for the socket stays
+// small
+const STREAM_PIECE = 65_536 // 64KB
 
 // ─── Lightweight Headers Proxy (optimized mode) ─────────────
 //
@@ -107,6 +111,51 @@ function createHeadersProxy(pairs: [string, string][]): Headers {
 // Properties accessed on the hot path (url, method) are simple reads.
 // Everything else is lazy - created only when accessed.
 
+/** What Node's own Request rejects a second body consumer with. */
+function bodyUsedError(): TypeError {
+  return new TypeError('Body is unusable: Body has already been read')
+}
+
+/** What Node's own Request throws from clone() once its body is used or locked. */
+function cloneError(): TypeError {
+  return new TypeError('unusable')
+}
+
+/**
+ * A Host header that makes no valid URL (`x:99999`, `[::1`) would make `new Request()` throw, where Bun and Deno
+ * serve the request: it is then built on `http://localhost` and its own path.
+ */
+function toRequest(url: string, target: string, init: RequestInit): Request {
+  try {
+    return new Request(url, init)
+  } catch (error) {
+    if (URL.canParse(url)) throw error
+    return new Request(`http://localhost${target}`, init)
+  }
+}
+
+/**
+ * The Host native mode builds the URL on: host[:port] or [IPv6]:port. A path, a query, a fragment, userinfo or a
+ * backslash in it would move the request off its own path (`Host: x/admin` turns `GET /public` into
+ * `/admin/public`), so such a Host gives way to `localhost`.
+ */
+const PLAIN_HOST = /^(?:[\w.~!$&'()*+,;=%-]+|\[[\w:.%]+\])(?::\d*)?$/
+
+/**
+ * The answer to a request native mode cannot build a `Request` for: a method fetch refuses (`CONNECT`, `TRACE`,
+ * `TRACK`), which Bun and Deno hand to the app, gets a 501 - the request is valid, this mode cannot carry it; anything
+ * else, such as a method that is not a token, a 400.
+ */
+function refuseRequest(res: HttpResponse, method: string): void {
+  const status = method === 'CONNECT' || method === 'TRACE' || method === 'TRACK' ? 501 : 400
+  const error = status === 501 ? 'Not Implemented' : 'Bad Request'
+  res.cork(() => {
+    res.writeStatus(`${status}`)
+    res.writeHeader('content-type', 'application/json')
+    res.end(JSON.stringify({ statusCode: status, error, message: error }))
+  })
+}
+
 const requestProto: Record<string | symbol, any> = {
   get method() {
     return this._method
@@ -116,6 +165,10 @@ const requestProto: Record<string | symbol, any> = {
   },
   get headers() {
     return (this._headers ??= createHeadersProxy(this._headerPairs))
+  },
+  /** Lazy connection info - read by @miiajs/core's resolveConn. */
+  get _conn() {
+    return (this._connCache ??= connInfo(this._address, this._remotePort))
   },
   get signal() {
     if (!this._ac) {
@@ -153,7 +206,7 @@ const requestProto: Record<string | symbol, any> = {
         ;(init as any).duplex = 'half'
       }
       if (this._ac) init.signal = this._ac.signal
-      this._real = new Request(this.url, init)
+      this._real = toRequest(this.url, this._search ? `${this._pathname}?${this._search}` : this._pathname, init)
     }
     return this._real
   },
@@ -167,10 +220,20 @@ const requestProto: Record<string | symbol, any> = {
     return this._bodyBuffer
   },
 
+  /** Buffer path: one consumer gets the body, as with a real Request - false once a consumer or `body` took it. */
+  _claimBody(): boolean {
+    const stream = this._bodyStream
+    if (this._bodyUsed || stream?.locked) return false
+    this._bodyUsed = true
+    stream?.getReader() // a stream handed out before stays locked, as on a real Request
+    return true
+  },
+
   // ── Body consumers: buffer fast path, stream fallback ──
 
   async json() {
     if (this._bodyPromise) {
+      if (!this._claimBody()) throw bodyUsedError()
       const buf = await this._getBuffer()
       return JSON.parse(textDecoder.decode(buf))
     }
@@ -178,6 +241,7 @@ const requestProto: Record<string | symbol, any> = {
   },
   async text() {
     if (this._bodyPromise) {
+      if (!this._claimBody()) throw bodyUsedError()
       const buf = await this._getBuffer()
       return textDecoder.decode(buf)
     }
@@ -185,47 +249,67 @@ const requestProto: Record<string | symbol, any> = {
   },
   async arrayBuffer() {
     if (this._bodyPromise) {
+      if (!this._claimBody()) throw bodyUsedError()
       const buf = await this._getBuffer()
       return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength)
     }
     return this._getReal().arrayBuffer()
   },
+  async bytes() {
+    if (this._bodyPromise) {
+      if (!this._claimBody()) throw bodyUsedError()
+      const buf = await this._getBuffer()
+      return buf.slice()
+    }
+    return this._getReal().bytes()
+  },
 
   get body() {
-    // Stream path - original ReadableStream
-    if (this._body) return this._body
-    // Buffer path - lazy stream from buffer (cached)
+    // Stream path - the original ReadableStream, through the real Request so that bodyUsed sees it read
+    if (this._body) return this._getReal().body
+    // Buffer path - lazy stream from buffer (cached), read on demand so reading it is what uses the body
     if (this._bodyPromise) {
       if (!this._bodyStream) {
         const self = this
-        this._bodyStream = new ReadableStream({
-          async start(controller) {
-            try {
-              const buf = await self._getBuffer()
-              if (buf.byteLength > 0) controller.enqueue(buf)
-              controller.close()
-            } catch (e) {
-              controller.error(e)
-            }
+        this._bodyStream = new ReadableStream(
+          {
+            async pull(controller) {
+              self._bodyUsed = true
+              try {
+                const buf = await self._getBuffer()
+                if (buf.byteLength > 0) controller.enqueue(buf)
+                controller.close()
+              } catch (e) {
+                controller.error(e)
+              }
+            },
           },
-        })
+          { highWaterMark: 0 },
+        )
+        // Taken by a consumer already: locked, like a real Request's body
+        if (this._bodyUsed) this._bodyStream.getReader()
       }
       return this._bodyStream
     }
     return null
   },
   get bodyUsed() {
-    return this._bodyBuffer !== null || (this._real?.bodyUsed ?? false)
+    return this._bodyUsed || (this._real?.bodyUsed ?? false)
   },
 
   // Rare path - delegate to real Request
   blob() {
+    if (this._bodyPromise && !this._claimBody()) return Promise.reject(bodyUsedError())
     return this._getReal().blob()
   },
   formData() {
+    if (this._bodyPromise && !this._claimBody()) return Promise.reject(bodyUsedError())
     return this._getReal().formData()
   },
   clone() {
+    // Buffer path: once a consumer or a read of `body` took the body, a Request built from the buffer would hand it
+    // out again
+    if (this._bodyPromise && (this._bodyUsed || this._bodyStream?.locked)) throw cloneError()
     return this._getReal().clone()
   },
 
@@ -269,7 +353,8 @@ function createRequestProxy(
   port: number,
   pathname: string,
   query: string,
-  conn: { remoteAddress: string; remotePort?: number; family: 'IPv4' | 'IPv6' },
+  address: string,
+  remotePort: number | undefined,
 ): Request {
   const proxy = Object.create(requestProto)
   proxy._method = method
@@ -285,10 +370,13 @@ function createRequestProxy(
   proxy._bodyPromise = bodyPromise
   proxy._bodyBuffer = null
   proxy._bodyStream = null
+  proxy._bodyUsed = false
   proxy._ac = null
   proxy._real = null
   proxy._aborted = false
-  proxy._conn = conn
+  proxy._address = address
+  proxy._remotePort = remotePort
+  proxy._connCache = null
   return proxy
 }
 
@@ -460,6 +548,11 @@ export const serve = async ({
   const native = mode === 'native'
   let listenSocket: us_listen_socket | null = null
 
+  // Requests dispatched and not yet answered or aborted - close() waits for them
+  let inFlight = 0
+  let drained: Promise<void> | null = null
+  let resolveDrained = () => {}
+
   if (!native) {
     Object.defineProperty(globalThis, 'Response', { value: LightResponse, configurable: true })
   }
@@ -487,26 +580,36 @@ export const serve = async ({
     // ── Connection info: must read remote address in the sync section ──
     // (uWS invalidates res after the first async gap). getRemotePort() returns
     // 0 when the port is unavailable, normalized to undefined.
-    const remoteAddress = textDecoder.decode(res.getRemoteAddressAsText())
+    const address = textDecoder.decode(res.getRemoteAddressAsText())
     const remotePort = res.getRemotePort() || undefined
-    const conn = {
-      remoteAddress,
-      remotePort,
-      family: remoteAddress.includes(':') ? ('IPv6' as const) : ('IPv4' as const),
-    }
 
     // ── 2. Sync: set up body stream ─────────────────────────
 
     const hasBody = method !== 'GET' && method !== 'HEAD'
 
+    // Counted in flight: set at dispatch, cleared by the one finish() that counts it out
+    let counted = false
+
+    // The response is out, or the client went away
+    const finish = () => {
+      if (!counted) return
+      counted = false
+      if (--inFlight === 0 && drained !== null) {
+        drained = null
+        resolveDrained()
+      }
+    }
+
     // ── Early 413: declared Content-Length over the cap, handler never runs ──
     // Fully synchronous - no async gap yet, so no onAborted registration is
     // needed. No onData handler is registered on this path, so uWS discards
-    // the incoming body itself and the connection stays reusable.
+    // the incoming body itself. The connection cannot carry another request
+    // until that body is through, so the answer says Connection: close.
     if (maxBodySize !== false && hasBody && contentLength > maxBodySize) {
       res.cork(() => {
         res.writeStatus('413')
         res.writeHeader('content-type', 'application/json')
+        res.writeHeader('connection', 'close')
         res.end(JSON.stringify({ statusCode: 413, error: 'Payload Too Large', message: 'Payload Too Large' }))
       })
       return
@@ -521,6 +624,12 @@ export const serve = async ({
     let responseEnded = false
     let bodyPromise: Promise<Uint8Array> | null = null
     let bodyReject: ((err: Error) => void) | null = null
+    // Resumes a response waiting for onWritable - set only while one is under backpressure
+    let wake: (() => void) | null = null
+    // A response write waits for onWritable: the request body must not pause the socket meanwhile
+    let writing = false
+    // The reader of a streamed response body - a client gone while it waits for the source cancels the source
+    let reading: ReadableStreamDefaultReader<unknown> | null = null
 
     if (shouldBuffer) {
       // ── Buffer path: small body accumulated natively in C++ ──
@@ -582,8 +691,15 @@ export const serve = async ({
                 bodyClosed = true
                 controller.close()
               } else if (!bodyPaused && !aborted && !responseEnded && (controller.desiredSize ?? 1) <= 0) {
-                bodyPaused = true
-                res.pause()
+                if (!writing) {
+                  bodyPaused = true
+                  res.pause()
+                } else if (controller.desiredSize! < -bodyHighWaterMark) {
+                  // A response write waits and the socket must keep reading: past twice the high-water mark the
+                  // unread body is given up, and what still arrives is dropped like after a response
+                  bodyClosed = true
+                  controller.error(new Error('Request body piled up unread while the response waited for the client'))
+                }
               }
             })
           },
@@ -603,19 +719,30 @@ export const serve = async ({
     let request: Request
 
     if (native) {
-      const url = `http://${host || `${hostname}:${port}`}${path}${query ? '?' + query : ''}`
+      const target = query ? `${path}?${query}` : path
       const ac = new AbortController()
-      request = new Request(url, {
-        method,
-        headers: new Headers(headerPairs),
-        body,
-        signal: ac.signal,
-        // @ts-expect-error - duplex required for streaming request bodies in Node
-        duplex: hasBody ? 'half' : undefined,
-      })
-      ;(request as any)._conn = conn
+      const authority = host === '' ? `${hostname}:${port}` : PLAIN_HOST.test(host) ? host : 'localhost'
+      try {
+        request = toRequest(`http://${authority}${target}`, target, {
+          method,
+          headers: new Headers(headerPairs),
+          body,
+          signal: ac.signal,
+          // @ts-expect-error - duplex required for streaming request bodies in Node
+          duplex: hasBody ? 'half' : undefined,
+        })
+      } catch {
+        // What still comes of the body is dropped, as after any response
+        bodyClosed = true
+        refuseRequest(res, method)
+        return
+      }
+      ;(request as any)._conn = connInfo(address, remotePort)
       res.onAborted(() => {
         aborted = true
+        wake?.()
+        reading?.cancel().catch(() => {})
+        finish()
         ac.abort(new Error('Client connection closed'))
         if (bodyController && !bodyClosed) {
           bodyClosed = true
@@ -627,9 +754,24 @@ export const serve = async ({
         }
       })
     } else {
-      request = createRequestProxy(method, headerPairs, body, bodyPromise, host, hostname, port, path, query, conn)
+      request = createRequestProxy(
+        method,
+        headerPairs,
+        body,
+        bodyPromise,
+        host,
+        hostname,
+        port,
+        path,
+        query,
+        address,
+        remotePort,
+      )
       res.onAborted(() => {
         aborted = true
+        wake?.()
+        reading?.cancel().catch(() => {})
+        finish()
         ;(request as any)._aborted = true
         if ((request as any)._ac) {
           ;(request as any)._ac.abort(new Error('Client connection closed'))
@@ -678,7 +820,12 @@ export const serve = async ({
     }
 
     const sendError = (error: unknown) => {
-      if (aborted || responseEnded) return
+      if (aborted || responseEnded) {
+        // Thrown while the response was being written: what went out cannot be completed, so the connection goes
+        if (!aborted) res.close()
+        finish()
+        return
+      }
       logger.error(
         'Unhandled error',
         error instanceof Error ? (error.stack ?? error.message) : String(error),
@@ -696,6 +843,21 @@ export const serve = async ({
           }),
         )
       })
+      finish()
+    }
+
+    // HEAD and 304 report the declared length and send no body; 1xx and 204 carry no Content-Length at all
+    // (RFC 9110 8.6); anything else without a body is an empty one. The length goes out as a header:
+    // endWithoutBody(length) would also switch off uWS's idle timeout.
+    const endEmpty = (status: number, length: number) => {
+      if (method === 'HEAD' || status === 304) {
+        if (length >= 0) res.writeHeader('content-length', `${length}`)
+        res.endWithoutBody()
+      } else if (status === 204 || status < 200) {
+        res.endWithoutBody()
+      } else {
+        res.end()
+      }
     }
 
     const sendResponse = (response: Response): void | Promise<void> => {
@@ -709,68 +871,182 @@ export const serve = async ({
         releaseBody()
         res.cork(() => {
           res.writeStatus(`${status}`)
-          if (headers) {
-            if (headers instanceof Headers) {
-              headers.forEach((v: string, k: string) => res.writeHeader(k, v))
-            } else {
-              for (const k of Object.keys(headers)) res.writeHeader(k, (headers as any)[k])
-            }
-          }
-          res.end(body ?? '')
+          const length = headers ? writeHeaders(res, headers instanceof Headers ? headers : new Headers(headers)) : -1
+          if (body === null) endEmpty(status, length)
+          else res.end(body)
         })
+        finish()
         return
       }
 
-      // No body (e.g. native mode 204)
+      // No body (e.g. native mode 204, a HEAD answer)
       if (!response.body) {
         releaseBody()
         res.cork(() => {
           res.writeStatus(`${response.status}`)
-          response.headers.forEach((v: string, k: string) => res.writeHeader(k, v))
-          res.end()
+          endEmpty(response.status, writeHeaders(res, response.headers))
         })
+        finish()
         return
       }
 
       // Streaming fallback (SSE, large files)
       if (aborted) return
-      return streamBody(response)
+      return streamBody(response).finally(finish)
     }
 
     const streamBody = async (response: Response) => {
+      let length = -1
       res.cork(() => {
         res.writeStatus(`${response.status}`)
-        response.headers.forEach((v: string, k: string) => res.writeHeader(k, v))
+        length = writeHeaders(res, response.headers)
       })
+      if (length >= 0) return streamFixed(response.body!, length)
 
+      // What the socket does not take stays in uWS's buffer, so the next piece waits for a writable event; pieces
+      // of at most STREAM_PIECE keep that buffer, and what is left in it at the end, small
       const reader = response.body!.getReader()
+      reading = reader
+      let complete = false
+      let failed = false
       try {
         while (true) {
           const { done, value } = await reader.read()
+          if (done) complete = true
           if (done || aborted) break
-          res.cork(() => res.write(value))
+          const chunk = toBytes(value)
+          if (chunk === null) {
+            failed = true
+            break
+          }
+          for (let at = 0; at < chunk.byteLength && !aborted; at += STREAM_PIECE) {
+            const piece = chunk.subarray(at, at + STREAM_PIECE)
+            let ok = false
+            res.cork(() => {
+              ok = res.write(piece)
+            })
+            if (!ok && !aborted) await waitWritable(() => true)
+          }
         }
       } catch {
         // Response body stream errored
+        failed = true
       } finally {
+        // A client gone or a source failed: the producer (SSE) is told to stop
+        if (!complete) reader.cancel().catch(() => {})
+        reading = null
         reader.releaseLock()
       }
 
       releaseBody()
-      if (!aborted) res.cork(() => res.end())
+      if (aborted) return
+      // Closed, not ended: a body cut off by its source must not look complete
+      if (failed) res.close()
+      else res.cork(() => res.end())
+    }
+
+    // A declared length goes out as the only framing: tryEnd() writes it as Content-Length and streams the body
+    // against it. A source that turns out longer or shorter, or errors, closes the connection - ending would put a
+    // wrong frame on the wire. The chunk that completes the body waits for the source to end, so a longer one is
+    // caught too.
+    const streamFixed = async (body: ReadableStream<Uint8Array>, total: number) => {
+      const reader = body.getReader()
+      reading = reader
+      let sent = 0
+      let last: Uint8Array | null = null
+      let intact = false
+      try {
+        while (!aborted) {
+          const { done, value } = await reader.read()
+          if (done) {
+            intact = sent === total
+            break
+          }
+          if (aborted) break
+          const chunk = toBytes(value)
+          if (chunk === null || sent + chunk.byteLength > total) break
+          if (chunk.byteLength === 0) continue
+          sent += chunk.byteLength
+          if (sent === total) last = chunk
+          else await sendChunk(chunk, total)
+        }
+      } catch {
+        // Response body stream errored
+      } finally {
+        if (!intact) reader.cancel().catch(() => {})
+        reading = null
+        reader.releaseLock()
+      }
+
+      releaseBody()
+      if (aborted) return
+      if (!intact) res.close()
+      else if (last === null) res.cork(() => res.end())
+      else await sendChunk(last, total)
+    }
+
+    // Hands a chunk to uWS; under backpressure waits for onWritable and retries the unsent rest from its offset
+    const sendChunk = async (chunk: Uint8Array, total: number) => {
+      let offset = 0
+      let ok = false
+      res.cork(() => {
+        offset = res.getWriteOffset()
+        ok = res.tryEnd(chunk, total)[0]
+      })
+      if (ok || aborted) return
+      await waitWritable((at) => {
+        let sent = false
+        res.cork(() => {
+          sent = res.tryEnd(chunk.subarray(at - offset), total)[0]
+        })
+        return sent
+      })
+    }
+
+    // Until `retry` goes through on a writable event. A socket paused for the request body gets none, so the body
+    // is resumed and is not paused again while the write waits - it queues unread meanwhile.
+    const waitWritable = async (retry: (offset: number) => boolean) => {
+      writing = true
+      if (bodyPaused) {
+        bodyPaused = false
+        res.resume()
+        // resume() polls for reads only: a retry asks for a writable event again if it falls short
+        if (retry(res.getWriteOffset())) {
+          writing = false
+          return
+        }
+      }
+      await new Promise<void>((resolve) => {
+        wake = resolve
+        res.onWritable((at) => {
+          const sent = retry(at)
+          if (sent) resolve()
+          return sent
+        })
+      })
+      wake = null
+      writing = false
+    }
+
+    // A throw from sendResponse itself must not escape: it would keep the request in flight and close() waiting
+    const safeSend = (response: Response) => {
+      try {
+        const p = sendResponse(response)
+        if (p) p.catch(sendError)
+      } catch (error) {
+        sendError(error)
+      }
     }
 
     // ── 5. Dispatch: sync path when possible ────────────────
 
+    counted = true
+    inFlight++
     try {
       const result = handler(request)
 
-      if (result instanceof Promise) {
-        result.then(sendResponse, sendError)
-      } else {
-        const p = sendResponse(result)
-        if (p) p.catch(sendError)
-      }
+      if (result instanceof Promise) result.then(safeSend, sendError)
+      else safeSend(result)
     } catch (error) {
       sendError(error)
     }
@@ -790,14 +1066,55 @@ export const serve = async ({
   })
 
   return {
+    // Stops accepting, then waits for the requests in flight - no timeout. Keep-alive connections stay open
+    // meanwhile, so a request still arriving on one is served and waited for too; after the drain every
+    // connection left is closed, so none is served once close() has resolved.
     async close() {
-      if (!native) {
-        Object.defineProperty(globalThis, 'Response', { value: GlobalResponse, configurable: true })
-      }
       if (listenSocket) {
         ;(uWS.default ?? uWS).us_listen_socket_close(listenSocket)
         listenSocket = null
       }
+      if (inFlight > 0) {
+        await (drained ??= new Promise<void>((resolve) => {
+          resolveDrained = resolve
+        }))
+      }
+      app.close()
+      // After the drain: a response built while it runs still gets LightResponse
+      if (!native) {
+        Object.defineProperty(globalThis, 'Response', { value: GlobalResponse, configurable: true })
+      }
     },
   }
+}
+
+/** The connection info core reads; the address is the text uWS gives, an IPv6 one in its expanded form. */
+function connInfo(
+  address: string,
+  remotePort: number | undefined,
+): { remoteAddress: string; remotePort?: number; family: 'IPv4' | 'IPv6' } {
+  return { remoteAddress: address, remotePort, family: address.includes(':') ? 'IPv6' : 'IPv4' }
+}
+
+/**
+ * Writes the response headers except Content-Length and Transfer-Encoding: uWS frames every response itself, and
+ * a forwarded copy would go out next to its own. Returns the declared Content-Length, -1 when there is none or it
+ * is not a valid length.
+ */
+function writeHeaders(res: HttpResponse, headers: Headers): number {
+  let length = -1
+  headers.forEach((value: string, key: string) => {
+    if (key === 'content-length') length = /^\d{1,15}$/.test(value) ? Number(value) : -1
+    else if (key !== 'transfer-encoding') res.writeHeader(key, value)
+  })
+  return length
+}
+
+/** A response body chunk as bytes - a stream may yield strings or other views, a declared length counts bytes. */
+function toBytes(value: unknown): Uint8Array | null {
+  if (value instanceof Uint8Array) return value
+  if (typeof value === 'string') return textEncoder.encode(value)
+  if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+  if (value instanceof ArrayBuffer) return new Uint8Array(value)
+  return null
 }
