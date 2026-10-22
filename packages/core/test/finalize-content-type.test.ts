@@ -7,8 +7,8 @@ const passThrough: Middleware = async (_ctx, next) => {
   await next()
 }
 
-// Each one reaches the result through its own tail in app.ts: finalizeResponse() straight from the handler,
-// finalizePipelineResult() after a route middleware, and the same after a global one
+// Each one reaches respond() in app.ts its own way: straight from the handler, after a route middleware,
+// and after a global one
 const setups: Record<string, (app: Miia, handler: Handler) => void> = {
   'no middleware': (app, handler) => app.addRoute('GET', '/', handler),
   'route middleware': (app, handler) => app.addRoute('GET', '/', handler, { middlewares: [passThrough] }),
@@ -72,6 +72,42 @@ describe('a returned value next to what the handler set on ctx.res', () => {
           return { returned: true }
         })
         expect(res).toEqual({ status: 200, type: 'application/json', body: '{"set":true}' })
+      })
+
+      it('keeps a stream the handler set, adding no Content-Type for the returned value - GET and HEAD', async () => {
+        for (const method of ['GET', 'HEAD']) {
+          const res = await fetchWith(
+            setup,
+            (ctx) => {
+              ctx.res.stream(new Blob(['abc']).stream())
+              return { a: 1 }
+            },
+            method,
+          )
+          expect(res).toEqual({ status: 200, type: null, body: method === 'GET' ? 'abc' : '' })
+        }
+      })
+
+      it('HEAD: never serializes the returned value', async () => {
+        let serialized = 0
+        const value = () => ({
+          toJSON() {
+            serialized++
+            return { a: 1 }
+          },
+        })
+        const plain = await fetchWith(setup, value, 'HEAD')
+        const touched = await fetchWith(
+          setup,
+          (ctx) => {
+            ctx.res.header('x-custom', '1')
+            return value()
+          },
+          'HEAD',
+        )
+        expect(plain).toEqual({ status: 200, type: 'application/json', body: '' })
+        expect(touched).toEqual({ status: 200, type: 'application/json', body: '' })
+        expect(serialized).toBe(0)
       })
 
       it('HEAD: the Content-Type the handler set, no body', async () => {

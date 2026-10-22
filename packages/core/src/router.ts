@@ -1,7 +1,7 @@
 import { DEFAULT_BODY_LIMIT } from './body-limit.js'
 import { GUARD_FACTORY } from './decorators/metadata.js'
 import { Logger } from './logger.js'
-import { compose } from './middleware.js'
+import { compose, type Pipeline } from './middleware.js'
 import type { HttpMethod, Middleware, RequestContext } from './types.js'
 import { joinPaths } from './utils/index.js'
 
@@ -13,7 +13,7 @@ interface RouteEntry {
   skipGlobalGuards: boolean
   skippedGuardClasses: Set<unknown> | null
   bodyLimit: number | false
-  compiledPipeline?: Middleware
+  compiledPipeline?: Pipeline
   /** `:param` names of this route; each is read from the path segment at the same index in `paramIndexes`. */
   paramNames: string[]
   paramIndexes: number[]
@@ -25,7 +25,7 @@ export interface MatchResult {
   handler: (ctx: RequestContext) => unknown
   params: Record<string, string>
   bodyLimit: number | false
-  compiledPipeline?: Middleware
+  compiledPipeline?: Pipeline
 }
 
 export interface AddRouteOptions {
@@ -93,6 +93,10 @@ function search(node: TrieNode, segments: string[], i: number): RouteEntry | nul
   return node.wildcard
 }
 
+function toMatch(entry: RouteEntry, params: Record<string, string>): MatchResult {
+  return { handler: entry.handler, params, bodyLimit: entry.bodyLimit, compiledPipeline: entry.compiledPipeline }
+}
+
 function routeParams(entry: RouteEntry, segments: string[]): Record<string, string> {
   const params: Record<string, string> = {}
   const names = entry.paramNames
@@ -109,7 +113,8 @@ function routeParams(entry: RouteEntry, segments: string[]): Record<string, stri
 
 export class Router {
   private logger = new Logger(Router.name)
-  private staticRoutes = new Map<string, RouteEntry>()
+  /** Method -> normalized path -> route. */
+  private staticRoutes = new Map<string, Map<string, RouteEntry>>()
   private tries = new Map<string, TrieNode>()
   private allEntries: RouteEntry[] = []
 
@@ -219,7 +224,12 @@ export class Router {
     this.logger.log(`Mapped {/${normalized}, ${method}} route`)
 
     if (isStatic) {
-      this.staticRoutes.set(method + ':' + normalized, entry)
+      let byPath = this.staticRoutes.get(method)
+      if (!byPath) {
+        byPath = new Map()
+        this.staticRoutes.set(method, byPath)
+      }
+      byPath.set(normalized, entry)
     }
 
     let root = this.tries.get(method)
@@ -263,27 +273,13 @@ export class Router {
           : pathname.substring(1)
 
     // Fast O(1) static lookup
-    const staticEntry = this.staticRoutes.get(method + ':' + normalized)
-    if (staticEntry) {
-      return {
-        handler: staticEntry.handler,
-        params: {},
-        bodyLimit: staticEntry.bodyLimit,
-        compiledPipeline: staticEntry.compiledPipeline,
-      }
-    }
+    const staticEntry = this.staticRoutes.get(method)?.get(normalized)
+    if (staticEntry) return toMatch(staticEntry, {})
 
     // HEAD static fallback
     if (method === 'HEAD') {
-      const headEntry = this.staticRoutes.get('GET:' + normalized)
-      if (headEntry) {
-        return {
-          handler: headEntry.handler,
-          params: {},
-          bodyLimit: headEntry.bodyLimit,
-          compiledPipeline: headEntry.compiledPipeline,
-        }
-      }
+      const headEntry = this.staticRoutes.get('GET')?.get(normalized)
+      if (headEntry) return toMatch(headEntry, {})
     }
 
     // Trie lookup for dynamic routes
@@ -360,12 +356,7 @@ export class Router {
     if (entry === null && from !== null) entry = search(from, pathSegments, fromIndex)
     if (entry === null) return null
 
-    return {
-      handler: entry.handler,
-      params: routeParams(entry, pathSegments),
-      bodyLimit: entry.bodyLimit,
-      compiledPipeline: entry.compiledPipeline,
-    }
+    return toMatch(entry, routeParams(entry, pathSegments))
   }
 
   /**
@@ -378,7 +369,7 @@ export class Router {
     segments: string[],
     isStatic: boolean,
   ): RouteEntry | null {
-    if (isStatic) return this.staticRoutes.get(method + ':' + normalized) ?? null
+    if (isStatic) return this.staticRoutes.get(method)?.get(normalized) ?? null
 
     let node: TrieNode | null | undefined = this.tries.get(method)
     for (const seg of segments) {
@@ -396,7 +387,8 @@ function normalizePath(path: string): string {
   return path.replace(/^\/+|\/+$/g, '')
 }
 
-function isSkipped(guardClass: unknown, skipSet: Set<unknown>): boolean {
+/** Whether `@SkipGuard` removed the guard: by its class, or by the factory that built it. */
+export function isSkipped(guardClass: unknown, skipSet: Set<unknown>): boolean {
   if (skipSet.has(guardClass)) return true
   const factory = (guardClass as any)?.[GUARD_FACTORY]
   return factory != null && skipSet.has(factory)

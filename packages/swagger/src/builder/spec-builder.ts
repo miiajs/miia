@@ -496,7 +496,7 @@ function statusText(code: number): string {
 
 // ─── Guards ─────────────────────────────────────────────────────
 
-// Kept in sync by hand with router-explorer.ts (getSkipSet/shouldSkip/filterGuards), which core keeps private
+// Kept in sync by hand with core (getSkipSet/filterGuards in router-explorer.ts, isSkipped in router.ts), all private
 function getSkipSet(controller: Constructor, handlerName: string): Set<any> | null {
   const map = getMeta<Map<string, Set<any>>>(controller, SKIP_GUARDS)
   if (!map) return null

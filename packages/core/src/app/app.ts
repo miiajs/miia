@@ -1,11 +1,12 @@
-import { applyBodyCeiling, DEFAULT_BODY_LIMIT } from '../body-limit.js'
+import { applyBodyCeiling, DEFAULT_BODY_LIMIT, isBodyLimitError, isBunBodyLimitError } from '../body-limit.js'
 import { CLOSED, Container, REQUEST_CONTEXT, requestContextReplaced, type ShutdownFailure } from '../di-container.js'
 import { DiscoveryService } from '../discovery/index.js'
 import { type AddRouteOptions, type GlobalGuardBinding, type MatchResult, Router } from '../router.js'
-import { compose, guardToMiddleware } from '../middleware.js'
+import { compose, guardToMiddleware, type Pipeline } from '../middleware.js'
 import { ResponseBuilder } from '../response.js'
 import {
   BadRequestException,
+  errorBody,
   HttpException,
   InternalServerException,
   NotFoundException,
@@ -132,6 +133,10 @@ const JSON_RESPONSE_INIT = Object.freeze({
   status: 200,
   headers: Object.freeze({ 'Content-Type': 'application/json' }),
 })
+// Lower case, as the error path wrote it through Headers: node-server sends a plain object's names as they are
+const ERROR_HEADERS = Object.freeze({ 'content-type': 'application/json' })
+const NOT_FOUND_INIT = Object.freeze({ status: 404, headers: ERROR_HEADERS })
+const DONE = Promise.resolve()
 
 // Stripped from merged headers on the error path: stale values would mis-describe
 // the fresh JSON error envelope and cause clients to mis-parse or hang.
@@ -166,7 +171,7 @@ export class Miia {
   private graphState: 'pending' | 'processed' | { error: unknown } = 'pending'
   private initialized = false
   private initPromise?: Promise<void>
-  private compiledGlobalPipeline?: Middleware
+  private compiledGlobalPipeline?: Pipeline
   private closeServer?: () => void | Promise<void>
   private logger: Logger
   private trustProxy: string[] | false
@@ -302,64 +307,33 @@ export class Miia {
       search = parsed.search
     }
     const ctx = new Context(req, search, env, this.trustProxy, this.container)
+    const method = req.method
 
     // Slow path: global middleware wraps router.match + per-route pipeline + handler.
     // Errors (including NotFoundException from router) bubble through the onion so
     // global middleware can observe them via try/catch around `await next()`.
     if (this.compiledGlobalPipeline !== undefined) {
-      return this.handleWithGlobalPipeline(this.compiledGlobalPipeline, pathname, ctx, req)
+      return this.handleWithGlobalPipeline(this.compiledGlobalPipeline, pathname, ctx, method)
     }
 
-    const matched = this.router.match(req.method, pathname)
-
-    if (!matched) {
-      return this.handleError(new NotFoundException(`Cannot ${req.method} ${pathname}`), req)
+    const matched = this.router.match(method, pathname)
+    // Nothing can observe a 404 here, so it is answered without building an exception
+    if (matched === null) {
+      return new Response(
+        method === 'HEAD' ? null : JSON.stringify(errorBody(404, `Cannot ${method} ${pathname}`)),
+        NOT_FOUND_INIT,
+      )
     }
 
-    if (req.method !== 'GET' && req.method !== 'HEAD' && matched.bodyLimit !== false) {
-      const tooLarge = this.checkBodyLimit(req, matched.bodyLimit)
-      if (tooLarge) return this.handleError(tooLarge, req, ctx)
-    }
-
-    ctx.params = matched.params
-
-    // Has per-route middleware → async path
-    if (matched.compiledPipeline) {
-      return this.handleWithPipeline(matched, ctx, req)
-    }
-
-    // Sync fast path - no global pipeline, no per-route pipeline
+    // Sync when neither the handler nor a route pipeline is async
     try {
-      const result = matched.handler(ctx)
-
+      const result = this.runMatched(matched, ctx, method)
       if (result instanceof Promise) {
-        return result
-          .then((value) => {
-            const response =
-              value != null && !(value instanceof Response) && !ctx.res._modified && req.method !== 'HEAD'
-                ? new Response(JSON.stringify(value), JSON_RESPONSE_INIT)
-                : this.finalizeResponse(value, ctx, req)
-            ctx._endScope()
-            return response
-          })
-          .catch((error) => {
-            const response = this.handleError(error, req, ctx)
-            ctx._endScope()
-            return response
-          })
+        return result.then((value) => this.respond(value, ctx, method)).catch((error) => this.fail(error, ctx))
       }
-
-      // Inline JSON fast path
-      const response =
-        result != null && !(result instanceof Response) && !ctx.res._modified && req.method !== 'HEAD'
-          ? new Response(JSON.stringify(result), JSON_RESPONSE_INIT)
-          : this.finalizeResponse(result, ctx, req)
-      ctx._endScope()
-      return response
+      return this.respond(result, ctx, method)
     } catch (error) {
-      const response = this.handleError(error, req, ctx)
-      ctx._endScope()
-      return response
+      return this.fail(error, ctx)
     }
   }
 
@@ -595,110 +569,88 @@ export class Miia {
     }
   }
 
-  private finalizeResponse(result: unknown, ctx: RequestContext, req: Request): Response {
-    if (result instanceof Response) {
-      if (req.method === 'HEAD') {
-        return new Response(null, { status: result.status, headers: result.headers })
-      }
-      return result
+  /**
+   * Body limit, params, then the route pipeline or the bare handler. Returns the handler's result, a promise
+   * of it when anything on the way is async; a 413 is thrown, so the global middleware sees it.
+   */
+  private runMatched(matched: MatchResult, ctx: Context, method: string): unknown {
+    if (method !== 'GET' && method !== 'HEAD' && matched.bodyLimit !== false) {
+      const tooLarge = this.checkBodyLimit(ctx.req, matched.bodyLimit)
+      if (tooLarge) throw tooLarge
     }
 
-    if (req.method === 'HEAD') {
-      if (result != null && !ctx.res.getHeaders().has('content-type')) {
-        ctx.res.header('Content-Type', 'application/json')
+    ctx.params = matched.params
+
+    const pipeline = matched.compiledPipeline
+    if (pipeline === undefined) return matched.handler(ctx)
+    let result: unknown
+    return pipeline(ctx, () => {
+      const value = matched.handler(ctx)
+      if (value instanceof Promise) {
+        return value.then((v) => {
+          result = v
+        })
       }
-      return new Response(null, {
-        status: ctx.res.getStatus(),
-        headers: ctx.res.getHeaders(),
-      })
-    }
-
-    if (result != null && !hasBody(ctx.res)) sendJson(ctx.res, result)
-
-    return ctx.res.build()
+      result = value
+      return DONE
+    }).then(() => result)
   }
 
-  private async handleWithPipeline(matched: MatchResult, ctx: Context, req: Request): Promise<Response> {
-    try {
-      let rawResult: unknown = undefined
-
-      await matched.compiledPipeline!(ctx, async () => {
-        const result = matched.handler(ctx)
-        rawResult = result instanceof Promise ? await result : result
-      })
-
-      return this.finalizePipelineResult(rawResult, ctx, req)
-    } catch (error) {
-      return this.handleError(error, req, ctx)
-    } finally {
-      ctx._endScope()
-    }
-  }
-
-  private async handleWithGlobalPipeline(
-    globalPipeline: Middleware,
+  private handleWithGlobalPipeline(
+    pipeline: Pipeline,
     pathname: string,
     ctx: Context,
-    req: Request,
+    method: string,
   ): Promise<Response> {
-    let rawResult: unknown = undefined
+    let result: unknown
+    return pipeline(ctx, () => {
+      const matched = this.router.match(method, pathname)
+      // Rejected, not thrown: the throw would only be caught by compose() again
+      if (matched === null) return Promise.reject(notFound(method, pathname))
+      const value = this.runMatched(matched, ctx, method)
+      if (value instanceof Promise) {
+        return value.then((v) => {
+          result = v
+        })
+      }
+      result = value
+      return DONE
+    })
+      .then(() => this.respond(result, ctx, method))
+      .catch((error) => this.fail(error, ctx))
+  }
 
+  /**
+   * The one place a result becomes the response, then the request scope ends. A body the handler or a
+   * middleware already set is kept, under its own Content-Type, for GET and HEAD alike; HEAD never
+   * serializes the result, it only gets the Content-Type a GET would.
+   */
+  private respond(result: unknown, ctx: Context, method: string): Response {
+    const res = ctx.res
+    let response: Response
+    if (result != null && !res._modified && method !== 'HEAD' && !(result instanceof Response)) {
+      response = new Response(JSON.stringify(result), JSON_RESPONSE_INIT)
+    } else if (result instanceof Response) {
+      response = method === 'HEAD' ? new Response(null, { status: result.status, headers: result.headers }) : result
+    } else {
+      if (result != null && !hasBody(res)) {
+        if (method !== 'HEAD') sendJson(res, result)
+        else if (!res.getHeaders().has('content-type')) res.header('Content-Type', 'application/json')
+      }
+      response =
+        method === 'HEAD' ? new Response(null, { status: res.getStatus(), headers: res.getHeaders() }) : res.build()
+    }
+    ctx._endScope()
+    return response
+  }
+
+  /** The error response, then the request scope ends - even when building it throws. */
+  private fail(error: unknown, ctx: Context): Response {
     try {
-      await globalPipeline(ctx, async () => {
-        const matched = this.router.match(req.method, pathname)
-        if (!matched) throw new NotFoundException(`Cannot ${req.method} ${pathname}`)
-
-        if (req.method !== 'GET' && req.method !== 'HEAD' && matched.bodyLimit !== false) {
-          const tooLarge = this.checkBodyLimit(req, matched.bodyLimit)
-          if (tooLarge) throw tooLarge // bubbles through the global middleware onion
-        }
-
-        ctx.params = matched.params
-
-        if (matched.compiledPipeline) {
-          await matched.compiledPipeline(ctx, async () => {
-            const result = matched.handler(ctx)
-            rawResult = result instanceof Promise ? await result : result
-          })
-        } else {
-          const result = matched.handler(ctx)
-          rawResult = result instanceof Promise ? await result : result
-        }
-      })
-
-      return this.finalizePipelineResult(rawResult, ctx, req)
-    } catch (error) {
-      return this.handleError(error, req, ctx)
+      return this.handleError(error, ctx)
     } finally {
       ctx._endScope()
     }
-  }
-
-  // Shared tail for both handleWithPipeline and handleWithGlobalPipeline.
-  private finalizePipelineResult(rawResult: unknown, ctx: RequestContext, req: Request): Response {
-    // Response returned directly by handler
-    if (rawResult instanceof Response) {
-      if (req.method === 'HEAD') {
-        return new Response(null, { status: rawResult.status, headers: rawResult.headers })
-      }
-      return rawResult
-    }
-
-    // Fast path: middleware didn't touch response, handler returned data
-    if (rawResult != null && !ctx.res._modified && req.method !== 'HEAD') {
-      return new Response(JSON.stringify(rawResult), JSON_RESPONSE_INIT)
-    }
-
-    // Normal path: middleware modified response (or handler returned null/undefined)
-    if (rawResult != null && !hasBody(ctx.res)) sendJson(ctx.res, rawResult)
-
-    if (req.method === 'HEAD') {
-      return new Response(null, {
-        status: ctx.res.getStatus(),
-        headers: ctx.res.getHeaders(),
-      })
-    }
-    return ctx.res.build()
   }
 
   /** Global guards not declared in a module are built with every other singleton, before any onInit(). */
@@ -717,8 +669,7 @@ export class Miia {
     this.compiledGlobalPipeline = this.globalMiddlewares.length > 0 ? compose(this.globalMiddlewares) : undefined
 
     const globalGuards: GlobalGuardBinding[] = this.globalGuards.map((guardCtor) => {
-      const instance = this.container.resolve<CanActivate>(guardCtor)
-      const middleware = guardToMiddleware((ctx) => instance.canActivate(ctx))
+      const middleware = guardToMiddleware(this.container.resolve<CanActivate>(guardCtor))
       return { guardClass: guardCtor, middleware }
     })
 
@@ -755,36 +706,29 @@ export class Miia {
     return null
   }
 
-  private handleError(error: unknown, req?: Request, ctx?: RequestContext): Response {
+  private handleError(error: unknown, ctx: Context): Response {
     let httpError: HttpException
 
     if (error instanceof HttpException) {
       httpError = error
-    } else if (error instanceof Error && error.name === 'PayloadTooLargeError') {
-      // Contract with @miiajs/node-server and @miiajs/uws-server: their body
-      // streams error with an Error named 'PayloadTooLargeError' when the
-      // adapter cap is exceeded mid-stream (chunked bodies). They do not
-      // depend on core, so they cannot throw PayloadTooLargeException itself.
-      httpError = new PayloadTooLargeException(error.message)
-    } else if (isBunBodyLimitError(error)) {
+    } else if (isBodyLimitError(error)) {
+      // An adapter's or Bun's body cap, exceeded mid-stream (chunked bodies)
       httpError = new PayloadTooLargeException(error.message)
     } else {
       this.logger.error('Unhandled error', error instanceof Error ? error.stack : String(error), 'RequestHandler')
       httpError = new InternalServerException()
     }
 
-    // Preserve middleware-set headers (CORS, X-Request-Id, tracing, Set-Cookie, ...)
-    // Defensive copy - ResponseBuilder.getHeaders() returns the internal ref via ensureHeaders().
-    const headers = new Headers(ctx?.res.getHeaders())
+    const body = ctx.req.method === 'HEAD' ? null : JSON.stringify(httpError.toJSON())
+
+    // Preserve middleware-set headers (CORS, X-Request-Id, tracing, Set-Cookie, ...). Edited in place, not
+    // copied: the response is the last use of them, only an onDestroy() reaching ctx.res through
+    // REQUEST_CONTEXT would see the edit.
+    const headers = headersOf(ctx.res)
+    if (headers === null) return new Response(body, { status: httpError.statusCode, headers: ERROR_HEADERS })
     for (const name of BODY_HEADERS_TO_STRIP) headers.delete(name)
     headers.set('Content-Type', 'application/json')
-
-    const body = req?.method === 'HEAD' ? null : JSON.stringify(httpError.toJSON())
-
-    return new Response(body, {
-      status: httpError.statusCode,
-      headers,
-    })
+    return new Response(body, { status: httpError.statusCode, headers })
   }
 }
 
@@ -911,6 +855,41 @@ function hasBody(res: ResponseBuilder): boolean {
   return (res as unknown as { _body: BodyInit | null })._body !== null
 }
 
+/** The headers set so far, without creating them as `getHeaders()` would - `_headers` is private to ResponseBuilder. */
+function headersOf(res: ResponseBuilder): Headers | null {
+  return (res as unknown as { _headers: Headers | null })._headers
+}
+
+/** Whether a stack collected at limit 0 is its first line (V8: Node, Deno) or none at all (JSC: Bun). */
+let firstLineStacks: boolean | undefined
+
+/**
+ * The 404 global middleware can observe. On V8 its stack is cut to the first line: collecting it walks every
+ * async frame of the onion. JSC collects stacks lazily and cheaply, and writing one there costs more than
+ * that, so on Bun it is built as usual - a string stack on every runtime.
+ */
+function notFound(method: string, pathname: string): NotFoundException {
+  firstLineStacks ??= stackAtLimitZero()
+  if (!firstLineStacks) return new NotFoundException(`Cannot ${method} ${pathname}`)
+  const limit = Error.stackTraceLimit
+  Error.stackTraceLimit = 0
+  try {
+    return new NotFoundException(`Cannot ${method} ${pathname}`)
+  } finally {
+    Error.stackTraceLimit = limit
+  }
+}
+
+function stackAtLimitZero(): boolean {
+  const limit = Error.stackTraceLimit
+  Error.stackTraceLimit = 0
+  try {
+    return typeof new Error().stack === 'string'
+  } finally {
+    Error.stackTraceLimit = limit
+  }
+}
+
 /** A returned value goes out as JSON, under the Content-Type the handler set if it set one. */
 function sendJson(res: ResponseBuilder, value: unknown): void {
   const type = res.getHeaders().get('content-type')
@@ -926,11 +905,6 @@ function parseJsonBody(text: string): unknown {
   } catch {
     throw new BadRequestException('Malformed JSON body')
   }
-}
-
-/** Bun rejects an oversized body with a plain Error; this is the only way to recognise it. */
-function isBunBodyLimitError(error: unknown): error is Error {
-  return error instanceof Error && error.message === 'Request body exceeded maxRequestBodySize'
 }
 
 /** Normalize the `trustProxy` option into a lowercased trusted-header list, or `false`. */

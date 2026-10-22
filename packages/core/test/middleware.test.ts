@@ -79,6 +79,63 @@ describe('compose', () => {
     await expect(composed(ctx, async () => {})).rejects.toThrow('next() called multiple times')
   })
 
+  it('a synchronous throw rejects the returned promise', async () => {
+    const syncThrow: Middleware = () => {
+      throw new Error('sync')
+    }
+
+    let result: Promise<void> | undefined
+    expect(() => {
+      result = compose([syncThrow])(createMockContext(), async () => {})
+    }).not.toThrow()
+    await expect(result!).rejects.toThrow('sync')
+  })
+
+  it('a synchronous throw from next() rejects too', async () => {
+    const callsNext: Middleware = (_ctx, next) => next()
+    const composed = compose([callsNext])
+    await expect(
+      composed(createMockContext(), () => {
+        throw new Error('from next')
+      }),
+    ).rejects.toThrow('from next')
+  })
+
+  it('a second next() rejects inside the middleware, and runs nothing again', async () => {
+    let calls = 0
+    let caught: unknown
+    const twice: Middleware = async (_ctx, next) => {
+      await next()
+      try {
+        await next()
+      } catch (err) {
+        caught = err
+      }
+    }
+
+    await compose([twice])(createMockContext(), async () => {
+      calls++
+    })
+    expect(calls).toBe(1)
+    expect((caught as Error).message).toBe('next() called multiple times')
+  })
+
+  it('a composed chain nests inside another', async () => {
+    const order: string[] = []
+    const mw =
+      (name: string): Middleware =>
+      async (_ctx, next) => {
+        order.push(`${name}>`)
+        await next()
+        order.push(`<${name}`)
+      }
+
+    await compose([mw('a'), compose([mw('b'), compose([mw('c')])])])(createMockContext(), async () => {
+      order.push('handler')
+    })
+    expect(order).toEqual(['a>', 'b>', 'c>', 'handler', '<c', '<b', '<a'])
+  })
+
   it('should short-circuit if next is not called', async () => {
     const order: string[] = []
 

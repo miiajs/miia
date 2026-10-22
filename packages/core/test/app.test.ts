@@ -535,6 +535,27 @@ describe('Miia Application', () => {
       expect(await res.json()).toEqual({ custom: true, message: 'Cannot GET /nothing' })
     })
 
+    it('the 404 a middleware catches has a string stack starting with its message', async () => {
+      let stack: unknown
+      const observe: Middleware = async (_ctx, next) => {
+        try {
+          await next()
+        } catch (err) {
+          stack = (err as Error).stack
+          throw err
+        }
+      }
+
+      @Module({ controllers: [] })
+      class M {}
+
+      const app = new Miia({ logger: false }).register(M).use(observe)
+      const res = await request(app, 'GET', '/gone')
+      expect(res.status).toBe(404)
+      expect(typeof stack).toBe('string')
+      expect((stack as string).split('\n')[0]).toBe('NotFoundException: Cannot GET /gone')
+    })
+
     it('onion order: global outer → per-route inner → handler', async () => {
       const trace: string[] = []
       const globalMw: Middleware = async (_ctx, next) => {

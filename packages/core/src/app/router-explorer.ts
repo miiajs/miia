@@ -6,7 +6,6 @@ import {
   CLASS_GUARDS,
   CLASS_MW,
   getMeta,
-  GUARD_FACTORY,
   METHOD_GUARDS,
   METHOD_MW,
   PARAMS_SCHEMAS,
@@ -16,8 +15,17 @@ import {
   STATUSES,
 } from '../decorators/index.js'
 import { guardToMiddleware } from '../middleware.js'
-import type { Router } from '../router.js'
-import type { BodyReader, Constructor, Guard, Middleware, RequestContext, RouteDefinition, ZodLike } from '../types.js'
+import { isSkipped, type Router } from '../router.js'
+import type {
+  BodyReader,
+  CanActivate,
+  Constructor,
+  Guard,
+  Middleware,
+  RequestContext,
+  RouteDefinition,
+  ZodLike,
+} from '../types.js'
 import { joinPaths } from '../utils/index.js'
 import { createValidationMiddleware, jsonBodyReader } from '../validation.js'
 import type { ModuleNode } from './module-graph.js'
@@ -99,10 +107,10 @@ export class RouterExplorer {
   ): Middleware[] {
     return guards.map((guardCtor) => {
       if (!this.container.has(guardCtor)) this.container.registerGuard(guardCtor)
-      const instance = this.container.resolve<any>(guardCtor)
+      const instance = this.container.resolve<CanActivate>(guardCtor)
       this.container.checkGuard(guardCtor, consumer, controller)
       for (const owner of owners) this.container.checkGuard(guardCtor, owner, controller)
-      return guardToMiddleware((ctx) => instance.canActivate(ctx))
+      return guardToMiddleware(instance)
     })
   }
 }
@@ -117,13 +125,7 @@ function getSkipSet(controller: Constructor, handlerName: string): Set<any> | nu
   return methodSet ?? classSet ?? null
 }
 
-function shouldSkip(guardCtor: Guard, skipSet: Set<any>): boolean {
-  if (skipSet.has(guardCtor)) return true
-  const factory = (guardCtor as any)[GUARD_FACTORY]
-  return factory != null && skipSet.has(factory)
-}
-
 function filterGuards(guards: Guard[], skipSet: Set<any> | null): Guard[] {
   if (!skipSet) return guards
-  return guards.filter((g) => !shouldSkip(g, skipSet))
+  return guards.filter((g) => !isSkipped(g, skipSet))
 }

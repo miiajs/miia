@@ -4,6 +4,20 @@ import { PayloadTooLargeException } from './exceptions.js'
 export const DEFAULT_BODY_LIMIT = 1_048_576
 
 /**
+ * An oversized body as an adapter or the runtime reports it. Contract with @miiajs/node-server and
+ * @miiajs/uws-server: their body streams error with an Error named 'PayloadTooLargeError' (they do not
+ * depend on core, so they cannot throw PayloadTooLargeException itself); Bun rejects with a plain Error.
+ */
+export function isBodyLimitError(error: unknown): error is Error {
+  return error instanceof Error && (error.name === 'PayloadTooLargeError' || isBunBodyLimitError(error))
+}
+
+/** Bun rejects an oversized body with a plain Error; this is the only way to recognise it. */
+export function isBunBodyLimitError(error: unknown): error is Error {
+  return error instanceof Error && error.message === 'Request body exceeded maxRequestBodySize'
+}
+
+/**
  * TransformStream that counts bytes and errors with PayloadTooLargeException
  * once `limit` is exceeded. Throwing inside transform() errors both sides:
  * the readable rejects the consumer (req.json()/req.text()/formData()), the

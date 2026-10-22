@@ -1,3 +1,4 @@
+import { isBodyLimitError } from './body-limit.js'
 import { HttpException, UnprocessableException } from './exceptions.js'
 import type { BodyReader, Middleware, RequestContext, RouteOptions } from './types.js'
 
@@ -9,7 +10,7 @@ export const jsonBodyReader: BodyReader = {
   // body stays a 413. Only an unexpected read failure becomes null (-> 422).
   read: (ctx) =>
     ctx.json().catch((e: unknown) => {
-      if (e instanceof HttpException || (e instanceof Error && e.name === 'PayloadTooLargeError')) throw e
+      if (e instanceof HttpException || isBodyLimitError(e)) throw e
       return null
     }),
   commit: (ctx, data) => ctx._setBody(data),

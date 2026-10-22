@@ -25,12 +25,17 @@ export class HttpException extends Error {
   }
 
   toJSON(): Record<string, unknown> {
-    return {
-      statusCode: this.statusCode,
-      error: STATUS_TEXT[this.statusCode] ?? 'Error',
-      message: this.message,
-      ...(this.details ? { details: this.details } : {}),
-    }
+    return errorBody(this.statusCode, this.message, this.details)
+  }
+}
+
+/** The JSON body of an error response, also for the 404 the app answers without an exception. @internal */
+export function errorBody(statusCode: number, message: string, details?: unknown): Record<string, unknown> {
+  return {
+    statusCode,
+    error: STATUS_TEXT[statusCode] ?? 'Error',
+    message,
+    ...(details ? { details } : {}),
   }
 }
 
