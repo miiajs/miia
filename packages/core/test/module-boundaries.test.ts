@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { ConfiguredModule, Constructor, RequestContext, Resolve, Token } from '../src/index.js'
+import type { ModuleGraph } from '../src/app/module-graph.js'
 import {
   Controller,
   createLazyProxy,
@@ -897,6 +898,61 @@ describe('module boundaries', () => {
     expect(thrownBy(() => app.get(Formatter)).message).toBe(
       report('Formatter (AppModule) injects Hidden (OtherModule):\n  - add Hidden to OtherModule `exports`'),
     )
+    await app.destroy()
+  })
+
+  it('after startup runs a passing check once per requester, and a failing one on every call', async () => {
+    @Injectable()
+    class Shown {}
+
+    @Injectable()
+    class Hidden {}
+
+    @Module({ providers: [Shown, Hidden], exports: [Shown] })
+    class OtherModule {}
+
+    @Injectable({ scope: 'transient' })
+    class Formatter {
+      shown = inject(Shown)
+    }
+
+    @Injectable({ scope: 'transient' })
+    class Leaky {
+      hidden = inject(Hidden)
+    }
+
+    @Injectable()
+    class Lookup {
+      resolver = inject(Resolver)
+    }
+
+    @Module({ imports: [OtherModule], providers: [Formatter, Leaky, Lookup] })
+    class AppModule {}
+
+    const app = new Miia({ logger: false }).register(AppModule)
+    await app.init()
+    const { graph } = (app as unknown as { container: { graph: ModuleGraph } }).container
+    const sees = graph.sees.bind(graph)
+    let calls = 0
+    graph.sees = (from, token) => {
+      calls++
+      return sees(from, token)
+    }
+    const { resolver } = app.get(Lookup)
+
+    app.get(Formatter)
+    app.get(Formatter)
+    resolver.resolve(Shown)
+    resolver.resolve(Shown)
+    expect(calls).toBe(2)
+
+    calls = 0
+    const leaky = report('Leaky (AppModule) injects Hidden (OtherModule):\n  - add Hidden to OtherModule `exports`')
+    expect(thrownBy(() => app.get(Leaky)).message).toBe(leaky)
+    expect(thrownBy(() => app.get(Leaky)).message).toBe(leaky)
+    expect(() => resolver.resolve(Hidden)).toThrow('Resolver of AppModule resolved Hidden (OtherModule)')
+    expect(() => resolver.resolve(Hidden)).toThrow('Resolver of AppModule resolved Hidden (OtherModule)')
+    expect(calls).toBe(4)
     await app.destroy()
   })
 

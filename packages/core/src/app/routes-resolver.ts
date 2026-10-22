@@ -1,4 +1,4 @@
-import type { Container } from '../di-container.js'
+import { classFactory, type Container } from '../di-container.js'
 import { Logger } from '../logger.js'
 import { getMeta, PREFIX } from '../decorators/index.js'
 import type { Router } from '../router.js'
@@ -21,7 +21,7 @@ export class RoutesResolver {
   /** `owners`: the other modules that own the controller; its guards are checked from them too. */
   resolve(controller: Constructor, modulePrefix: string, node: ModuleNode, owners?: readonly ModuleNode[]): void {
     if (!this.container.has(controller)) {
-      this.container.register(controller, () => new controller(), 'singleton', undefined, node)
+      this.container.register(controller, classFactory(controller), 'singleton', undefined, node)
     }
 
     const instance = this.container.resolve(controller)

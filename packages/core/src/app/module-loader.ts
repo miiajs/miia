@@ -1,5 +1,5 @@
-import { type Container, REQUEST_CONTEXT, requestContextReplaced } from '../di-container.js'
-import { formatToken } from '../di-token-format.js'
+import { classFactory, type Container, REQUEST_CONTEXT, requestContextReplaced } from '../di-container.js'
+import { formatPair, formatToken } from '../di-token-format.js'
 import { SHARED_PROVIDER } from '../di-token.js'
 import { Logger } from '../logger.js'
 import { getMeta, setMeta, MODULE, INJECTABLE, PREFIX, RESOLVED_PREFIX } from '../decorators/index.js'
@@ -15,8 +15,8 @@ import type {
   ProviderDefinition,
 } from '../types.js'
 import { RoutesResolver } from './routes-resolver.js'
-import { isOverride, OVERRIDE_KIND } from './overrides.js'
-import type { OverrideDescriptor } from './overrides.js'
+import { isOverride, OVERRIDE_CHECK, OVERRIDE_KIND } from './overrides.js'
+import type { CheckedOverride, OverrideDescriptor } from './overrides.js'
 import { FORWARD_REF, isForwardRef } from './forward-ref.js'
 import { ModuleGraph } from './module-graph.js'
 import type { ModuleNode } from './module-graph.js'
@@ -45,10 +45,6 @@ type ModuleItem = Constructor | ConfiguredModule
 
 const NESTED_OVERRIDE = '[Miia] override descriptors are only allowed at the top level of register()'
 
-function formatPair(cls: Constructor, name: string): string {
-  return name ? `${formatToken(cls)} (name '${name}')` : formatToken(cls)
-}
-
 function isConfiguredModule(value: unknown): value is ConfiguredModule {
   return typeof value === 'object' && value !== null && typeof (value as ConfiguredModule).module === 'function'
 }
@@ -64,8 +60,6 @@ function describeValue(value: unknown): string {
 
 export class ModuleLoader {
   private logger = new Logger(ModuleLoader.name)
-  /** Tokens registered with `app.provide()`; a module that declares one is an error. */
-  readonly provided = new Set<AnyToken>()
   private moduleGraph = new ModuleGraph()
   /** By the pair (class, name); a bare class is the pair (class, ''). */
   private nodes = new Map<Constructor, Map<string, ModuleNode>>()
@@ -81,7 +75,7 @@ export class ModuleLoader {
   private moduleClassOwners = new Map<Constructor, ModuleNode>()
   private configured = new Map<Constructor, Map<string, ConfiguredEntry>>()
   private forwardRefs = new WeakMap<ForwardRef<ModuleItem>, ModuleItem>()
-  private providerOverrides = new Map<AnyToken, () => unknown>()
+  private providerOverrides = new Map<AnyToken, CheckedOverride & { factory: () => unknown }>()
   private usedOverrides = new Set<AnyToken>()
   private routesResolver: RoutesResolver
   private pendingRoutes: PendingRoute[] = []
@@ -100,39 +94,23 @@ export class ModuleLoader {
   load(...items: (Constructor | ConfiguredModule | OverrideDescriptor)[]): void {
     const root = this.moduleGraph.root
     const modules: ModuleItem[] = []
-    const moduleOverrides: ConfiguredModule[] = []
+    const moduleOverrides: (CheckedOverride & { module: ConfiguredModule })[] = []
     items.forEach((item, index) => {
       if (!isOverride(item)) modules.push(this.unwrap(item, root, 'imports', index) as ModuleItem)
-      else if (item[OVERRIDE_KIND] === 'module') moduleOverrides.push(item.module)
+      else if (item[OVERRIDE_KIND] === 'module') moduleOverrides.push(item)
       else if (item.token === REQUEST_CONTEXT) throw requestContextReplaced('override')
-      else this.providerOverrides.set(item.token, item.factory)
+      else this.providerOverrides.set(item.token, item)
     })
 
     for (const mod of modules) {
       this.addImport(root, this.collect(mod, root))
     }
 
-    for (const replacement of moduleOverrides) {
-      const name = replacement.name ?? ''
-      const entry = this.configured.get(replacement.module)?.get(name)
-      const pair = formatPair(replacement.module, name)
-      if (!entry) {
-        const cls = formatToken(replacement.module)
-        throw new Error(
-          `[Miia] override(${pair}): ${pair} is not configured in the loaded graph - ` +
-            `if a module imports ${cls} bare and expects the root to configure it, register it alongside: ` +
-            `TestApp.create(FeatureModule, ${cls}.configure(...))`,
-        )
-      }
-      const global = entry.global || getMeta<ModuleOptions>(replacement.module, MODULE)?.global === true
-      if (replacement.global !== undefined && replacement.global !== global) {
-        throw new Error(
-          `[Miia] override(${pair}): the replacement sets global: ${replacement.global}, ` +
-            `but the configured module it replaces ${global ? 'is global' : 'does not'} - ` +
-            'leave global out, it is inherited',
-        )
-      }
-      entry.module = replacement
+    for (const descriptor of moduleOverrides) {
+      const replacement = descriptor.module
+      const entry = this.configured.get(replacement.module)?.get(replacement.name ?? '')
+      descriptor[OVERRIDE_CHECK]?.(entry ? entry.global : null)
+      if (entry) entry.module = replacement
     }
 
     // Tokens already in the container (built-ins, provide()) never pass through registerProvider(),
@@ -149,7 +127,6 @@ export class ModuleLoader {
     this.resolveExports()
     // From here on the container checks module boundaries: phase 2 constructs controllers and guards.
     this.container.graph = this.moduleGraph
-    this.container.provided = this.provided
 
     // Phase 2: Resolve routes
     for (const { controller, prefix, node } of this.pendingRoutes) {
@@ -157,7 +134,7 @@ export class ModuleLoader {
       if (owners.length > 0) {
         // The other names must own the entry before the controller is constructed.
         if (!this.container.has(controller)) {
-          this.container.register(controller, () => new controller(), 'singleton', undefined, node)
+          this.container.register(controller, classFactory(controller), 'singleton', undefined, node)
         }
         for (const owner of owners) this.container.addOwner(controller, owner)
       }
@@ -172,13 +149,8 @@ export class ModuleLoader {
     }
     this.pendingRoutes = []
 
-    for (const token of this.providerOverrides.keys()) {
-      if (!this.usedOverrides.has(token)) {
-        const name = formatToken(token)
-        throw new Error(
-          `[Miia] override(${name}): no loaded module provides ${name} - use provide() for a module-less test`,
-        )
-      }
+    for (const [token, descriptor] of this.providerOverrides) {
+      descriptor[OVERRIDE_CHECK]?.(this.usedOverrides.has(token))
     }
   }
 
@@ -327,7 +299,7 @@ export class ModuleLoader {
       node.owns.add(moduleCtor)
       this.container.addOwner(moduleCtor, node)
     } else if (!this.container.has(moduleCtor)) {
-      this.container.register(moduleCtor, () => new moduleCtor(), 'singleton', undefined, node)
+      this.container.register(moduleCtor, classFactory(moduleCtor), 'singleton', undefined, node)
       node.owns.add(moduleCtor)
       this.moduleClassOwners.set(moduleCtor, node)
     }
@@ -400,7 +372,7 @@ export class ModuleLoader {
       }
       throw new Error(this.duplicateMessage(token, owner, node))
     }
-    if (this.provided.has(token)) {
+    if (this.container.provided.has(token)) {
       const name = formatToken(token)
       throw new Error(
         `[Miia] provide(${name}): ${name} is declared by ${node.where} - replace it with override() instead`,
@@ -423,7 +395,7 @@ export class ModuleLoader {
     if (this.applyOverride(token, node)) return
     if (typeof provider === 'function') {
       const scope = getMeta<InjectableMeta>(provider, INJECTABLE)?.scope ?? 'singleton'
-      this.container.register(provider, () => new provider(), scope, undefined, node)
+      this.container.register(provider, classFactory(provider), scope, undefined, node)
     } else {
       const fp = provider as FactoryProvider
       this.container.register(fp.token, fp.factory, fp.scope, fp.deps, node)
@@ -441,10 +413,10 @@ export class ModuleLoader {
   }
 
   private applyOverride(token: AnyToken, owner: ModuleNode | null): boolean {
-    const factory = this.providerOverrides.get(token)
-    if (!factory) return false
+    const descriptor = this.providerOverrides.get(token)
+    if (!descriptor) return false
     // The replacement is a value or its own factory; the deps of the provider it replaces do not apply to it.
-    this.container.register(token, factory, 'singleton', undefined, owner)
+    this.container.register(token, descriptor.factory, 'singleton', undefined, owner)
     this.usedOverrides.add(token)
     return true
   }

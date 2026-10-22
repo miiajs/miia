@@ -28,6 +28,8 @@ interface ContainerEntry {
   guard: boolean
   /** What such a guard injected while it was constructed, checked from every module that uses it. */
   injected: Set<AnyToken> | null
+  /** Requesters (entries, Resolver views) that passed the boundary check after start-up, so it runs once each. */
+  seenBy: Set<ContainerEntry | ResolverView> | null
 }
 
 interface HookTarget {
@@ -97,8 +99,8 @@ export class Container {
    * @internal
    */
   graph: ModuleGraph | null = null
-  /** Tokens registered with `app.provide()`, named so in the report. @internal */
-  provided: ReadonlySet<AnyToken> = new Set()
+  /** Tokens registered with `app.provide()`: a module may not declare one, the report names them so. @internal */
+  readonly provided = new Set<AnyToken>()
 
   private registry = new Map<AnyToken, ContainerEntry>()
   private requestScope: RequestScopeHolder | null = null
@@ -110,7 +112,10 @@ export class Container {
   private stack: Frame[] = []
   /** Violations of the start-up window; null outside it, where a violation throws at once. */
   private violations: BoundaryViolation[] | null = null
-  /** Requester -> dependency, between singletons, keyed by token: an override replaces the entry, not the token. */
+  /**
+   * Requester -> dependency, between singletons, keyed by token: an override replaces the entry, not the token.
+   * Recorded until constructAll() fixes the hook order, then cleared.
+   */
   private edges = new Map<AnyToken, Set<AnyToken>>()
   private hookOrder: HookTarget[] | null = null
   /**
@@ -131,7 +136,7 @@ export class Container {
     owner: ModuleNode | null = null,
   ): void {
     const owners = owner ? [owner] : null
-    this.registry.set(token, { factory, scope, deps, owner, owners, guard: false, injected: null })
+    this.registry.set(token, { factory, scope, deps, owner, owners, guard: false, injected: null, seenBy: null })
   }
 
   /**
@@ -220,12 +225,13 @@ export class Container {
     }
     if (entry === this.resolverEntry && view !== 'root') return this.resolverOf(view)
     const owner = entry.owner
-    if (this.graph !== null && owner !== null) {
+    if (this.graph !== null && owner !== null && !entry.seenBy?.has(view)) {
       if (isModuleList(view)) {
         for (let i = 0; i < view.length; i++) this.checkResolve(view[i]!, token, owner)
       } else {
         this.checkResolve(view, token, owner)
       }
+      this.passed(entry, view)
     }
     return this.instantiate(token, entry, this.stack.at(-1))
   }
@@ -349,6 +355,7 @@ export class Container {
       if (entry.scope === 'singleton') this.instantiate(token, entry, undefined)
     }
     this.hookOrder = this.lifecycleOrder(true)
+    this.edges.clear()
   }
 
   /** Phase 2 of init: onInit() on every singleton, dependencies first; runs constructAll() if nothing has. */
@@ -539,6 +546,7 @@ export class Container {
   }
 
   private recordEdge(token: AnyToken): void {
+    if (this.hookOrder !== null) return
     for (let i = this.stack.length - 1; i >= 0; i--) {
       const frame = this.stack[i]!
       if (frame.entry.scope !== 'singleton') continue
@@ -586,7 +594,10 @@ export class Container {
     if (entry === this.resolverEntry && owners !== null) return this.resolverOf(owners.length > 1 ? owners : owners[0]!)
     if (this.graph !== null && entry.owner !== null) {
       if (frame.entry.guard) (frame.entry.injected ??= new Set()).add(token)
-      else this.checkVisible(frame, token, entry.owner, 'inject')
+      else if (!entry.seenBy?.has(frame.entry)) {
+        this.checkVisible(frame, token, entry.owner, 'inject')
+        this.passed(entry, frame.entry)
+      }
     }
     return this.instantiate(token, entry, frame)
   }
@@ -621,6 +632,11 @@ export class Container {
     const graph = this.graph!
     if (view === 'root') return graph.sees(graph.root, token)
     return graph.sees(view, token) || (view.host !== null && graph.sees(view.host, token))
+  }
+
+  /** After start-up a violation throws, so a check that returns has passed; the start-up window keeps nothing. */
+  private passed(entry: ContainerEntry, requester: ContainerEntry | ResolverView): void {
+    if (this.violations === null) (entry.seenBy ??= new Set()).add(requester)
   }
 
   /** Collected in the start-up window, thrown outside it. */
@@ -709,6 +725,11 @@ export class Container {
       Container.activeContainer = prev
     }
   }
+}
+
+/** A factory that keeps nothing but the class alive, unlike an arrow written inside a method. @internal */
+export function classFactory<T>(cls: Constructor<T>): () => T {
+  return () => new cls()
 }
 
 // ─── inject / injectOptional ─────────────────────────────────────

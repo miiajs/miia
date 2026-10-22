@@ -41,8 +41,8 @@ export class ModuleGraph {
   /** Owns nothing, exports nothing; imports every module passed to `register()`. */
   readonly root = new ModuleNode('<root>', true)
   private nodes: ModuleNode[] = []
+  /** Only for modules with re-exports: the others expose their exportedTokens as they are. */
   private publicCache = new Map<ModuleNode, ReadonlySet<AnyToken>>()
-  private visibleCache = new Map<ModuleNode, ReadonlySet<AnyToken>>()
   private globalCache: ReadonlySet<AnyToken> | null = null
 
   createNode(label: string, module: Constructor, name: string): ModuleNode {
@@ -53,6 +53,7 @@ export class ModuleGraph {
 
   /** Tokens `node` makes visible to an importer: its exports and, recursively, those of re-exported modules. */
   publicTokens(node: ModuleNode): ReadonlySet<AnyToken> {
+    if (node.reexports.length === 0) return node.exportedTokens
     const cached = this.publicCache.get(node)
     if (cached) return cached
     const tokens = new Set<AnyToken>()
@@ -70,16 +71,11 @@ export class ModuleGraph {
 
   /** Owned, exported by an import (with re-exports), or exported by a global module (with re-exports). */
   sees(from: ModuleNode, token: AnyToken): boolean {
-    let visible = this.visibleCache.get(from)
-    if (!visible) {
-      const tokens = new Set(from.owns)
-      for (const imported of from.imports) {
-        for (const t of this.publicTokens(imported)) tokens.add(t)
-      }
-      for (const t of this.globalTokens()) tokens.add(t)
-      this.visibleCache.set(from, (visible = tokens))
+    if (from.owns.has(token) || this.globalTokens().has(token)) return true
+    for (const imported of from.imports) {
+      if (this.publicTokens(imported).has(token)) return true
     }
-    return visible.has(token)
+    return false
   }
 
   private globalTokens(): ReadonlySet<AnyToken> {

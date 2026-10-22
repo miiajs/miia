@@ -166,7 +166,6 @@ export class Miia {
   private router = new Router()
   private globalMiddlewares: Middleware[] = []
   private globalGuards: Guard[] = []
-  private moduleLoader: ModuleLoader
   private pendingModules: (Constructor | ConfiguredModule | OverrideDescriptor)[] = []
   private graphState: 'pending' | 'processed' | { error: unknown } = 'pending'
   private initialized = false
@@ -209,7 +208,6 @@ export class Miia {
     // Gated on truthiness, unlike defaultBodyLimit above: an empty string means
     // no prefix, and skipping the setter keeps it out of validation too.
     if (options?.globalPrefix) this.router.globalPrefix = options.globalPrefix
-    this.moduleLoader = new ModuleLoader(this.router, this.container)
 
     // Auto-register DiscoveryService so any provider can inject it without
     // explicit module registration. Factory closure captures `this.container`
@@ -262,10 +260,10 @@ export class Miia {
       if (typeof provider === 'function') {
         const scope = getMeta<InjectableMeta>(provider, INJECTABLE)?.scope ?? 'singleton'
         this.container.register(provider, () => new provider(), scope)
-        this.moduleLoader.provided.add(provider)
+        this.container.provided.add(provider)
       } else {
         this.container.register(provider.token, provider.factory, provider.scope, provider.deps)
-        this.moduleLoader.provided.add(provider.token)
+        this.container.provided.add(provider.token)
       }
     }
     return this
@@ -521,7 +519,8 @@ export class Miia {
   /**
    * Loads every registered module once, on the first `init()` / `get()` / `fetch()`.
    * The state flips before `load()` runs, so a failed graph is never reloaded on top
-   * of the loader's partial state - every later call rethrows the first error.
+   * of the loader's partial state - every later call rethrows the first error. The
+   * loader is dropped after it: the container keeps the graph.
    */
   private processGraph(): void {
     const state = this.graphState
@@ -529,7 +528,7 @@ export class Miia {
     if (state !== 'pending') throw state.error
     this.graphState = 'processed'
     try {
-      this.moduleLoader.load(...this.pendingModules)
+      new ModuleLoader(this.router, this.container).load(...this.pendingModules)
     } catch (error) {
       this.graphState = { error }
       throw error

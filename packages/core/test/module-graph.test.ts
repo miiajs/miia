@@ -13,7 +13,6 @@ import {
   Router,
 } from '../src/index.js'
 import type { ModuleGraph, ModuleNode } from '../src/app/module-graph.js'
-import type { ModuleLoader } from '../src/app/module-loader.js'
 import { CycleAModule, CycleAService } from './fixtures/cycle-a.module.js'
 import { CycleBModule, CycleBService } from './fixtures/cycle-b.module.js'
 
@@ -31,7 +30,7 @@ function thrownBy(fn: () => unknown): Error {
 /** Processes the graph without running lifecycle hooks. */
 function loaded(app: Miia): ModuleGraph {
   app.get(Router)
-  return (app as unknown as { moduleLoader: ModuleLoader }).moduleLoader.graph
+  return (app as unknown as { container: { graph: ModuleGraph } }).container.graph
 }
 
 function graphOf(...items: Item[]): ModuleGraph {

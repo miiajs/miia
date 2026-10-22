@@ -86,6 +86,32 @@ describe('shutdown order', () => {
     expect(events).toEqual(['Orders.onShutdown', 'Users.onShutdown', 'Orders.onDestroy', 'Users.onDestroy'])
   })
 
+  it('keeps the order once init() has dropped the construction edges, and records none after it', async () => {
+    const events: string[] = []
+
+    @Injectable()
+    class UsersService extends tracked(events, 'Users') {}
+
+    @Injectable()
+    class OrdersService extends tracked(events, 'Orders') {
+      users = inject(UsersService)
+    }
+
+    @Injectable({ scope: 'transient' })
+    class Report {
+      orders = inject(OrdersService)
+    }
+
+    const app = new Miia({ logger: false }).provide(OrdersService, UsersService, Report)
+    await app.init()
+    const { edges } = (app as unknown as { container: { edges: Map<unknown, unknown> } }).container
+    expect(edges.size).toBe(0)
+    app.get(Report)
+    expect(edges.size).toBe(0)
+    await app.destroy()
+    expect(events).toEqual(['Orders.onShutdown', 'Users.onShutdown', 'Orders.onDestroy', 'Users.onDestroy'])
+  })
+
   it('runs unrelated providers in reverse registration order', async () => {
     const events: string[] = []
 
