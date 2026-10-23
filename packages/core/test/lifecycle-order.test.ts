@@ -306,7 +306,7 @@ describe('deps', () => {
     const error = await initError(app)
     expect(error.message).toBe(
       '[Miia] Circular dependency detected: A -> B -> A\n' +
-        '  - deps of A lists B, which injects A: drop the deps entry, or move the shared logic into a separate provider both depend on',
+        '  - deps of A lists B: drop that entry, or move the shared logic into a provider both depend on',
     )
     expect(events).toEqual([])
   })

@@ -112,7 +112,7 @@ function routeParams(entry: RouteEntry, segments: string[]): Record<string, stri
 // ─── Router ─────────────────────────────────────────────────────
 
 export class Router {
-  private logger = new Logger(Router.name)
+  private logger = new Logger('Router')
   /** Method -> normalized path -> route. */
   private staticRoutes = new Map<string, Map<string, RouteEntry>>()
   private tries = new Map<string, TrieNode>()

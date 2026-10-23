@@ -56,7 +56,7 @@ function describeValue(value: unknown): string {
 }
 
 export class ModuleLoader {
-  private logger = new Logger(ModuleLoader.name)
+  private logger = new Logger('ModuleLoader')
   private moduleGraph = new ModuleGraph()
   /** By the pair (class, name); a bare class is the pair (class, ''). */
   private nodes = new Map<Constructor, Map<string, ModuleNode>>()

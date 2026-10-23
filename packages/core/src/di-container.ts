@@ -518,18 +518,13 @@ export class Container {
   /** `cycle` starts and ends with the same token; `viaDeps` tells how each step was reached from the previous one. */
   private hookCycleMessage(cycle: Array<{ token: AnyToken; viaDeps: boolean }>): string {
     const names = cycle.map((step) => describe(step.token, ownerOf(this.registry.get(step.token))))
-    const lines = [`[Miia] Circular dependency detected: ${names.join(' -> ')}`]
     const at = cycle.findIndex((step, i) => i > 0 && step.viaDeps)
-    if (at !== -1) {
-      const from = names[at - 1]
-      // Two providers: the step back is the other edge of the pair
-      const injects = cycle.length === 3 && !cycle[3 - at]!.viaDeps
-      lines.push(
-        `  - deps of ${from} lists ${names[at]}, which ${injects ? 'injects' : 'depends on'} ${from}: ` +
-          'drop the deps entry, or move the shared logic into a separate provider both depend on',
-      )
-    }
-    return lines.join('\n')
+    const message = `[Miia] Circular dependency detected: ${names.join(' -> ')}`
+    if (at === -1) return message
+    return (
+      `${message}\n  - deps of ${names[at - 1]} lists ${names[at]}: ` +
+      'drop that entry, or move the shared logic into a provider both depend on'
+    )
   }
 
   private recordEdge(token: AnyToken): void {
@@ -559,14 +554,10 @@ export class Container {
     if (hint) {
       lines.push(`  - ${name} is provided by ${hint}; import that module where ${name} is used`)
       // Equal tokens that are different objects: defined twice on purpose, or two copies of a package.
-      const copy = [...this.registry.keys()].some(
-        (key) => key !== token && formatToken(key) === name && hintOf(key) === hint,
-      )
-      if (copy) {
+      if ([...this.registry.keys()].some((key) => key !== token && formatToken(key) === name && hintOf(key) === hint)) {
         lines.push(
-          `  - another token named ${name} with the same hint is registered: if ${name} is defined twice on purpose ` +
-            '(e.g. one model per connection), register this one too; otherwise two copies of the package ' +
-            'that defines it are probably installed - deduplicate the dependency',
+          `  - another token named ${name} with the same hint is registered: register this one too if both are ` +
+            'intended, otherwise deduplicate the package that defines it',
         )
       }
     }

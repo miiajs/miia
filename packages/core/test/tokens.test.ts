@@ -208,9 +208,8 @@ describe('typed tokens', () => {
 
   describe('two copies of a package', () => {
     const copyLine =
-      '  - another token named db with the same hint is registered: if db is defined twice on purpose ' +
-      '(e.g. one model per connection), register this one too; otherwise two copies of the package ' +
-      'that defines it are probably installed - deduplicate the dependency'
+      '  - another token named db with the same hint is registered: register this one too if both are intended, ' +
+      'otherwise deduplicate the package that defines it'
 
     it('flags another token with the same name and hint', () => {
       const registered = createToken('db', { hint: 'DbModule.configure()' })

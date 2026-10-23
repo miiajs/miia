@@ -7,7 +7,7 @@ import { RouterExplorer } from './router-explorer.js'
 import type { ModuleNode } from './module-graph.js'
 
 export class RoutesResolver {
-  private logger = new Logger(RoutesResolver.name)
+  private logger = new Logger('RoutesResolver')
   private routerExplorer: RouterExplorer
 
   constructor(
