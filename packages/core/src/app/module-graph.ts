@@ -1,4 +1,4 @@
-import type { AnyToken, Constructor } from '../types.js'
+import type { AnyToken, ConfiguredModule, Constructor } from '../types.js'
 
 /** One module of the graph: a pair (class, name), or the virtual root that `register()` imports into. */
 export class ModuleNode {
@@ -11,6 +11,9 @@ export class ModuleNode {
   hasExports = false
   /** The module whose `imports` hold this configure() result, the root for `register()`; null when not configured. */
   host: ModuleNode | null = null
+  /** The configure() result of the pair, an override in its place; set while the graph loads, null afterwards. */
+  config: ConfiguredModule | null = null
+  processed = false
 
   constructor(
     readonly label: string,

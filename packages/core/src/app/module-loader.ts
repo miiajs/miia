@@ -22,10 +22,15 @@ import { ModuleGraph } from './module-graph.js'
 import type { ModuleNode } from './module-graph.js'
 import { joinPaths } from '../utils/index.js'
 
-interface PendingRoute {
-  controller: Constructor
-  prefix: string
+/**
+ * The first declaration of a token: from `@Module({ providers })` of a class (`static`), from a configure() result,
+ * or the instance of a module class itself.
+ */
+interface Declaration {
   node: ModuleNode
+  kind: 'static' | 'configured' | 'module'
+  /** The `shared` key of the provider. */
+  key: string | undefined
 }
 
 /** The node that mounts the controllers of a module class, and the other names of the class: they own them too. */
@@ -35,15 +40,7 @@ interface MountedControllers {
   owners: ModuleNode[]
 }
 
-interface ConfiguredEntry {
-  module: ConfiguredModule
-  /** `global` of the configuration the graph declares: an override inherits it. */
-  global: boolean
-}
-
 type ModuleItem = Constructor | ConfiguredModule
-
-const NESTED_OVERRIDE = '[Miia] override descriptors are only allowed at the top level of register()'
 
 function isConfiguredModule(value: unknown): value is ConfiguredModule {
   return typeof value === 'object' && value !== null && typeof (value as ConfiguredModule).module === 'function'
@@ -63,22 +60,13 @@ export class ModuleLoader {
   private moduleGraph = new ModuleGraph()
   /** By the pair (class, name); a bare class is the pair (class, ''). */
   private nodes = new Map<Constructor, Map<string, ModuleNode>>()
-  private processed = new Set<ModuleNode>()
-  private owners = new Map<AnyToken, ModuleNode>()
-  /** The `shared` key of the first declaration of a token. */
-  private sharedKeys = new Map<AnyToken, string>()
-  /** Tokens first registered from the `@Module` providers of a class: its other names own them too. */
-  private staticTokens = new Set<AnyToken>()
-  /** By module class: its controllers are mounted once, whatever the number of names. */
+  private declared = new Map<AnyToken, Declaration>()
+  /** By module class, in the order phase 2 mounts them: once, whatever the number of names. */
   private mountedControllers = new Map<Constructor, MountedControllers>()
-  /** The node that registered a module class instance. */
-  private moduleClassOwners = new Map<Constructor, ModuleNode>()
-  private configured = new Map<Constructor, Map<string, ConfiguredEntry>>()
   private forwardRefs = new WeakMap<ForwardRef<ModuleItem>, ModuleItem>()
   private providerOverrides = new Map<AnyToken, CheckedOverride & { factory: () => unknown }>()
   private usedOverrides = new Set<AnyToken>()
   private routesResolver: RoutesResolver
-  private pendingRoutes: PendingRoute[] = []
 
   constructor(
     router: Router,
@@ -108,9 +96,10 @@ export class ModuleLoader {
 
     for (const descriptor of moduleOverrides) {
       const replacement = descriptor.module
-      const entry = this.configured.get(replacement.module)?.get(replacement.name ?? '')
-      descriptor[OVERRIDE_CHECK]?.(entry ? entry.global : null)
-      if (entry) entry.module = replacement
+      const node = this.nodeOf(replacement)
+      // Until processModule() adds `@Module({ global })`, `global` is that of the configuration: an override inherits it.
+      descriptor[OVERRIDE_CHECK]?.(node?.config ? node.global : null)
+      if (node?.config) node.config = replacement
     }
 
     // Tokens already in the container (built-ins, provide()) never pass through registerProvider(),
@@ -120,34 +109,35 @@ export class ModuleLoader {
     }
 
     // Phase 1: Load modules, register providers
-    for (const mod of modules) {
-      this.processModule(mod)
+    for (const node of root.imports) {
+      this.processModule(node)
+    }
+    // The graph outlives the loader: drop the configurations it no longer needs.
+    for (const byName of this.nodes.values()) {
+      for (const node of byName.values()) node.config = null
     }
 
-    this.resolveExports()
     // From here on the container checks module boundaries: phase 2 constructs controllers and guards.
     this.container.graph = this.moduleGraph
 
     // Phase 2: Resolve routes
-    for (const { controller, prefix, node } of this.pendingRoutes) {
-      const owners = this.mountedControllers.get(node.module!)?.owners ?? []
-      if (owners.length > 0) {
-        // The other names must own the entry before the controller is constructed.
+    for (const { node, prefix, owners } of this.mountedControllers.values()) {
+      for (const controller of getMeta<ModuleOptions>(node.module!, MODULE)!.controllers!) {
+        // Registered only if absent: an override or provide() is there first.
         if (!this.container.has(controller)) {
           this.container.register(controller, classFactory(controller), 'singleton', undefined, node)
         }
-        for (const owner of owners) this.container.addOwner(controller, owner)
+        // The other names must own the entry before the controller is constructed.
+        for (const owner of owners) this.own(owner, controller)
+        const fullPrefix = joinPaths(prefix, getMeta<string>(controller, PREFIX) ?? '')
+        this.routesResolver.resolve(controller, fullPrefix, node, owners)
+        // Expose the fully-resolved prefix as class metadata so DiscoveryService
+        // consumers (e.g. @miiajs/swagger) can pair controllers with their live
+        // routing prefix without reaching into ModuleLoader internals.
+        const classMeta = (controller as { [Symbol.metadata]?: Record<string | symbol, unknown> })[Symbol.metadata]
+        if (classMeta) setMeta(classMeta, RESOLVED_PREFIX, fullPrefix)
       }
-      this.routesResolver.resolve(controller, prefix, node, owners)
-      const ctrlPrefix = getMeta<string>(controller, PREFIX) ?? ''
-      const resolvedPrefix = joinPaths(prefix, ctrlPrefix)
-      // Expose the fully-resolved prefix as class metadata so DiscoveryService
-      // consumers (e.g. @miiajs/swagger) can pair controllers with their live
-      // routing prefix without reaching into ModuleLoader internals.
-      const classMeta = (controller as { [Symbol.metadata]?: Record<string | symbol, unknown> })[Symbol.metadata]
-      if (classMeta) setMeta(classMeta, RESOLVED_PREFIX, resolvedPrefix)
     }
-    this.pendingRoutes = []
 
     for (const [token, descriptor] of this.providerOverrides) {
       descriptor[OVERRIDE_CHECK]?.(this.usedOverrides.has(token))
@@ -160,7 +150,7 @@ export class ModuleLoader {
    * order, a second configuration of a pair throws, and so does one configure() result under two hosts.
    */
   private collect(item: ModuleItem, host: ModuleNode): ModuleNode {
-    if (isOverride(item)) throw new Error(NESTED_OVERRIDE)
+    if (isOverride(item)) throw new Error('[Miia] override descriptors are only allowed at the top level of register()')
 
     const moduleCtor = typeof item === 'function' ? item : item.module
     const name = typeof item === 'function' ? '' : (item.name ?? '')
@@ -171,10 +161,8 @@ export class ModuleLoader {
     if (!node) byName.set(name, (node = this.moduleGraph.createNode(formatPair(moduleCtor, name), moduleCtor, name)))
 
     if (typeof item !== 'function') {
-      let entries = this.configured.get(moduleCtor)
-      const seen = entries?.get(name)
-      if (seen) {
-        if (seen.module !== item) {
+      if (node.config) {
+        if (node.config !== item) {
           const cls = formatToken(moduleCtor)
           throw new Error(
             `[Miia] ${node.label} is configured twice (${node.host!.importer}, ${host.importer}) - configure it once; ` +
@@ -191,8 +179,8 @@ export class ModuleLoader {
           )
         }
       } else {
-        if (!entries) this.configured.set(moduleCtor, (entries = new Map()))
-        entries.set(name, { module: item, global: item.global === true })
+        node.config = item
+        node.global = item.global === true
         node.host = host
       }
     }
@@ -238,39 +226,26 @@ export class ModuleLoader {
     return this.nodes.get(item.module)?.get(item.name ?? '')
   }
 
-  private processModule(modOrConfigured: ModuleItem, parentPrefix = ''): void {
-    if (isOverride(modOrConfigured)) throw new Error(NESTED_OVERRIDE)
+  private processModule(node: ModuleNode, parentPrefix = ''): void {
+    if (node.processed) return
+    node.processed = true
 
-    let moduleCtor: Constructor
-    let name = ''
-    if (typeof modOrConfigured === 'function') {
-      moduleCtor = modOrConfigured
-    } else {
-      moduleCtor = modOrConfigured.module
-      name = modOrConfigured.name ?? ''
-    }
-    const node = this.nodeOf(modOrConfigured)!
-    if (this.processed.has(node)) return
-    this.processed.add(node)
-
-    // The collected (possibly overridden) configuration; a bare class gets the unnamed one, if any.
-    const extraProviders = this.configured.get(moduleCtor)?.get(name)?.module.providers ?? []
-
+    const moduleCtor = node.module!
+    const config = node.config
     const meta = getMeta<ModuleOptions>(moduleCtor, MODULE)
     const prefix = joinPaths(parentPrefix, meta?.prefix ?? '')
 
-    for (const provider of extraProviders) {
-      this.registerProvider(provider, node)
+    // The collected (possibly overridden) configuration; a bare class gets the unnamed one, if any.
+    for (const provider of config?.providers ?? []) {
+      this.registerProvider(provider, node, 'configured')
     }
 
-    meta?.imports?.forEach((imp, index) => {
-      this.processModule(this.unwrap(imp, node, 'imports', index) as ModuleItem, prefix)
-    })
+    for (const imported of node.imports) {
+      this.processModule(imported, prefix)
+    }
 
-    if (meta?.providers) {
-      for (const provider of meta.providers) {
-        this.registerProvider(provider, node, true)
-      }
+    for (const provider of meta?.providers ?? []) {
+      this.registerProvider(provider, node, 'static')
     }
 
     if (meta?.controllers?.length) {
@@ -286,44 +261,30 @@ export class ModuleLoader {
       else this.mountedControllers.set(moduleCtor, { node, prefix, owners: [] })
       for (const controller of meta.controllers) {
         node.owns.add(controller)
-        if (mounted) continue
         // Controllers are registered in phase 2, only if absent - an override has to be there first.
-        this.applyOverride(controller, node)
-        this.pendingRoutes.push({ controller, prefix, node })
+        if (!mounted) this.applyOverride(controller, node)
       }
     }
 
-    const classOwner = this.moduleClassOwners.get(moduleCtor)
-    if (classOwner) {
+    if (this.declared.get(moduleCtor)?.kind === 'module') {
       // Another name of the class: one module instance, owned by every name.
-      node.owns.add(moduleCtor)
-      this.container.addOwner(moduleCtor, node)
+      this.own(node, moduleCtor)
     } else if (!this.container.has(moduleCtor)) {
       this.container.register(moduleCtor, classFactory(moduleCtor), 'singleton', undefined, node)
       node.owns.add(moduleCtor)
-      this.moduleClassOwners.set(moduleCtor, node)
+      this.declared.set(moduleCtor, { node, kind: 'module', key: undefined })
     }
+
+    // `exports` and `global` from `@Module` of the class and the configuration, once the node owns all it declares.
+    node.global ||= meta?.global === true
+    node.hasExports = meta?.exports !== undefined || config?.exports !== undefined
+    meta?.exports?.forEach((ref, index) => this.addExport(node, ref, index))
+    config?.exports?.forEach((ref, index) => this.addExport(node, ref, index))
 
     this.logger.log(`${node.label} dependencies initialized`)
   }
 
-  /**
-   * Fills `exports` and `global` of every node from `@Module` of its class and its configuration.
-   * An export is an owned token or a module the node imports, matched by its pair (class, name).
-   */
-  private resolveExports(): void {
-    for (const [moduleCtor, byName] of this.nodes) {
-      const meta = getMeta<ModuleOptions>(moduleCtor, MODULE)
-      for (const [name, node] of byName) {
-        const entry = this.configured.get(moduleCtor)?.get(name)
-        node.global = meta?.global === true || entry?.global === true
-        node.hasExports = meta?.exports !== undefined || entry?.module.exports !== undefined
-        meta?.exports?.forEach((ref, index) => this.addExport(node, ref, index))
-        entry?.module.exports?.forEach((ref, index) => this.addExport(node, ref, index))
-      }
-    }
-  }
-
+  /** An export is an owned token or a module the node imports, matched by its pair (class, name). */
   private addExport(node: ModuleNode, ref: unknown, index: number): void {
     const item = this.unwrap(ref, node, 'exports', index)
     if (node.owns.has(item as AnyToken)) {
@@ -345,32 +306,27 @@ export class ModuleLoader {
     )
   }
 
-  /** `isStatic`: from `@Module({ providers })` of the class, not from a configure() result. */
-  private registerProvider(provider: ProviderDefinition, node: ModuleNode, isStatic = false): void {
+  private registerProvider(provider: ProviderDefinition, node: ModuleNode, kind: Declaration['kind']): void {
     const token = typeof provider === 'function' ? provider : (provider as FactoryProvider).token
     const key = sharedKeyOf(provider)
-    const owner = this.owners.get(token)
-    if (owner) {
+    const first = this.declared.get(token)
+    // A module class instance is no provider declaration: one declared again keeps it, like a built-in.
+    if (first && first.kind !== 'module') {
+      if (first.node === node) throw new Error(this.duplicateMessage(token, first.node, node))
       // Another name of the class: one instance, owned by every name.
-      if (isStatic && owner !== node && owner.module === node.module && this.staticTokens.has(token)) {
-        node.owns.add(token)
-        this.container.addOwner(token, node)
-        return
-      }
-      const firstKey = this.sharedKeys.get(token)
-      if (owner !== node && key !== undefined && firstKey !== undefined) {
-        if (key !== firstKey) {
+      const sameClass = first.node.module === node.module
+      if (kind === 'static' && first.kind === 'static' && sameClass) return this.own(node, token)
+      if (key !== undefined && first.key !== undefined) {
+        if (key !== first.key) {
           throw new Error(
-            `[Miia] ${formatToken(token)} is shared by ${owner.where} (${firstKey}) and ${node.where} (${key}) - ` +
+            `[Miia] ${formatToken(token)} is shared by ${first.node.where} (${first.key}) and ${node.where} (${key}) - ` +
               'a shared provider must be declared the same way in every module; use a separate token for each variant',
           )
         }
         // Another module declaring a shared provider: one instance, owned by both.
-        node.owns.add(token)
-        this.container.addOwner(token, node)
-        return
+        return this.own(node, token)
       }
-      throw new Error(this.duplicateMessage(token, owner, node))
+      throw new Error(this.duplicateMessage(token, first.node, node))
     }
     if (this.container.provided.has(token)) {
       const name = formatToken(token)
@@ -387,11 +343,9 @@ export class ModuleLoader {
     // Any other built-in token declared by a module keeps the built-in.
     if (this.container.has(token)) return
 
-    // An overridden provider still has its owner and key: a second module declaring it is a duplicate, or joins it.
-    this.owners.set(token, node)
-    if (key !== undefined) this.sharedKeys.set(token, key)
+    // An overridden provider still has its declaration: a second module declaring it is a duplicate, or joins it.
+    this.declared.set(token, { node, kind, key })
     node.owns.add(token)
-    if (isStatic) this.staticTokens.add(token)
     if (this.applyOverride(token, node)) return
     if (typeof provider === 'function') {
       const scope = getMeta<InjectableMeta>(provider, INJECTABLE)?.scope ?? 'singleton'
@@ -400,6 +354,12 @@ export class ModuleLoader {
       const fp = provider as FactoryProvider
       this.container.register(fp.token, fp.factory, fp.scope, fp.deps, node)
     }
+  }
+
+  /** One more module that declares `token`: it owns the same entry. */
+  private own(node: ModuleNode, token: AnyToken): void {
+    node.owns.add(token)
+    this.container.addOwner(token, node)
   }
 
   private duplicateMessage(token: AnyToken, first: ModuleNode, second: ModuleNode): string {

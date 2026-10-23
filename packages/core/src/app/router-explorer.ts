@@ -55,6 +55,18 @@ export class RouterExplorer {
     const querySchemaMap = getMeta<Map<string, ZodLike>>(controller, QUERY_SCHEMAS)
     const paramsSchemaMap = getMeta<Map<string, ZodLike>>(controller, PARAMS_SCHEMAS)
     const bodyReaderMap = getMeta<Map<string, BodyReader>>(controller, BODY_READERS)
+    // Built and checked on the first route that runs the guard: one skipped on every route is never built.
+    const guardMws = new Map<Guard, Middleware>()
+    const toMiddlewares = (guards: Guard[], skipSet: Set<any> | null): Middleware[] => {
+      const result: Middleware[] = []
+      for (const guard of guards) {
+        if (skipSet && isSkipped(guard, skipSet)) continue
+        let mw = guardMws.get(guard)
+        if (!mw) guardMws.set(guard, (mw = this.resolveGuard(guard, controller, node, owners)))
+        result.push(mw)
+      }
+      return result
+    }
 
     for (const route of routes) {
       const fullPath = joinPaths(controllerPrefix, route.path)
@@ -67,8 +79,8 @@ export class RouterExplorer {
       const bodyLimit = bodyLimitMap?.get(route.handlerName) ?? bodyLimitMap?.get('*')
 
       const skipSet = getSkipSet(controller, route.handlerName)
-      const ctrlGuardMws = this.resolveGuards(filterGuards(ctrlGuards, skipSet), controller, node, owners)
-      const methodGuardMws = this.resolveGuards(filterGuards(methodGuards, skipSet), controller, node, owners)
+      const ctrlGuardMws = toMiddlewares(ctrlGuards, skipSet)
+      const methodGuardMws = toMiddlewares(methodGuards, skipSet)
 
       const validation = createValidationMiddleware(
         {
@@ -99,19 +111,17 @@ export class RouterExplorer {
   }
 
   /** Checked from every module of the controller: the guard itself if a module declares it, else what it injects. */
-  private resolveGuards(
-    guards: Guard[],
+  private resolveGuard(
+    guardCtor: Guard,
     controller: Constructor,
     consumer: ModuleNode,
     owners: readonly ModuleNode[],
-  ): Middleware[] {
-    return guards.map((guardCtor) => {
-      if (!this.container.has(guardCtor)) this.container.registerGuard(guardCtor)
-      const instance = this.container.resolve<CanActivate>(guardCtor)
-      this.container.checkGuard(guardCtor, consumer, controller)
-      for (const owner of owners) this.container.checkGuard(guardCtor, owner, controller)
-      return guardToMiddleware(instance)
-    })
+  ): Middleware {
+    if (!this.container.has(guardCtor)) this.container.registerGuard(guardCtor)
+    const instance = this.container.resolve<CanActivate>(guardCtor)
+    this.container.checkGuard(guardCtor, consumer, controller)
+    for (const owner of owners) this.container.checkGuard(guardCtor, owner, controller)
+    return guardToMiddleware(instance)
   }
 }
 
@@ -123,9 +133,4 @@ function getSkipSet(controller: Constructor, handlerName: string): Set<any> | nu
   if (!methodSet && !classSet) return null
   if (methodSet && classSet) return new Set([...classSet, ...methodSet])
   return methodSet ?? classSet ?? null
-}
-
-function filterGuards(guards: Guard[], skipSet: Set<any> | null): Guard[] {
-  if (!skipSet) return guards
-  return guards.filter((g) => !isSkipped(g, skipSet))
 }

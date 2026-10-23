@@ -57,9 +57,9 @@ function nodeOf(graph: ModuleGraph, label: string): ModuleNode {
 }
 
 function ownerOf(app: Miia, token: AnyToken): ModuleNode | null {
-  const { registry } = (app as unknown as { container: { registry: Map<AnyToken, { owner: ModuleNode | null }> } })
+  const { registry } = (app as unknown as { container: { registry: Map<AnyToken, { owners: ModuleNode[] | null }> } })
     .container
-  return registry.get(token)!.owner
+  return registry.get(token)!.owners?.[0] ?? null
 }
 
 const CONFIG = createToken<string>('CONFIG')

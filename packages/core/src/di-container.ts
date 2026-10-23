@@ -20,9 +20,10 @@ interface ContainerEntry {
   scope: Scope
   instance?: unknown
   deps?: readonly AnyToken[]
-  /** The module that declares the provider; null for built-ins, `provide()` and guards no module declares. */
-  owner: ModuleNode | null
-  /** Every module that declares the provider, `owner` first: what it injects is checked from each; null without one. */
+  /**
+   * Every module that declares the provider, the first one (its owner) first: what it injects is checked from each.
+   * Null for built-ins, `provide()` and guards no module declares.
+   */
   owners: ModuleNode[] | null
   /** A guard no module declares, registered for the routes or app.useGuard(). */
   guard: boolean
@@ -47,6 +48,11 @@ interface Frame {
 export interface ShutdownFailure {
   source: string
   error: unknown
+}
+
+/** The module that declares the entry first; null without one. */
+function ownerOf(entry: ContainerEntry | undefined): ModuleNode | null {
+  return entry?.owners?.[0] ?? null
 }
 
 function hintOf(token: AnyToken): string | undefined {
@@ -127,6 +133,8 @@ export class Container {
   private resolvers = new WeakMap<ModuleNode | readonly ModuleNode[], Resolver>()
   /** Guard -> the modules it is already checked from. */
   private checkedGuards = new Map<AnyToken, Set<View>>()
+  /** singletonInstances() once every singleton is constructed. */
+  private instances: object[] | null = null
 
   register<T>(
     token: Token<T> | AbstractConstructor<T>,
@@ -136,7 +144,7 @@ export class Container {
     owner: ModuleNode | null = null,
   ): void {
     const owners = owner ? [owner] : null
-    this.registry.set(token, { factory, scope, deps, owner, owners, guard: false, injected: null, seenBy: null })
+    this.registry.set(token, { factory, scope, deps, owners, guard: false, injected: null, seenBy: null })
   }
 
   /**
@@ -174,15 +182,13 @@ export class Container {
 
   /** Top-level resolution (app.get(), ctx.resolve(), the framework itself): not checked against boundaries. */
   resolve<T>(token: Token<T> | AbstractConstructor<T>): T {
-    const entry = this.registry.get(token)
-    if (!entry) throw new Error(this.noProviderMessage(token))
+    const entry = this.registry.get(token) ?? this.missing(token, false)!
     return this.instantiate(token, entry, this.stack.at(-1)) as T
   }
 
   resolveOptional<T>(token: Token<T> | AbstractConstructor<T>): T | null {
     const entry = this.registry.get(token)
-    if (!entry) return null
-    return this.instantiate(token, entry, this.stack.at(-1)) as T
+    return entry === undefined ? null : (this.instantiate(token, entry, this.stack.at(-1)) as T)
   }
 
   /**
@@ -202,7 +208,7 @@ export class Container {
   visible(view: ResolverView, token: AnyToken): boolean {
     const entry = this.registry.get(token)
     if (!entry) return false
-    if (this.graph === null || entry.owner === null) return true
+    if (this.graph === null || entry.owners === null) return true
     return isModuleList(view) ? view.every((node) => this.sees(node, token)) : this.sees(view, token)
   }
 
@@ -212,11 +218,8 @@ export class Container {
    * @internal
    */
   resolveFrom(view: ResolverView, token: AnyToken, optional: boolean): unknown {
-    const entry = this.registry.get(token)
-    if (!entry) {
-      if (optional) return null
-      throw new Error(this.noProviderMessage(token))
-    }
+    const entry = this.registry.get(token) ?? this.missing(token, optional)
+    if (entry === null) return null
     if (entry.scope === 'request') {
       throw new Error(
         `[Miia] Request-scoped ${formatToken(token)} cannot be resolved through Resolver - ` +
@@ -224,23 +227,12 @@ export class Container {
       )
     }
     if (entry === this.resolverEntry && view !== 'root') return this.resolverOf(view)
-    const owner = entry.owner
+    const owner = ownerOf(entry)
     if (this.graph !== null && owner !== null && !entry.seenBy?.has(view)) {
-      if (isModuleList(view)) {
-        for (let i = 0; i < view.length; i++) this.checkResolve(view[i]!, token, owner)
-      } else {
-        this.checkResolve(view, token, owner)
-      }
+      this.check(view, token, owner, { requester: Resolver, provided: false, via: 'resolve', controller: null })
       this.passed(entry, view)
     }
     return this.instantiate(token, entry, this.stack.at(-1))
-  }
-
-  /** A Resolver of `view` resolving `token`, declared by `owner`. */
-  private checkResolve(view: View, token: AnyToken, owner: ModuleNode): void {
-    if (this.sees(view, token)) return
-    const from = view === 'root' ? null : view
-    this.violate({ requester: Resolver, from, provided: false, token, owner, via: 'resolve', controller: null })
   }
 
   /**
@@ -257,18 +249,16 @@ export class Container {
     if (consumers.has(consumer)) return
     consumers.add(consumer)
 
-    const from = consumer === 'root' ? null : consumer
-    if (entry.owner !== null) {
-      if (this.sees(consumer, guard)) return
-      const requester = controller ?? guard
+    const owner = ownerOf(entry)
+    if (owner !== null) {
       const via = controller === null ? 'useGuard' : 'uses'
-      this.violate({ requester, from, provided: false, token: guard, owner: entry.owner, via, controller: null })
+      this.check(consumer, guard, owner, { requester: controller ?? guard, provided: false, via, controller: null })
       return
     }
     for (const token of entry.injected ?? []) {
-      const owner = this.registry.get(token)?.owner
-      if (!owner || this.sees(consumer, token)) continue
-      this.violate({ requester: guard, from, provided: false, token, owner, via: 'inject', controller })
+      const tokenOwner = ownerOf(this.registry.get(token))
+      if (tokenOwner === null) continue
+      this.check(consumer, token, tokenOwner, { requester: guard, provided: false, via: 'inject', controller })
     }
   }
 
@@ -324,7 +314,17 @@ export class Container {
       else if (targets.some((target) => target.instance === instance)) continue
       targets.push({ token, instance })
     }
-    if (targets !== null) queueMicrotask(() => this.runRequestDestroy(targets, targets.length - 1))
+    if (targets === null) return
+    queueMicrotask(() => {
+      const rest = this.runRequestDestroy(targets, targets.length - 1)
+      if (rest === undefined) return
+      const chain: Promise<void> = rest
+        .catch(() => {})
+        .then(() => {
+          this.pendingRequestDestroys.delete(chain)
+        })
+      this.pendingRequestDestroys.add(chain)
+    })
   }
 
   has(token: AnyToken): boolean {
@@ -343,12 +343,10 @@ export class Container {
   constructAll(): void {
     for (const [token, entry] of this.registry) {
       if (entry.deps === undefined) continue
+      const frame: Frame = { token, entry }
       for (const dep of entry.deps) {
-        const depEntry = this.registry.get(dep)
-        if (!depEntry) throw new Error(this.noProviderMessage(dep, `deps of ${describe(token, entry.owner)}`))
-        if (this.graph !== null && depEntry.owner !== null && !entry.guard) {
-          this.checkVisible({ token, entry }, dep, depEntry.owner, 'deps')
-        }
+        const owner = ownerOf(this.registry.get(dep) ?? this.missing(dep, false, frame, true)!)
+        if (this.graph !== null && owner !== null && !entry.guard) this.checkFrame(frame, dep, owner, 'deps')
       }
     }
     for (const [token, entry] of this.registry) {
@@ -361,12 +359,7 @@ export class Container {
   /** Phase 2 of init: onInit() on every singleton, dependencies first; runs constructAll() if nothing has. */
   async initAll(): Promise<void> {
     if (this.hookOrder === null) this.constructAll()
-    for (const { instance } of this.hookOrder!) {
-      const onInit = (instance as { onInit?: () => unknown }).onInit
-      if (typeof onInit === 'function') {
-        await onInit.call(instance)
-      }
-    }
+    await this.runHooks(this.hookOrder!, 'onInit')
   }
 
   /**
@@ -380,12 +373,7 @@ export class Container {
    * - An instance registered under several tokens gets the hook once.
    */
   async bootstrapAll(): Promise<void> {
-    for (const { instance } of this.hookOrder ?? this.lifecycleOrder(false)) {
-      const onReady = (instance as { onReady?: () => unknown }).onReady
-      if (typeof onReady === 'function') {
-        await onReady.call(instance)
-      }
-    }
+    await this.runHooks(this.hookOrder ?? this.lifecycleOrder(false), 'onReady')
   }
 
   /**
@@ -393,14 +381,18 @@ export class Container {
    * Lazy proxies are left out: their target, when registered, is listed itself. Used by DiscoveryService.
    * @internal
    */
-  singletonInstances(): object[] {
+  singletonInstances(): readonly object[] {
+    if (this.instances !== null) return this.instances
     const result = new Set<object>()
     for (const entry of this.registry.values()) {
       const instance = entry.instance
       if (entry.scope !== 'singleton' || typeof instance !== 'object' || instance === null) continue
       if (!isLazyProxy(instance)) result.add(instance)
     }
-    return [...result]
+    const list = [...result]
+    // Fixed once constructAll() has built every singleton.
+    if (this.hookOrder !== null) this.instances = list
+    return list
   }
 
   /**
@@ -413,21 +405,30 @@ export class Container {
     await this.settleRequestScopes()
     const order = (this.hookOrder ?? this.lifecycleOrder(false)).toReversed()
     const failures: ShutdownFailure[] = []
-    for (const hook of ['onShutdown', 'onDestroy'] as const) {
-      for (const { token, instance } of order) {
-        const fn = (instance as Record<string, unknown>)[hook]
-        if (typeof fn !== 'function') continue
-        try {
-          await fn.call(instance)
-        } catch (error) {
-          failures.push({ source: `${formatToken(token)}.${hook}()`, error })
-        }
-      }
-    }
+    await this.runHooks(order, 'onShutdown', failures)
+    await this.runHooks(order, 'onDestroy', failures)
     this.registry.clear()
     this.edges.clear()
     this.hookOrder = null
+    this.instances = null
     return failures
+  }
+
+  /** `hook` on each instance that has it, in order; with `failures` an error is collected and the rest still run. */
+  private async runHooks(order: HookTarget[], hook: string, failures?: ShutdownFailure[]): Promise<void> {
+    for (const { token, instance } of order) {
+      const fn = (instance as Record<string, unknown>)[hook]
+      if (typeof fn !== 'function') continue
+      if (failures === undefined) {
+        await fn.call(instance)
+        continue
+      }
+      try {
+        await fn.call(instance)
+      } catch (error) {
+        failures.push({ source: `${formatToken(token)}.${hook}()`, error })
+      }
+    }
   }
 
   /**
@@ -440,43 +441,29 @@ export class Container {
     if (this.pendingRequestDestroys.size > 0) await Promise.all([...this.pendingRequestDestroys])
   }
 
-  /** Hooks from `targets[from]` down to the oldest; after a hook that returns a thenable the rest wait for it. */
-  private runRequestDestroy(targets: HookTarget[], from: number): void {
+  /**
+   * Hooks from `targets[from]` down to the oldest, synchronously until one returns a thenable: the rest wait for it,
+   * and the promise of that chain is returned.
+   */
+  private runRequestDestroy(targets: HookTarget[], from: number): Promise<void> | undefined {
     for (let i = from; i >= 0; i--) {
       const target = targets[i]!
       try {
         const result = (target.instance as { onDestroy: () => unknown }).onDestroy()
-        if (isThenable(result)) {
-          const chain: Promise<void> = this.awaitRequestDestroy(result, targets, i)
-            .catch(() => {})
-            .then(() => {
-              this.pendingRequestDestroys.delete(chain)
-            })
-          this.pendingRequestDestroys.add(chain)
-          return
-        }
+        if (isThenable(result)) return this.afterRequestDestroy(result, targets, i)
       } catch (error) {
         this.requestDestroyFailed(target.token, error)
       }
     }
   }
 
-  /** The rest of the hooks of a request after `targets[at]` returned a thenable: one chain, which never rejects. */
-  private async awaitRequestDestroy(pending: PromiseLike<unknown>, targets: HookTarget[], at: number): Promise<void> {
-    try {
-      await pending
-    } catch (error) {
+  /** Out of the loop above, which then allocates nothing per hook. */
+  private afterRequestDestroy(pending: PromiseLike<unknown>, targets: HookTarget[], at: number): Promise<void> {
+    const next = () => this.runRequestDestroy(targets, at - 1)
+    return Promise.resolve(pending).then(next, (error) => {
       this.requestDestroyFailed(targets[at]!.token, error)
-    }
-    for (let i = at - 1; i >= 0; i--) {
-      const target = targets[i]!
-      try {
-        const result = (target.instance as { onDestroy: () => unknown }).onDestroy()
-        if (isThenable(result)) await result
-      } catch (error) {
-        this.requestDestroyFailed(target.token, error)
-      }
-    }
+      return next()
+    })
   }
 
   /** A logger that throws must not escape the microtask. */
@@ -530,7 +517,7 @@ export class Container {
 
   /** `cycle` starts and ends with the same token; `viaDeps` tells how each step was reached from the previous one. */
   private hookCycleMessage(cycle: Array<{ token: AnyToken; viaDeps: boolean }>): string {
-    const names = cycle.map((step) => describe(step.token, this.registry.get(step.token)?.owner ?? null))
+    const names = cycle.map((step) => describe(step.token, ownerOf(this.registry.get(step.token))))
     const lines = [`[Miia] Circular dependency detected: ${names.join(' -> ')}`]
     const at = cycle.findIndex((step, i) => i > 0 && step.viaDeps)
     if (at !== -1) {
@@ -558,10 +545,15 @@ export class Container {
     }
   }
 
-  private noProviderMessage(token: AnyToken, requiredBy?: string): string {
+  /** No entry for `token`: null when `optional`, else the error naming `requester` (or its `deps`). */
+  private missing(token: AnyToken, optional: boolean, requester?: Frame, viaDeps = false): null {
+    if (optional) return null
+    throw new Error(this.noProviderMessage(token, requester ?? this.stack.at(-1), viaDeps))
+  }
+
+  private noProviderMessage(token: AnyToken, frame: Frame | undefined, viaDeps: boolean): string {
     const name = formatToken(token)
-    const top = this.stack.at(-1)
-    const requester = requiredBy ?? (top ? describe(top.token, top.entry.owner) : undefined)
+    const requester = frame && `${viaDeps ? 'deps of ' : ''}${describe(frame.token, ownerOf(frame.entry))}`
     const lines = [`[Miia] No provider found for token: ${name}${requester ? `, required by ${requester}` : ''}`]
     const hint = hintOf(token)
     if (hint) {
@@ -583,19 +575,16 @@ export class Container {
 
   /** Checks `frame` against module boundaries, then instantiates; S4 is checked from `frame` too. */
   private resolveFor(frame: Frame, token: AnyToken, optional: boolean): unknown {
-    const entry = this.registry.get(token)
-    if (!entry) {
-      if (optional) return null
-      throw new Error(this.noProviderMessage(token, describe(frame.token, frame.entry.owner)))
-    }
+    const entry = this.registry.get(token) ?? this.missing(token, optional, frame)
+    if (entry === null) return null
     // The built-in Resolver comes bound to the module of the requester, or to all of them for an entry several modules
     // declare; one without a module gets the root one.
     const owners = frame.entry.owners
     if (entry === this.resolverEntry && owners !== null) return this.resolverOf(owners.length > 1 ? owners : owners[0]!)
-    if (this.graph !== null && entry.owner !== null) {
+    if (this.graph !== null && entry.owners !== null) {
       if (frame.entry.guard) (frame.entry.injected ??= new Set()).add(token)
       else if (!entry.seenBy?.has(frame.entry)) {
-        this.checkVisible(frame, token, entry.owner, 'inject')
+        this.checkFrame(frame, token, entry.owners[0]!, 'inject')
         this.passed(entry, frame.entry)
       }
     }
@@ -609,21 +598,26 @@ export class Container {
   }
 
   /**
-   * `token`, declared by `owner`, must be visible from every module that declares `frame`, or the root for an
-   * entry without one: the result does not depend on which of them the loader reached first.
+   * `token` must be visible from every module that declares `frame`, or the root for an entry without one: the
+   * result does not depend on which of them the loader reached first.
    */
-  private checkVisible(frame: Frame, token: AnyToken, owner: ModuleNode, via: 'inject' | 'deps'): void {
+  private checkFrame(frame: Frame, token: AnyToken, owner: ModuleNode, via: 'inject' | 'deps'): void {
     const owners = frame.entry.owners
-    if (owners === null) {
-      if (this.sees('root', token)) return
-      const provided = this.provided.has(frame.token)
-      this.violate({ requester: frame.token, from: null, provided, token, owner, via, controller: null })
-      return
-    }
-    for (let i = 0; i < owners.length; i++) {
-      const from = owners[i]!
-      if (this.sees(from, token)) continue
-      this.violate({ requester: frame.token, from, provided: false, token, owner, via, controller: null })
+    const provided = owners === null && this.provided.has(frame.token)
+    this.check(owners ?? 'root', token, owner, { requester: frame.token, provided, via, controller: null })
+  }
+
+  /** `token`, declared by `owner`, must be visible from `views`, from each module of a list; a miss is a violation. */
+  private check(
+    views: ResolverView,
+    token: AnyToken,
+    owner: ModuleNode,
+    base: Omit<BoundaryViolation, 'from' | 'token' | 'owner'>,
+  ): void {
+    if (isModuleList(views)) {
+      for (let i = 0; i < views.length; i++) this.check(views[i]!, token, owner, base)
+    } else if (!this.sees(views, token)) {
+      this.violate({ ...base, from: views === 'root' ? null : views, token, owner })
     }
   }
 
@@ -655,8 +649,8 @@ export class Container {
     const cycleStart = this.stack.findIndex((frame) => frame.token === token)
     if (cycleStart !== -1) {
       const chain = [
-        ...this.stack.slice(cycleStart).map((frame) => describe(frame.token, frame.entry.owner)),
-        describe(token, entry.owner),
+        ...this.stack.slice(cycleStart).map((frame) => describe(frame.token, ownerOf(frame.entry))),
+        describe(token, ownerOf(entry)),
       ]
       throw new Error(
         `[Miia] Circular dependency detected: ${chain.join(' -> ')}\n` +

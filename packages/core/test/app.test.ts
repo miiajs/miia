@@ -20,6 +20,7 @@ import {
   UseGuard,
   GUARD_FACTORY,
 } from '../src/index.js'
+import { Container } from '../src/di-container.js'
 
 // Helper to make requests to the app
 async function request(
@@ -1165,6 +1166,100 @@ describe('Miia Application', () => {
       // Factory guard active, denies → 403
       const guarded = await request(app, 'GET', '/guarded')
       expect(guarded.status).toBe(403)
+    })
+
+    it('never builds a class guard that @SkipGuard removes from every route', async () => {
+      let built = 0
+      class Skipped implements CanActivate {
+        constructor() {
+          built++
+        }
+        canActivate() {
+          return false
+        }
+      }
+
+      @Controller('/')
+      @UseGuard(Skipped)
+      @SkipGuard(Skipped)
+      class Ctrl {
+        @Get('/a')
+        a() {
+          return { ok: true }
+        }
+
+        @Get('/b')
+        @SkipGuard(Skipped)
+        b() {
+          return { ok: true }
+        }
+      }
+
+      @Module({ controllers: [Ctrl] })
+      class M {}
+
+      const app = new Miia({ logger: false }).register(M)
+
+      expect((await request(app, 'GET', '/a')).status).toBe(200)
+      expect((await request(app, 'GET', '/b')).status).toBe(200)
+      expect(built).toBe(0)
+      expect(() => app.get(Skipped)).toThrow('No provider found for token: Skipped')
+    })
+
+    it('builds and checks a class guard once for all the routes of a controller', async () => {
+      let built = 0
+      let calls = 0
+      class Counted implements CanActivate {
+        constructor() {
+          built++
+        }
+        canActivate() {
+          calls++
+          return true
+        }
+      }
+
+      @Controller('/items')
+      @UseGuard(Counted)
+      class Ctrl {
+        @Get()
+        list() {
+          return []
+        }
+
+        @Get(':id')
+        one() {
+          return {}
+        }
+
+        @Post()
+        create() {
+          return {}
+        }
+      }
+
+      @Module({ controllers: [Ctrl] })
+      class M {}
+
+      const checks: unknown[] = []
+      const original = Container.prototype.checkGuard
+      Container.prototype.checkGuard = function (this: Container, guard, ...rest) {
+        checks.push(guard)
+        return original.call(this, guard, ...rest)
+      }
+      try {
+        const app = new Miia({ logger: false }).register(M)
+        await app.init()
+        expect(built).toBe(1)
+        expect(checks.filter((guard) => guard === Counted)).toHaveLength(1)
+
+        expect((await request(app, 'GET', '/items')).status).toBe(200)
+        expect((await request(app, 'GET', '/items/1')).status).toBe(200)
+        expect((await request(app, 'POST', '/items')).status).toBe(200)
+        expect(calls).toBe(3)
+      } finally {
+        Container.prototype.checkGuard = original
+      }
     })
   })
 
