@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
-import { ConsoleLogger } from '../src/index.js'
+import type { LoggerService } from '../src/index.js'
+import { ConsoleLogger, Logger, Miia } from '../src/index.js'
 
 const ESC = '\x1b['
 
@@ -63,5 +64,62 @@ describe('ConsoleLogger colors', () => {
     process.env.NO_COLOR = '1'
     const [line] = lines('log', () => new ConsoleLogger({ colors: true }).log('hello'))
     expect(line).toContain(ESC)
+  })
+})
+
+describe('the logger an app installs', () => {
+  const initial = Logger.getLogger()
+
+  afterEach(() => {
+    Logger.setLogger(initial)
+  })
+
+  function capture(): { logger: LoggerService; lines: string[] } {
+    const lines: string[] = []
+    const logger: LoggerService = {
+      log(message, context) {
+        lines.push(`[${context}] ${message}`)
+      },
+      error() {},
+      warn() {},
+    }
+    return { logger, lines }
+  }
+
+  it("'logger: false' silences the process only until destroy()", async () => {
+    const { logger, lines } = capture()
+    Logger.setLogger(logger)
+    const app = new Miia({ logger: false })
+    await app.init()
+    new Logger('Other').log('while the app lives')
+    await app.destroy()
+    new Logger('Other').log('after destroy')
+    expect(Logger.getLogger()).toBe(logger)
+    expect(lines).toEqual(['[Other] after destroy'])
+  })
+
+  it('a custom logger goes back to the one it replaced on destroy()', async () => {
+    const { logger } = capture()
+    const app = new Miia({ logger })
+    expect(Logger.getLogger()).toBe(logger)
+    await app.destroy()
+    expect(Logger.getLogger()).toBe(initial)
+  })
+
+  it('destroy() leaves a logger installed after the app alone', async () => {
+    const first = new Miia({ logger: false })
+    const { logger } = capture()
+    const second = new Miia({ logger })
+    await first.destroy()
+    expect(Logger.getLogger()).toBe(logger)
+    await second.destroy()
+  })
+
+  it('an app without the option leaves the logger as it is', async () => {
+    const { logger } = capture()
+    Logger.setLogger(logger)
+    const app = new Miia()
+    await app.destroy()
+    expect(Logger.getLogger()).toBe(logger)
   })
 })

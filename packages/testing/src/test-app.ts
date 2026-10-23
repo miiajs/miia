@@ -90,13 +90,19 @@ export class TestApp {
     const app = new Miia({ logger: false, globalPrefix: this.globalPrefix })
     this.app = app
 
-    // Register explicit providers (for unit tests without modules)
-    app.provide(...this.providers)
-    app.use(...this.middlewares)
-    app.useGuard(...this.guards)
-    app.register(...this.modules, ...this.overrides)
+    try {
+      // Register explicit providers (for unit tests without modules)
+      app.provide(...this.providers)
+      app.use(...this.middlewares)
+      app.useGuard(...this.guards)
+      app.register(...this.modules, ...this.overrides)
 
-    await app.init()
+      await app.init()
+    } catch (error) {
+      // A test whose compile() throws never gets to close(): give the global logger back here
+      await app.destroy().catch(() => {})
+      throw error
+    }
     return this
   }
 

@@ -136,3 +136,33 @@ describe('a returned value next to what the handler set on ctx.res', () => {
     })
   }
 })
+
+describe('a returned ctx.res', () => {
+  for (const [name, setup] of Object.entries(setups)) {
+    describe(name, () => {
+      it('return ctx.res.redirect(): the redirect, no JSON body - GET and HEAD', async () => {
+        for (const method of ['GET', 'HEAD']) {
+          const app = new Miia({ logger: false })
+          setup(app, (ctx) => ctx.res.redirect('/login'))
+          const res = await app.fetch(new Request('http://localhost/', { method }))
+          expect(res.status).toBe(302)
+          expect(res.headers.get('location')).toBe('/login')
+          expect(res.headers.get('content-type')).toBeNull()
+          expect(await res.text()).toBe('')
+        }
+      })
+
+      it('return ctx.res.status(201).json(x): the status and x', async () => {
+        const res = await fetchWith(setup, async (ctx) => ctx.res.status(201).json({ id: 1 }))
+        expect(res).toEqual({ status: 201, type: 'application/json', body: '{"id":1}' })
+        const head = await fetchWith(setup, (ctx) => ctx.res.status(201).json({ id: 1 }), 'HEAD')
+        expect(head).toEqual({ status: 201, type: 'application/json', body: '' })
+      })
+
+      it('return ctx.res untouched: the same as returning nothing', async () => {
+        const res = await fetchWith(setup, (ctx) => ctx.res)
+        expect(res).toEqual({ status: 200, type: null, body: '' })
+      })
+    })
+  }
+})

@@ -173,6 +173,8 @@ export class Miia {
   private compiledGlobalPipeline?: Pipeline
   private closeServer?: () => void | Promise<void>
   private logger: Logger
+  /** The global logger this app put in place of `previous`, handed back by destroy(). */
+  private installedLogger?: { installed: LoggerService; previous: LoggerService }
   private trustProxy: string[] | false
   private shutdownHooksOption: boolean | NodeJS.Signals[]
   private shutdownHandlersRegistered = false
@@ -188,14 +190,15 @@ export class Miia {
   private registeredShutdownHandlers: Array<{ signal: NodeJS.Signals; listener: NodeJS.SignalsListener }> = []
 
   constructor(options?: MiiaOptions) {
-    if (options?.logger === false) {
-      Logger.setLogger({
-        log() {},
-        error() {},
-        warn() {},
-      })
-    } else if (options?.logger) {
-      Logger.setLogger(this.isLoggerService(options.logger) ? options.logger : new ConsoleLogger(options.logger))
+    if (options?.logger != null) {
+      const installed: LoggerService =
+        options.logger === false
+          ? { log() {}, error() {}, warn() {} }
+          : this.isLoggerService(options.logger)
+            ? options.logger
+            : new ConsoleLogger(options.logger)
+      this.installedLogger = { installed, previous: Logger.getLogger() }
+      Logger.setLogger(installed)
     }
     this.logger = new Logger('App')
     // Normalize trustProxy once: false/undefined -> false; true -> leftmost XFF;
@@ -422,6 +425,7 @@ export class Miia {
     // Cleared when it settles: a later destroy() runs again.
     this.destroying ??= this.runDestroy().finally(() => {
       this.destroying = undefined
+      this.restoreLogger()
     })
     return this.destroying
   }
@@ -622,10 +626,12 @@ export class Miia {
   /**
    * The one place a result becomes the response, then the request scope ends. A body the handler or a
    * middleware already set is kept, under its own Content-Type, for GET and HEAD alike; HEAD never
-   * serializes the result, it only gets the Content-Type a GET would.
+   * serializes the result, it only gets the Content-Type a GET would. A returned `ctx.res` is no result:
+   * the response is built from it.
    */
   private respond(result: unknown, ctx: Context, method: string): Response {
     const res = ctx.res
+    if (result === res) result = undefined
     let response: Response
     if (result != null && !res._modified && method !== 'HEAD' && !(result instanceof Response)) {
       response = new Response(JSON.stringify(result), JSON_RESPONSE_INIT)
@@ -673,6 +679,13 @@ export class Miia {
     })
 
     this.router.compileAll(globalGuards)
+  }
+
+  /** Unless something has replaced it since, the global logger goes back to what it was before this app. */
+  private restoreLogger(): void {
+    if (this.installedLogger === undefined) return
+    if (Logger.getLogger() === this.installedLogger.installed) Logger.setLogger(this.installedLogger.previous)
+    this.installedLogger = undefined
   }
 
   private isLoggerService(value: LoggerService | LoggerConfig): value is LoggerService {

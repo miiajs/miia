@@ -46,9 +46,31 @@ function decodePath(raw: string): string {
   return decoded
 }
 
+/**
+ * Bun hands a request with an invalid Host over with a relative url, and node-server keeps a Host that makes no URL:
+ * those are read as a path on localhost.
+ */
+function parseUrl(raw: string): { url: URL; relative: boolean } {
+  const url = URL.parse(raw)
+  if (url !== null) return { url, relative: false }
+  const pathStart = raw.charCodeAt(0) === 47 ? 0 : raw.indexOf('/', raw.indexOf('//') + 2)
+  return { url: new URL(`http://localhost${pathStart === -1 ? '/' : raw.substring(pathStart)}`), relative: true }
+}
+
 /** Worded like the router's own 404: method and path, never the client's Host. */
 function notFound(ctx: RequestContext): NotFoundException {
-  return new NotFoundException(`Cannot ${ctx.req.method} ${new URL(ctx.req.url).pathname}`)
+  return new NotFoundException(`Cannot ${ctx.req.method} ${parseUrl(ctx.req.url).url.pathname}`)
+}
+
+/** Redirect to trailing slash so relative paths in HTML resolve correctly. */
+function slashRedirect(ctx: RequestContext): Response | null {
+  const { url, relative } = parseUrl(ctx.req.url)
+  if (url.pathname.endsWith('/')) return null
+  url.pathname += '/'
+  if (!relative) return Response.redirect(url.toString(), 301)
+  // A path-only Location, with one leading slash: `//x/` would name another host
+  const location = `/${url.pathname.replace(/^\/+/, '')}${url.search}`
+  return new Response(null, { status: 301, headers: { Location: location } })
 }
 
 function shouldFallback(method: string, accept: string | null, relativePath: string): boolean {
@@ -201,12 +223,8 @@ export function createStaticHandler(
         throw notFound(ctx)
       }
 
-      // Redirect to trailing slash so relative paths in HTML resolve correctly
-      const url = new URL(ctx.req.url)
-      if (!url.pathname.endsWith('/')) {
-        url.pathname += '/'
-        return Response.redirect(url.toString(), 301)
-      }
+      const redirect = slashRedirect(ctx)
+      if (redirect) return redirect
 
       relativePath = index
     }
@@ -223,14 +241,7 @@ export function createStaticHandler(
     // A subdirectory with an index file: the same trailing-slash redirect as the mount root
     if (index && resolved?.stats.isDirectory()) {
       const indexFile = await resolveFile(`${relativePath}/${index}`)
-      if (indexFile) {
-        const url = new URL(ctx.req.url)
-        if (!url.pathname.endsWith('/')) {
-          url.pathname += '/'
-          return Response.redirect(url.toString(), 301)
-        }
-        return sendFile(ctx, indexFile)
-      }
+      if (indexFile) return slashRedirect(ctx) ?? sendFile(ctx, indexFile)
     }
 
     if (fallback !== false) {

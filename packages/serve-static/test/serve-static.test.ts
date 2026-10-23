@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
+import { connect } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Miia, NotFoundException } from '@miiajs/core'
@@ -230,6 +231,67 @@ describe('serve-static - index serving + redirects', () => {
     )
     expect(res.status).toBe(200)
     expect(await res.text()).toContain('<title>spa</title>')
+  })
+})
+
+/** A raw request with an invalid Host: Bun hands it to fetch with a relative `req.url`. */
+async function rawGet(port: number, path: string): Promise<{ status: number; location: string | null; body: string }> {
+  const raw = await new Promise<string>((resolve, reject) => {
+    const socket = connect(port, '127.0.0.1', () => {
+      socket.write(`GET ${path} HTTP/1.1\r\nHost: x/y\r\nConnection: close\r\n\r\n`)
+    })
+    let out = ''
+    socket.on('data', (chunk) => {
+      out += chunk
+    })
+    socket.on('end', () => resolve(out))
+    socket.on('error', reject)
+  })
+  const [head = '', body = ''] = raw.split('\r\n\r\n')
+  const location = /^location: (.*)$/im.exec(head)?.[1] ?? null
+  return { status: Number(head.split(' ')[1]), location, body }
+}
+
+describe('serve-static - a request url that is not a URL on its own (invalid Host)', () => {
+  it('Bun, relative url: serves, redirects and answers 404 as usual', async () => {
+    const rootApp = new Miia({ logger: false })
+    serveStatic(rootApp, '', tmpRoot)
+    await rootApp.init()
+    const server = Bun.serve({ port: 0, fetch: defaultApp.fetch })
+    const rootServer = Bun.serve({ port: 0, fetch: rootApp.fetch })
+    try {
+      const file = await rawGet(server.port!, '/static/hello.txt')
+      expect(file.status).toBe(200)
+      expect(file.body).toContain('hello world')
+
+      const missing = await rawGet(server.port!, '/static/nope.txt')
+      expect(missing.status).toBe(404)
+      expect(missing.body).toContain('"Cannot GET /static/nope.txt"')
+
+      expect(await rawGet(server.port!, '/static')).toMatchObject({ status: 301, location: '/static/' })
+      expect(await rawGet(server.port!, '/static/docs?v=1')).toMatchObject({
+        status: 301,
+        location: '/static/docs/?v=1',
+      })
+      expect((await rawGet(server.port!, '/static/docs/')).body).toContain('<title>docs</title>')
+      // Never a protocol-relative Location
+      expect(await rawGet(rootServer.port!, '//docs')).toMatchObject({ status: 301, location: '/docs/' })
+    } finally {
+      server.stop(true)
+      rootServer.stop(true)
+      await rootApp.destroy()
+    }
+  })
+
+  it('reads the path of an absolute url with a Host that makes no URL (node-server)', async () => {
+    const req = (url: string) => ({ url, method: 'GET', headers: new Headers() }) as Request
+    const file = await defaultApp.fetch(req('http://x:99999/static/hello.txt'))
+    expect(await file.text()).toBe('hello world')
+    const missing = await defaultApp.fetch(req('http://x:99999/static/nope.txt'))
+    expect((await missing.json()).message).toBe('Cannot GET /static/nope.txt')
+    const redirect = await defaultApp.fetch(req('http://x:99999/static/docs?v=1'))
+    expect(redirect.status).toBe(301)
+    expect(redirect.headers.get('location')).toBe('/static/docs/?v=1')
   })
 })
 

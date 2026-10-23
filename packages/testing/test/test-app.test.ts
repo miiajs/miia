@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Controller, createToken, Get, Post, Module, Injectable, UseGuard, inject, REQUEST_CONTEXT } from '@miiajs/core'
 import type { CanActivate, ConfiguredModule, RequestContext, Guard, Middleware } from '@miiajs/core'
-import { ForbiddenException } from '@miiajs/core'
+import { ForbiddenException, Logger } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 
 // ─── Test fixtures ───────────────────────────────────────────────
@@ -327,6 +327,51 @@ describe('TestApp', () => {
     it('should cleanup without errors', async () => {
       const app = await TestApp.create(AppModule).compile()
       await app.close()
+    })
+
+    it('hands the global logger back: logs from outside the test app are silenced only while it lives', async () => {
+      const lines: string[] = []
+      const previous = Logger.getLogger()
+      Logger.setLogger({
+        log: (message) => lines.push(message),
+        error() {},
+        warn() {},
+      })
+      try {
+        const app = await TestApp.create(AppModule).compile()
+        new Logger('Other').log('during')
+        await app.close()
+        new Logger('Other').log('after')
+        expect(lines).toEqual(['after'])
+      } finally {
+        Logger.setLogger(previous)
+      }
+    })
+
+    it('hands the global logger back when compile() throws', async () => {
+      @Injectable()
+      class Broken {
+        onInit() {
+          throw new Error('boom')
+        }
+      }
+      @Module({ providers: [Broken] })
+      class BrokenModule {}
+
+      const lines: string[] = []
+      const previous = Logger.getLogger()
+      Logger.setLogger({
+        log: (message) => lines.push(message),
+        error() {},
+        warn() {},
+      })
+      try {
+        await expect(TestApp.create(BrokenModule).compile()).rejects.toThrow('boom')
+        new Logger('Other').log('after')
+        expect(lines).toEqual(['after'])
+      } finally {
+        Logger.setLogger(previous)
+      }
     })
   })
 

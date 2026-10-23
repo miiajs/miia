@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { LoggerService } from '../src/index.js'
-import { Controller, createToken, inject, Injectable, Miia, Module, provider } from '../src/index.js'
+import { Controller, createToken, inject, Injectable, Logger, Miia, Module, provider } from '../src/index.js'
 
 function hooks(events: string[], name: string) {
   return {
@@ -197,14 +197,21 @@ describe('shutdown order', () => {
     @Injectable()
     class Service extends tracked(events, 'Service') {}
 
-    const app = new Miia({ logger }).provide(Service)
-    await app.init()
-    await Promise.all([app.destroy(), app.destroy()])
-    expect(events).toEqual(['Service.onShutdown', 'Service.onDestroy'])
-    expect(logged.filter((message) => message === 'Shutdown complete')).toHaveLength(1)
+    // destroy() hands the global logger back to the one it replaced: the same one, so the later call logs here too
+    const previous = Logger.getLogger()
+    Logger.setLogger(logger)
+    try {
+      const app = new Miia({ logger }).provide(Service)
+      await app.init()
+      await Promise.all([app.destroy(), app.destroy()])
+      expect(events).toEqual(['Service.onShutdown', 'Service.onDestroy'])
+      expect(logged.filter((message) => message === 'Shutdown complete')).toHaveLength(1)
 
-    await app.destroy()
-    expect(logged.filter((message) => message === 'Shutdown complete')).toHaveLength(2)
+      await app.destroy()
+      expect(logged.filter((message) => message === 'Shutdown complete')).toHaveLength(2)
+    } finally {
+      Logger.setLogger(previous)
+    }
   })
 })
 
