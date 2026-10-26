@@ -12,31 +12,29 @@ const { data: versionData } = await useFetch<{ version: string }>(
 )
 const version = computed(() => versionData.value?.version ?? '')
 
-const columns = [
+const columns: { label: string, children: { label: string, to: string, target?: string }[] }[] = [
   {
     label: 'Documentation',
     children: [
       { label: 'Getting Started', to: '/docs/getting-started' },
       { label: 'Core Concepts',   to: '/docs/core-concepts' },
       { label: 'Benchmarks',      to: '/benchmarks' },
-      { label: 'API Reference',   to: 'https://github.com/miiajs/miia', target: '_blank' }
+      { label: 'Roadmap',         to: '/docs/roadmap' }
     ]
   },
   {
     label: 'Community',
     children: [
       { label: 'GitHub',      to: 'https://github.com/miiajs/miia',               target: '_blank' },
-      { label: 'Issues',      to: 'https://github.com/miiajs/miia/issues',        target: '_blank' },
-      { label: 'Discussions', to: 'https://github.com/miiajs/miia/discussions',   target: '_blank' }
+      { label: 'Issues',      to: 'https://github.com/miiajs/miia/issues',        target: '_blank' }
     ]
   },
   {
     label: 'Resources',
     children: [
       { label: 'MIT License', to: 'https://github.com/miiajs/miia/blob/main/LICENSE', target: '_blank' }
-      // TODO: re-enable once we publish the first release and have a real roadmap page
-      // { label: 'Changelog', to: 'https://github.com/miiajs/miia/releases', target: '_blank' },
-      // { label: 'Roadmap',   to: 'https://github.com/miiajs/miia/issues',   target: '_blank' }
+      // TODO: re-enable once GitHub Releases are published
+      // { label: 'Changelog', to: 'https://github.com/miiajs/miia/releases', target: '_blank' }
     ]
   }
 ]
@@ -130,7 +128,7 @@ const columns = [
         </p>
         <NuxtLink
           v-if="version"
-          to="https://github.com/miiajs/miia/releases"
+          to="https://github.com/miiajs/miia/tags"
           target="_blank"
           class="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--ui-border)] px-2.5 py-1 text-xs text-dimmed font-mono hover:text-[color:var(--color-plasma-500)] hover:border-[color:color-mix(in_oklab,var(--color-plasma-500)_40%,transparent)] transition"
         >

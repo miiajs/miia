@@ -3,8 +3,9 @@ import type { HttpResponse, us_listen_socket } from 'uWebSockets.js'
 /**
  * @miiajs/uws-server - uWebSockets.js HTTP server for Web API frameworks.
  *
- * Requires `uWebSockets.js` to be installed separately:
- *   bun add uWebSockets.js@uNetworking/uWebSockets.js#v20.69.0
+ * `uWebSockets.js` comes as a dependency of this package, from its GitHub
+ * tag (the official build is not published on npm), so nothing needs to be
+ * installed next to it.
  *
  * Usage:
  *   import { serve } from '@miiajs/uws-server';

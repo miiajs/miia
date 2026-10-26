@@ -47,6 +47,8 @@ The tests apply the migrations to the database they are given and are skipped wi
 | `src/user/user.table.ts` | Drizzle table definition |
 | `src/user/user.module.ts` | Feature module - exposes controller and service; injects `db` without importing `DrizzleModule`, which the root configures with `{ global: true }` |
 | `src/user/user.service.ts` | Service - uses `inject(db)` for DB access |
-| `src/user/user.controller.ts` | Controller - REST endpoints for `/users` |
+| `src/user/user.controller.ts` | Controller - REST endpoints for `/users`, request schemas in the route decorators |
+| `src/user/schemas/` | Zod schemas of the request body and the `:id` param (a positive 4-byte integer, the range of a Postgres serial) |
+| `src/user/user.test.ts` | `TestApp` tests against `DATABASE_TEST_URL` |
 | `drizzle.config.ts` | drizzle-kit config for migration generation |
 | `drizzle/` | Committed SQL migrations and snapshots |

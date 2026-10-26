@@ -28,7 +28,7 @@ sections:
         description: '@Controller, @Get, @Injectable, @Module - the modern decorator standard. No reflect-metadata, no experimental flags, no setup.'
         icon: i-lucide-at-sign
       - title: Web Standards First
-        description: Request in, Response out. Your handlers receive standard web objects - no proprietary context, no framework lock-in.
+        description: 'Request in, Response out. ctx.req is the standard Request, a handler can return a standard Response, and no Express or Fastify sits underneath.'
         icon: i-lucide-globe
       - title: Koa-Style Middleware
         description: A single middleware concept replaces interceptors, pipes, and filters. Easier to learn, easier to compose.
@@ -40,13 +40,13 @@ sections:
     id: runtimes
     features:
       - title: True Portability
-        description: 'Bun, Deno, Node.js, Cloudflare Workers, AWS Lambda - same code, different entry point.'
+        description: 'Bun, Deno, Node.js, Cloudflare Workers - same code, different entry point.'
         icon: i-lucide-rocket
       - title: Modern JavaScript Only
         description: Pure ESM, latest ECMAScript target. Clean imports, fast startup, works with modern tooling out of the box.
         icon: i-lucide-package
       - title: Serverless Ready
-        description: 'Use app.fetch as your handler - Cloudflare Workers, AWS Lambda, or any edge platform. Lazy init, zero overhead.'
+        description: 'Use app.fetch as your handler on Cloudflare Workers or any platform that hands you a Request. Init once on cold start, then every request goes straight to the router.'
         icon: i-lucide-cloud
 features:
   title: Batteries included, bloat excluded
@@ -56,7 +56,7 @@ features:
       description: Per-app container with inject() - no global singletons, no hidden magic. Singleton, transient, and request scopes built in.
       icon: i-lucide-boxes
     - title: Auth & Guards
-      description: JWT and local auth providers with composable guards. Protect routes at any level - skip specific guards when needed.
+      description: Auth primitives - AuthProvider, AuthGuard, token extractors - plus recipes for JWT, local and OAuth2 login. Protect routes at any level, skip specific guards when needed.
       icon: i-lucide-lock-keyhole
     - title: Schema Validation
       description: Validate request body, query, and params with any ZodLike schema. Type-safe from request to handler, errors handled automatically.

@@ -7,6 +7,8 @@
     "dev:deno": "miia dev --runtime deno",
     "dev:node": "SERVER=node miia dev --runtime node",
     "dev:uws": "SERVER=uws miia dev --runtime node",
+    "build": "miia build --runtime bun",
+    "start": "miia start --runtime bun",
     "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {

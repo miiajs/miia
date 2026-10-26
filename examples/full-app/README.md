@@ -6,11 +6,14 @@ End-to-end [MiiaJS](../../README.md) example: Drizzle + Auth/JWT + Roles + Swagg
 
 - **Auth** (`src/auth/`) - JWT + Local auth providers, register / login / me endpoints, password hashing with `@node-rs/argon2`
 - **Roles guard** (`src/auth/guards/roles.guard.ts`) - custom method decorator `@Roles('admin')` backed by `CanActivate`
-- **Users CRUD** (`src/users/`) - paginated list, get by id, update (with policy), admin-only delete
-- **Drizzle + PostgreSQL** - schema at `src/users/user.table.ts`, connection via `DrizzleModule.configure`
+- **Users CRUD** (`src/users/`) - paginated list, get by id, update (with policy), avatar upload through `ctx.req.formData()`, admin-only delete
+- **Posts CRUD** (`src/posts/`) - posts owned by their author, update and delete by the author or an admin (`posts.policy.ts`)
+- **Uploads** (`src/uploads/`) - `@miiajs/multipart`: files streamed to `public/uploads/` through `ctx.parts`, and a buffered form validated by a `body` schema, both with `maxFileSize` / `maxFiles` / `allowedTypes`
+- **Rate limiting** - `RateLimitGuard` app-wide plus a perimeter `rateLimit()` middleware in `main.ts`; `src/limits/` shows per-route and per-controller `@RateLimit` policies, `@SkipRateLimit`, ban with backoff, custom keys, header modes and shared buckets
+- **Drizzle + PostgreSQL** - tables in `src/users/user.table.ts` and `src/posts/post.table.ts` (collected in `src/db.schema.ts`), migrations in `drizzle/`, connection via `DrizzleModule.configure`
 - **Swagger** - OpenAPI 3.1 spec generated from decorators, UI at `/api/docs/`
 - **Global prefix** - the `/api` prefix comes from `new Miia({ globalPrefix: '/api' })` in `main.ts`, not from a module `prefix`, which is why the generated spec documents clean paths (`/users`, not `/api/users`). The landing redirect, the static mount and the docs endpoints opt out via `skipGlobalPrefix`, so they keep serving `/`, `/static/*` and `/api/docs/`
-- **Middleware** (`src/common/middleware/`) - `requestLogger`, `responseTime`, plus `cors()` from core
+- **Middleware** (`src/common/middleware/`) - `requestId`, `requestLogger`, `responseTime`, plus `cors()` from core
 - **Validation** - Zod schemas in the route decorator: `@Post('/', { body })`, `@Get({ query })`, `@Get(':id', { params })`
 - **Lifecycle hook** - `UsersService.onReady()` seeds a default admin in dev mode
 - **Static files** - `public/index.html` landing served via `@miiajs/serve-static`
@@ -34,8 +37,8 @@ bun install
 cd examples/full-app
 cp .env.example .env
 
-# 4. Push the Drizzle schema
-bun x drizzle-kit push
+# 4. Apply the migrations in drizzle/
+bun run db:migrate
 
 # 5. Run the dev server
 bun run dev
@@ -89,7 +92,16 @@ The seed is a no-op when `NODE_ENV=production`. The two variables are not in the
 | `GET`    | `/api/users`          | Paginated user list                 | JWT   |
 | `GET`    | `/api/users/:id`      | Single user                         | JWT   |
 | `PATCH`  | `/api/users/:id`      | Update profile (self or admin)      | JWT   |
+| `POST`   | `/api/users/:id/avatar` | Upload an avatar (multipart, self or admin) | JWT |
 | `DELETE` | `/api/users/:id`      | Delete user                         | admin |
+| `GET`    | `/api/posts`          | Paginated post list                 | JWT   |
+| `GET`    | `/api/posts/:id`      | Single post                         | JWT   |
+| `POST`   | `/api/posts`          | Create a post                       | JWT   |
+| `PATCH`  | `/api/posts/:id`      | Update a post (author or admin)     | JWT   |
+| `DELETE` | `/api/posts/:id`      | Delete a post (author or admin)     | JWT   |
+| `POST`   | `/api/uploads/stream` | Stream files to disk (`ctx.parts`)  | JWT   |
+| `POST`   | `/api/uploads/form`   | Buffered form with a `body` schema  | JWT   |
+| `GET`    | `/api/limits/*`       | Rate-limit policies, one per route (see Swagger) | - |
 | `GET`    | `/api/cookies`        | Read all incoming cookies           | -     |
 | `GET`    | `/api/cookies/prefs`  | Read the theme cookie (with default) | -    |
 | `PUT`    | `/api/cookies/prefs`  | Persist a 30-day theme cookie       | -     |
@@ -105,6 +117,8 @@ src/
 ├── app.module.ts           - root module, wires ConfigModule/JwtModule/DrizzleModule/RateLimitModule ({ global: true }) and SwaggerModule
 ├── main.ts                 - bootstrap, global prefix, global middleware, static files, redirect
 ├── env.schema.ts           - Zod env contract
+├── db.schema.ts            - every table, for DrizzleModule and drizzle-kit
+├── db.ts                   - the typed drizzleDb() token
 ├── auth/
 │   ├── auth.module.ts      - global, exports JwtAuth for AuthGuard(JwtAuth) everywhere, imports UsersModule
 │   ├── auth.controller.ts  - register / login / me
@@ -118,10 +132,14 @@ src/
 │   ├── users.controller.ts - CRUD with Swagger decorators
 │   ├── users.service.ts    - Drizzle queries + onReady() admin seed
 │   ├── users.policy.ts     - authorization rules for update
-│   ├── user.table.ts     - pgTable definition
+│   ├── user.table.ts       - pgTable definition
 │   └── schemas/            - Zod DTOs
+├── posts/                  - posts CRUD, author-or-admin policy, Zod DTOs
+├── uploads/                - multipart uploads, stored under public/uploads/
+├── limits/                 - @RateLimit / @SkipRateLimit showcase controllers
+├── cookies/                - cookie jar and ResponseBuilder cookie examples
 ├── common/
-│   └── middleware/         - requestLogger, responseTime
+│   └── middleware/         - requestId, requestLogger, responseTime
 └── types/
     └── core.d.ts           - module augmentation for ctx.user / ctx.requestId
 ```

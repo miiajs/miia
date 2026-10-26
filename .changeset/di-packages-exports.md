@@ -9,7 +9,7 @@
 '@miiajs/messaging': minor
 ---
 
-`configure()` takes `{ global: true }` in its second argument (`{ name?, global? }` for drizzle, papr, mongoose and messaging) and declares its `exports` - the visibility rules that use them come later in this release:
+`configure()` takes `{ global: true }` in its second argument (`{ name?, global? }` for drizzle, papr, mongoose and messaging) and declares its `exports`, which decide what other modules see of it:
 
 - `ConfigModule`, `JwtModule` and `SwaggerModule` export `ConfigService`, `JwtService` and `SwaggerService`; `RateLimitModule` exports the options its guards read
 - `DrizzleModule`, `PaprModule` and `MongooseModule` export the db / connection token, papr and mongoose also the internals their `register()` models resolve; `MessagingModule` exports its bus

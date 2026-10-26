@@ -1,7 +1,7 @@
 ---
 '@miiajs/core': minor
 '@miiajs/swagger': patch
-'@miiajs/messaging': patch
+'@miiajs/messaging': minor
 ---
 
 `DiscoveryService` returns only what carries a metadata key: new `getClassesWithMeta(key)` (`{ instance, ctor, metadata }` per instance whose class has metadata under `key`, type `DiscoveredClass`) next to `getMethodsWithMeta(key)`. Metadata is read from the class of each instance, so a handler class behind a factory provider is discovered; an instance under two tokens is listed once, and a lazy proxy is skipped. Swagger collects controllers through `getClassesWithMeta(RESOLVED_PREFIX)`. Breaking:

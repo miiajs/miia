@@ -28,6 +28,14 @@ curl -X POST http://localhost:3000/users \
 curl http://localhost:3000/users
 ```
 
+## Tests
+
+```sh
+bun test
+```
+
+`src/user/user.test.ts` needs no database: `TestApp` replaces the `User` model with a stub that finds nothing, and the tests check the 422 for an id that is not an ObjectId and the 404 for one that matches no user.
+
 ## Project structure
 
 | File | Description |
@@ -36,4 +44,6 @@ curl http://localhost:3000/users
 | `src/user/user.model.ts` | Papr schema and model definition via `defineModel()` |
 | `src/user/user.module.ts` | Feature module - registers model via `PaprModule.register()` |
 | `src/user/user.service.ts` | Service - uses `inject(User)` and `inject(paprDb())` for typed model and raw db access |
-| `src/user/user.controller.ts` | Controller - REST endpoints for `/users` |
+| `src/user/user.controller.ts` | Controller - REST endpoints for `/users`, request schemas in the route decorators |
+| `src/user/schemas/` | Zod schemas of the request body and the `:id` param (a 24-character hex ObjectId) |
+| `src/user/user.test.ts` | `TestApp` tests without a database |

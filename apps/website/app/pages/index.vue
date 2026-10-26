@@ -37,20 +37,19 @@ await app.listen(3000)
 // Node.js / uWebSockets.js
 await app.listen(3000, serve)
 
-// Cloudflare Workers
+// Cloudflare Workers and other fetch platforms
 await app.init()
-export default app`
+export default { fetch: app.fetch }`
 
 const runtimes = [
   { name: 'Bun',        icon: 'i-simple-icons-bun' },
   { name: 'Deno',       icon: 'i-simple-icons-deno' },
   { name: 'Node.js',    icon: 'i-simple-icons-nodedotjs' },
   { name: 'Cloudflare', icon: 'i-simple-icons-cloudflare' },
-  { name: 'AWS Lambda', icon: 'i-simple-icons-awslambda' },
   { name: 'Vercel',     icon: 'i-simple-icons-vercel' }
 ]
 
-const installCommand = 'bun add @miiajs/core'
+const installCommand = 'bun create miia my-app'
 const copied = ref(false)
 let copyResetTimer: ReturnType<typeof setTimeout> | null = null
 
@@ -147,7 +146,7 @@ async function copyInstall() {
             @click="copyInstall"
           >
             <UIcon name="i-lucide-terminal" class="size-4 text-[color:var(--color-plasma-500)]" />
-            <span><span class="opacity-50">$</span> bun add <span class="text-default">@miiajs/core</span></span>
+            <span><span class="opacity-50">$</span> bun create <span class="text-default">miia my-app</span></span>
             <UIcon
               :name="copied ? 'i-lucide-check' : 'i-lucide-copy'"
               :class="[

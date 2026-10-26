@@ -8,9 +8,9 @@ Demonstrates:
   - default bus → `inMemoryTransport` (fast, in-process, ephemeral)
   - `'redis'` bus → `redisStreamsTransport` (durable, cross-process)
 - `@On(topic)` vs `@On(topic, { bus: 'redis' })` routing
-- **Consumer groups**: `order.placed` is fan-out to two groups (`analytics`, `inventory`) - each group processes independently, identical `group` name across replicas would load-balance
+- **Consumer groups**: `order.placed` fans out to two groups - the explicit `analytics` and the group the bus derives for `OrderInventoryHandler` (`messaging-app:order.placed__OrderInventoryHandler_reserveStock`, prefixed by `appName`) - each group processes independently, and replicas sharing a group name load-balance
 - **`@Idempotent` deduplication** with both `MemoryIdempotencyStore` and `RedisIdempotencyStore`
-- **Retry with exponential backoff** (`maxAttempts: 2, backoffMs: 500, multiplier: 2`)
+- **Retry with exponential backoff** (`maxAttempts: 2, backoffMs: 500, backoffMultiplier: 2`)
 - **Dead-letter queue** - `payment.charge` always throws → exhausts retries → re-published to `payment.charge.dlq` with `meta.lastError` populated
 - DLQ consumer that records failures
 - Per-handler `concurrency` (`order.placed/analytics` uses `concurrency: 4`)
@@ -29,7 +29,7 @@ HTTP layer (Miia)
                                 ▼                                           ▼
                        memory bus (default)                          redis bus ('redis')
                        ├─ notification.send                          ├─ order.placed (group=analytics, concurrency=4)
-                       │   └─ NotificationHandler                    ├─ order.placed (group=inventory, @Idempotent on Redis)
+                       │   └─ NotificationHandler                    ├─ order.placed (auto group, @Idempotent on Redis)
                        │       (@Idempotent on Memory)               ├─ payment.charge (group=payments, ALWAYS fails)
                        └─ MemoryIdempotencyStore                     │   └─ FlakyPaymentHandler ⤵
                                                                      ├─ payment.charge.dlq (group=payments-dlq)
@@ -105,7 +105,7 @@ curl -s -X POST http://localhost:3000/orders/charge \
   -d '{"orderId":"order-42","amount":50}' | jq
 ```
 
-`FlakyPaymentHandler` throws on every attempt. Configured `maxAttempts: 2, backoffMs: 500, multiplier: 2`, so:
+`FlakyPaymentHandler` throws on every attempt. Configured `maxAttempts: 2, backoffMs: 500, backoffMultiplier: 2`, so:
 
 ```
 attempt #1  → throws → stays pending in the group's PEL, re-parked for 500ms
@@ -135,7 +135,7 @@ docker exec -it messaging-app-redis redis-cli
 4) "messaging-app:idem:inventory:..."
 
 > XINFO STREAM order.placed
-> XINFO GROUPS order.placed                 # see analytics + inventory
+> XINFO GROUPS order.placed                 # analytics + the auto-derived inventory group
 > XLEN payment.charge.dlq                   # count of dead-lettered payments
 
 # Retries live in the group's PEL, not in a separate key. Extended-form XPENDING
@@ -158,13 +158,15 @@ src/
     app.service.ts
   orders/
     orders.module.ts
-    orders.controller.ts               - HTTP endpoints
+    orders.controller.ts               - HTTP endpoints, request body schemas
     orders.service.ts                  - publishes to both buses
-    events.ts                          - payload types + topic constants
+    orders.constants.ts                - topic constants (TOPIC, DLQ_TOPIC)
+    orders.types.ts                    - payload types
+    schemas/                           - Zod schemas of the request bodies
     handlers/
       notification.handler.ts          - default bus, @Idempotent, MemoryIdempotencyStore
       order-analytics.handler.ts       - redis bus, group='analytics', concurrency=4
-      order-inventory.handler.ts       - redis bus, group='inventory', @Idempotent (Redis store)
+      order-inventory.handler.ts       - redis bus, auto-derived group, @Idempotent (Redis store)
       flaky-payment.handler.ts         - redis bus, throws every time → drives retry/DLQ
       payment-dlq.handler.ts           - redis bus, listens on payment.charge.dlq
 ```

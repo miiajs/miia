@@ -2,7 +2,7 @@
 '@miiajs/core': minor
 ---
 
-New `forwardRef(() => X)` (type `ForwardRef`) for module files that import each other: written on both sides of the cycle, in `imports` or `exports`, it defers the reference until the graph loads. New module options `exports` and `global` on `@Module()` and on `ConfiguredModule` - the loader records them and checks `exports`, the visibility rules that use them come later in this release. Breaking:
+New `forwardRef(() => X)` (type `ForwardRef`) for module files that import each other: written on both sides of the cycle, in `imports` or `exports`, it defers the reference until the graph loads. New module options `exports` and `global` on `@Module()` and on `ConfiguredModule` - the loader records them and checks `exports`, and module boundaries are checked against them. Breaking:
 
 - `exports` may list only the module's own providers and modules it imports: `[Miia] UsersModule exports MailService, which it neither provides nor imports`
 - one `configure()` result imported by two modules (or by a module and `register()`) throws `[Miia] The same configured module X is imported by A and B` instead of being shared - import it once and re-export it, or make it global

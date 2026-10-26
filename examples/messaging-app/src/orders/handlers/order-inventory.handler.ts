@@ -13,7 +13,7 @@ export class OrderInventoryHandler {
   @On(TOPIC.orderPlaced, { bus: 'redis' })
   @Idempotent({
     ttl: 24 * 60 * 60 * 1000, // 24 hours
-    key: (payload) => `inventory:${(payload as OrderPlaced).orderId}`,
+    key: (p: OrderPlaced) => `inventory:${p.orderId}`,
   })
   async reserveStock(payload: OrderPlaced): Promise<void> {
     this.logger.log(

@@ -4,34 +4,59 @@ Documentation site for MiiaJS. This CLAUDE.md describes how the site is wired so
 
 ## Stack
 
-- **Nuxt 4.4** (ESM, `srcDir: app/`)
-- **@nuxt/content 3.12** - file-based collections under `content/`
-- **@nuxt/ui 4.6** - UI kit, provides `UPage`, `UPageHeader`, `UContentNavigation`, `UBadge`, Prose components
+- **Nuxt 4** (ESM, `srcDir: app/`)
+- **@nuxt/content 3** - file-based collections under `content/`
+- **@nuxt/ui 4** - UI kit, provides `UPage`, `UPageHeader`, `UContentNavigation`, `UBadge`, Prose components
 - **@nuxt/image**, **@nuxtjs/seo**, **Tailwind 4**
 - No third-party docs theme (no docus, no shadcn-docs-nuxt) - own layout built on top of `@nuxt/ui` primitives
+
+Exact versions are in `package.json`.
+
+## Scripts
+
+The site is a workspace of the monorepo (`apps/*`); install from the repository root with `bun install`.
+
+| Command | What it does |
+| --- | --- |
+| `bun run dev` | Dev server on `http://localhost:3000` (`bun run website:dev` from the root) |
+| `bun run build` | Production build (`bun run website:build` from the root) |
+| `bun run preview` | Serve the production build locally |
+| `bun run typecheck` | `nuxt typecheck` (vue-tsc) |
+| `bun run lint` | ESLint via `@nuxt/eslint` |
 
 ## Directory layout
 
 ```
 apps/website/
 ├── content/
-│   └── 1.docs/                     # only collection that renders under /docs/*
+│   ├── 0.index.yml                 # `index` collection: landing page copy (sections, features, cta, seo)
+│   └── 1.docs/                     # `docs` collection, renders under /docs/*
 │       ├── 1.getting-started/
 │       ├── 2.core-concepts/
-│       └── 3.packages/
+│       ├── 3.packages/
+│       └── 4.roadmap/
 ├── content.config.ts               # Nuxt Content collection schemas (Zod)
-├── nuxt.config.ts
+├── nuxt.config.ts                  # modules, site meta, prerender, redirects
+├── public/                         # favicons, og-image
 └── app/
     ├── app.vue                     # root, builds navigation + search data, provides navigation
     ├── app.config.ts
+    ├── error.vue
+    ├── assets/css/main.css         # Tailwind 4 theme, plasma/violet/cyan accents
     ├── layouts/
+    │   ├── default.vue             # landing and benchmarks shell
     │   └── docs.vue                # doc shell: header, sidebar nav, footer
     ├── pages/
+    │   ├── index.vue               # landing page (reads content/0.index.yml)
+    │   ├── benchmarks.vue          # benchmarks page
     │   └── docs/[...slug].vue      # renders one doc page via <ContentRenderer>
-    ├── components/                 # AppHeader, AppFooter, AppLogo, etc.
+    ├── data/benchmarks/            # benchmark datasets per machine (m1.ts, server.ts)
+    ├── components/                 # AppHeader, AppFooter, AppLogo, CodeCard, HeroBackground, StarsBg
     └── utils/
         └── status.ts               # statusColor() helper (auto-imported)
 ```
+
+The numbers on the landing page (hero badge, stats strip) and the benchmarks page are measured by hand in the [`miiajs/benchmarks`](https://github.com/miiajs/benchmarks) repo; do not edit them without a new run.
 
 `app/utils/*` and `app/components/*` are auto-imported by Nuxt 4 - no explicit imports needed in `.vue` files.
 

@@ -4,10 +4,10 @@
  * ## Architecture
  *
  * Three optimizations inspired by @hono/node-server that eliminate Web API
- * overhead on Node.js (~57k req/sec vs ~36k with naive new Request/Response):
+ * overhead on Node.js:
  *
- * 1. **Lazy Request Proxy** - instead of `new Request()` (~1.27µs), creates a
- *    plain object with getters that read from IncomingMessage directly.
+ * 1. **Lazy Request Proxy** - instead of `new Request()`, creates a plain
+ *    object with getters that read from IncomingMessage directly.
  *    `req.url` and `req.method` are simple property reads. Headers, body,
  *    signal, and the real Request are created lazily on first access.
  *
@@ -18,37 +18,47 @@
  *    are accessed.
  *
  * 3. **Sync Listener** - no async/await in the request handler. When
- *    `handle()` returns a Response synchronously (common for GET with no
- *    middleware), it writes directly to ServerResponse via the CACHE fast
- *    path: `writeHead() + end(body)` - zero Promise allocation.
+ *    `handle()` returns a Response synchronously (a route without middleware,
+ *    guards or schemas and a synchronous handler), it writes directly to
+ *    ServerResponse via the CACHE fast path: `writeHead() + end(body)` - zero
+ *    Promise allocation.
  *
  * ## Request Body Handling
  *
- * Body methods (`json()`, `text()`, etc.) delegate to a lazily-created
- * GlobalRequest backed by `Readable.toWeb(incoming)`. No custom buffering -
- * body reading uses the platform's standard Request implementation.
- * Body can only be consumed once (Web API spec).
+ * - **Buffered** - a body with Content-Length <= `bufferThreshold` (100KB) is
+ *   read into a `Promise<Uint8Array>` and decoded straight into `json()`,
+ *   `text()`, `arrayBuffer()` and `bytes()`, without a real Request.
+ * - **Streamed** - a larger or chunked body goes through a lazily created
+ *   GlobalRequest backed by `Readable.toWeb(incoming)`; a chunked one is capped
+ *   in-stream at `_bodyLimit` (the adapter ceiling, narrowed by @miiajs/core to
+ *   the route's own limit before the body is first read).
+ * - **Early 413** - a declared Content-Length over `maxBodySize` is answered
+ *   before the handler runs, and the body is drained.
+ * - Body can only be consumed once (Web API spec).
  *
  * ## Abort & Cleanup
  *
  * - **AbortController** - created lazily on `req.signal` access. Close
  *   listener is registered at that point to abort on client disconnect.
- * - **Body drain** - for POST/PUT/PATCH/DELETE, close listener is registered
- *   eagerly to drain unconsumed body (500ms timeout, 64MB limit).
+ * - **Body drain** - for a request with a body, the close listener is
+ *   registered eagerly to drain an unconsumed body (500ms timeout, 64MB
+ *   limit); a response written while the body is still unread gets
+ *   `Connection: close`.
  * - **GET/HEAD** - no close listener overhead (lazy via `_ensureCloseListener`).
  *
  * ## Global Override
  *
- * `listen()` replaces `globalThis.Response` with LightResponse.
- * `close()` restores the original. LightResponse prototype chain is set via
- * `Object.setPrototypeOf` so `instanceof Response` checks pass.
+ * `serve()` in optimized mode replaces `globalThis.Response` with
+ * LightResponse; `close()` restores the original. LightResponse prototype
+ * chain is set via `Object.setPrototypeOf` so `instanceof Response` checks pass.
  *
  * ## Native Mode
  *
  * `serve({ mode: 'native' })` disables all optimizations - uses real
  * `new Request()` / `new Response()`, no global overrides, no proxies.
- * Slower (~36k req/sec) but fully spec-compliant and safe for environments
- * with multiple frameworks or strict `instanceof` checks.
+ * Slower but fully spec-compliant and safe for environments with multiple
+ * frameworks or strict `instanceof` checks. A request `new Request()` refuses
+ * is answered by the adapter: `TRACE` with 501, anything else with 400.
  *
  * ## Known Limitations (optimized mode)
  *
@@ -57,7 +67,6 @@
  * - `formData()` creates a real GlobalRequest (Content-Type boundary parsing).
  * - Multiple adapter instances: second `close()` restores GlobalResponse,
  *   which may break a still-running first adapter.
- * - Body can only be consumed once (matches Web API spec).
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'

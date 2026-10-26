@@ -10,7 +10,7 @@ export class NotificationHandler {
   @On(TOPIC.notificationSend)
   @Idempotent({
     ttl: 5 * 60 * 1000, // 5 minutes
-    key: (payload) => `notification:${(payload as NotificationSend).orderId}`,
+    key: (p: NotificationSend) => `notification:${p.orderId}`,
   })
   async send(payload: NotificationSend): Promise<void> {
     this.logger.log(`[memory] sending '${payload.template}' to ${payload.to} (order ${payload.orderId})`)

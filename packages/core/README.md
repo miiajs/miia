@@ -8,16 +8,14 @@ Build structured, type-safe APIs with decorators, dependency injection, and midd
 
 - **TC39 Native Decorators** - no `reflect-metadata`, no experimental TypeScript flags
 - **Web Standards** - built on the `Request`/`Response` API, no proprietary abstractions
-- **Multi-Runtime** - runs on Bun, Deno, Node.js, Cloudflare Workers, AWS Lambda
+- **Multi-Runtime** - runs on Bun, Deno, Node.js and Cloudflare Workers; anywhere else through `app.fetch`
 - **Koa-style Middleware** - clean onion model replaces interceptors, pipes, and filters
 - **Module boundaries over one container** - per-app container with `inject()`, `imports` / `exports` / `global` checked at startup
 - **ESM-only** - ES2025 target, `nodenext` module resolution
 
 ## Performance
 
-Up to **9% faster** than Hono | Up to **33% faster** than NestJS+Fastify \*
-
-> \* Realistic API benchmarks on Bun. Results vary by runtime. [See full benchmarks →](https://miiajs.com/benchmarks)
+Benchmarks against Hono, Elysia, Fastify and NestJS on Bun, Node.js and Deno: [miiajs.com/benchmarks](https://miiajs.com/benchmarks).
 
 ## Ecosystem
 
