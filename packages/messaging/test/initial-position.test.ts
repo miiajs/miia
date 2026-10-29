@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { Injectable, Module } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
+import { defineEvent } from '../src/contract.js'
 import { On } from '../src/decorators.js'
 import { MessageBus } from '../src/message-bus.js'
 import { inMemoryTransport } from '../src/in-memory-transport.js'
@@ -8,6 +9,13 @@ import { MessagingModule } from '../src/messaging.module.js'
 import { idempotencyStoreToken, messageBus, transportToken } from '../src/tokens.js'
 import type { InitialPositionKind, MessageTransport } from '../src/types.js'
 import { stubTransport, StubTransport } from './fixtures/stub-transport.js'
+
+const Topic = defineEvent('topic')
+const CacheInvalidate = defineEvent('cache.invalidate')
+const EventA = defineEvent('a')
+const EventB = defineEvent('b')
+const EventC = defineEvent('c')
+const Jobs = defineEvent('jobs')
 
 const ALL_POSITIONS: readonly InitialPositionKind[] = ['latest', 'earliest', 'since']
 
@@ -41,7 +49,7 @@ describe('Initial position', () => {
 
       @Injectable()
       class H {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
 
@@ -62,12 +70,12 @@ describe('Initial position', () => {
 
       @Injectable()
       class Inherits {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
       @Injectable()
       class Overrides {
-        @On('topic', { initialPosition: 'earliest' })
+        @On(Topic, { initialPosition: 'earliest' })
         async run() {}
       }
 
@@ -91,7 +99,7 @@ describe('Initial position', () => {
 
       @Injectable()
       class Cache {
-        @On('cache.invalidate', { broadcast: true })
+        @On(CacheInvalidate, { broadcast: true })
         async run() {}
       }
 
@@ -112,7 +120,7 @@ describe('Initial position', () => {
 
       @Injectable()
       class Cache {
-        @On('cache.invalidate', { broadcast: true, initialPosition: 'latest' })
+        @On(CacheInvalidate, { broadcast: true, initialPosition: 'latest' })
         async run() {}
       }
 
@@ -132,7 +140,7 @@ describe('Initial position', () => {
 
       @Injectable()
       class Cache {
-        @On('cache.invalidate', { broadcast: true, initialPosition: 'earliest' })
+        @On(CacheInvalidate, { broadcast: true, initialPosition: 'earliest' })
         async run() {}
       }
 
@@ -152,7 +160,7 @@ describe('Initial position', () => {
 
       @Injectable()
       class Cache {
-        @On('cache.invalidate', { broadcast: true, initialPosition: { since: 60_000 } })
+        @On(CacheInvalidate, { broadcast: true, initialPosition: { since: 60_000 } })
         async run() {}
       }
 
@@ -174,7 +182,7 @@ describe('Initial position', () => {
 
       @Injectable()
       class H {
-        @On('topic', { initialPosition: 'earliest' })
+        @On(Topic, { initialPosition: 'earliest' })
         async run() {}
       }
 
@@ -194,12 +202,12 @@ describe('Initial position', () => {
 
       @Injectable()
       class Explicit {
-        @On('topic', { initialPosition: 'latest' })
+        @On(Topic, { initialPosition: 'latest' })
         async run() {}
       }
       @Injectable()
       class Implicit {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
 
@@ -223,7 +231,7 @@ describe('Initial position', () => {
 
       @Injectable()
       class H {
-        @On('topic', { initialPosition: { since: 1000 } })
+        @On(Topic, { initialPosition: { since: 1000 } })
         async run() {}
       }
 
@@ -242,7 +250,7 @@ describe('Initial position', () => {
 
       @Injectable()
       class H {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
 
@@ -259,13 +267,13 @@ describe('Initial position', () => {
     it('InMemoryTransport accepts every position', async () => {
       @Injectable()
       class H {
-        @On('a', { initialPosition: 'latest' })
+        @On(EventA, { initialPosition: 'latest' })
         async latest() {}
 
-        @On('b', { initialPosition: 'earliest' })
+        @On(EventB, { initialPosition: 'earliest' })
         async earliest() {}
 
-        @On('c', { initialPosition: { since: 60_000 } })
+        @On(EventC, { initialPosition: { since: 60_000 } })
         async since() {}
       }
 
@@ -287,7 +295,7 @@ describe('Initial position', () => {
 
         @Injectable()
         class H {
-          @On('topic', { initialPosition: { since } })
+          @On(Topic, { initialPosition: { since } })
           async run() {}
         }
 
@@ -308,7 +316,7 @@ describe('Initial position', () => {
 
       @Injectable()
       class Cache {
-        @On('cache.invalidate', { broadcast: true })
+        @On(CacheInvalidate, { broadcast: true })
         async run() {}
       }
 
@@ -327,12 +335,12 @@ describe('Initial position', () => {
 
       @Injectable()
       class A {
-        @On('jobs', { group: 'pool' })
+        @On(Jobs, { group: 'pool' })
         async run() {}
       }
       @Injectable()
       class B {
-        @On('jobs', { group: 'pool', initialPosition: { since: 5000 } })
+        @On(Jobs, { group: 'pool', initialPosition: { since: 5000 } })
         async run() {}
       }
 
@@ -352,12 +360,12 @@ describe('Initial position', () => {
 
       @Injectable()
       class A {
-        @On('jobs', { group: 'pool', initialPosition: { since: 5000 } })
+        @On(Jobs, { group: 'pool', initialPosition: { since: 5000 } })
         async run() {}
       }
       @Injectable()
       class B {
-        @On('jobs', { group: 'pool', initialPosition: { since: 5000 } })
+        @On(Jobs, { group: 'pool', initialPosition: { since: 5000 } })
         async run() {}
       }
 
@@ -380,7 +388,7 @@ describe('Initial position', () => {
 
       @Injectable()
       class H {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
 
@@ -402,12 +410,12 @@ describe('Initial position', () => {
 
       @Injectable()
       class OnDefault {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
       @Injectable()
       class OnNamed {
-        @On('topic', { bus: 'other' })
+        @On(Topic, { bus: 'other' })
         async run() {}
       }
 

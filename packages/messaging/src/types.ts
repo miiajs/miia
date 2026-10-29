@@ -115,7 +115,12 @@ export interface SubscribeOptions {
   initialPosition?: InitialPosition
 }
 
-export type HandlerResult = { status: 'ack' } | { status: 'nack'; error: Error }
+/**
+ * What a subscription handler reports back to the transport. `nack` is retried with backoff until the attempts run
+ * out; `reject` is never retried - straight to the DLQ (or dropped when the DLQ is off). The bus rejects a payload
+ * that does not match the event's schema.
+ */
+export type HandlerResult = { status: 'ack' } | { status: 'nack'; error: Error } | { status: 'reject'; error: Error }
 
 export interface Subscription {
   unsubscribe(): Promise<void>
@@ -151,7 +156,7 @@ export const DEFAULT_RETRY: RetryConfig = {
  *
  * Retry/DLQ logic lives INSIDE each transport - different brokers have
  * different primitives (Redis Streams PEL, RabbitMQ DLX, NATS max_deliver).
- * Handlers simply return ack/nack; transport decides what to do next.
+ * Handlers return ack, nack or reject; transport decides what to do next.
  */
 export interface MessageTransport {
   /**

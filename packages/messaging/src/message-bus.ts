@@ -1,5 +1,15 @@
 import { randomUUID } from 'node:crypto'
-import { type Constructor, DiscoveryService, getMeta, INJECTABLE, Injectable, inject, Logger } from '@miiajs/core'
+import {
+  type Constructor,
+  type DiscoveredMethod,
+  DiscoveryService,
+  getMeta,
+  INJECTABLE,
+  Injectable,
+  inject,
+  Logger,
+} from '@miiajs/core'
+import { assertEventContract, type EventContract, type EventInput } from './contract.js'
 import { IDEMPOTENT, type IdempotentMeta, ON, type OnMeta } from './decorators.js'
 import { deriveGroupName } from './group-name.js'
 import type { IdempotencyStore } from './idempotency.js'
@@ -54,8 +64,8 @@ const VALID_INITIAL_POSITIONS = "'latest', 'earliest' or { since: ms } with a po
  * class OrderService {
  *   private bus = inject(MessageBus)
  *
- *   async placeOrder(order: Order) {
- *     await this.bus.publish('order.placed', order)
+ *   async placeOrder(order: OrderPlaced) {
+ *     await this.bus.publish(OrderPlaced, order)
  *   }
  * }
  * ```
@@ -69,10 +79,10 @@ const VALID_INITIAL_POSITIONS = "'latest', 'earliest' or { since: ms } with a po
  *
  * For multi-bus setups, use `MessagingModule.configure(opts, { name })` and inject
  * the named bus via `inject(messageBus(name))`. Handlers target a specific bus
- * via `@On(topic, { bus: name })`.
+ * via `@On(event, { bus: name })`.
  *
  * `MessageBus.publish` and `MessageTransport.publish` share the method name
- * but live at different layers: `MessageBus.publish(topic, payload, meta)`
+ * but live at different layers: `MessageBus.publish(event, payload, meta)`
  * is the high-level API that fills in `id`/`timestamp`/`attempt` and hands
  * a fully-formed envelope to `MessageTransport.publish(envelope)`. Both can
  * appear in stack traces; signature shape (envelope vs payload+meta) makes
@@ -290,6 +300,9 @@ export class MessageBus {
    * fills in `id`, `timestamp`, and `attempt`. Composes onto
    * `MessageTransport.publish(envelope)` internally.
    *
+   * `payload` is typed by the event: the schema's input, or `unknown` for an event without a schema. The schema itself
+   * runs only on the consumer side, before each handler.
+   *
    * For distributed tracing, populate `traceparent` (and optionally `tracestate`)
    * from your tracing library so consumers can continue the trace.
    *
@@ -299,21 +312,22 @@ export class MessageBus {
    *
    * const span = trace.getActiveSpan()
    * const ctx = span?.spanContext()
-   * await bus.publish('order.placed', order, {
+   * await bus.publish(OrderPlaced, order, {
    *   traceparent: ctx
    *     ? `00-${ctx.traceId}-${ctx.spanId}-${ctx.traceFlags.toString(16).padStart(2, '0')}`
    *     : undefined,
    * })
    * ```
    */
-  async publish<T>(
-    topic: string,
-    payload: T,
+  async publish<C extends EventContract<any, any>>(
+    event: C,
+    payload: EventInput<C>,
     meta?: Partial<Pick<MessageMeta, 'correlationId' | 'causationId' | 'traceparent' | 'tracestate'>>,
   ): Promise<void> {
-    const envelope: MessageEnvelope<T> = {
+    assertEventContract(event, 'publish()')
+    const envelope: MessageEnvelope = {
       id: randomUUID(),
-      topic,
+      topic: event.topic,
       payload,
       meta: {
         timestamp: Date.now(),
@@ -331,12 +345,37 @@ export class MessageBus {
     this.subscriptions = []
   }
 
-  private async dispatch(
-    h: ReturnType<DiscoveryService['getMethodsWithMeta']>[number],
-    envelope: MessageEnvelope,
-  ): Promise<HandlerResult> {
+  private async dispatch(h: DiscoveredMethod<OnMeta>, envelope: MessageEnvelope): Promise<HandlerResult> {
+    // The envelope is shared by every subscriber of the in-memory transport, so the parsed payload stays local.
+    let payload = envelope.payload
+    const schema = h.metadata.schema
+    if (schema) {
+      let failure: string | null = null
+      try {
+        const parsed = schema.safeParse(payload)
+        if (parsed.success) payload = parsed.data
+        else {
+          failure = parsed.error.issues
+            .map((i) => `${i.path?.map(String).join('.') || '(root)'}: ${i.message}`)
+            .join('; ')
+        }
+      } catch (err) {
+        // zod throws on an async refine or transform; without this the message would go through every retry.
+        failure = err instanceof Error ? err.message : String(err)
+      }
+      if (failure !== null) {
+        const message = `Payload validation failed for '${envelope.topic}': ${failure}`
+        this.logger.error(
+          `Handler ${h.ctor.name}.${h.methodName} rejected ${envelope.id} on ${envelope.topic}: ` +
+            'payload does not match the event schema',
+          message,
+        )
+        return { status: 'reject', error: new Error(message) }
+      }
+    }
+
     const callHandler = () =>
-      (h.instance as Record<string, (...args: unknown[]) => unknown>)[h.methodName]!(envelope.payload, envelope.meta)
+      (h.instance as Record<string, (...args: unknown[]) => unknown>)[h.methodName]!(payload, envelope.meta)
 
     const idemMeta = this.getIdempotentMeta(h.ctor, h.methodName)
 
@@ -356,7 +395,7 @@ export class MessageBus {
     // @Idempotent path: claim → run → release on failure.
     // Per-handler default key avoids cross-handler conflicts; user can override
     // via `key` to widen scope (e.g. share across handlers).
-    const id = idemMeta.key?.(envelope.payload, envelope.meta) ?? `${envelope.id}:${h.ctor.name}.${h.methodName}`
+    const id = idemMeta.key?.(payload, envelope.meta) ?? `${envelope.id}:${h.ctor.name}.${h.methodName}`
     const claimed = await this.idempotencyStore!.claim(id, idemMeta.ttl)
     if (!claimed) return { status: 'ack' } // already processed - silently skip
 

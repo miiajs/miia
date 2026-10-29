@@ -1,7 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { randomUUID } from 'node:crypto'
-import type { MessageEnvelope, HandlerResult } from '@miiajs/messaging'
+import { Injectable, Miia, Module } from '@miiajs/core'
+import {
+  defineEvent,
+  type EventPayload,
+  type HandlerResult,
+  MessageBus,
+  type MessageEnvelope,
+  MessagingModule,
+  On,
+} from '@miiajs/messaging'
 import type { Redis } from 'ioredis'
+import { z } from 'zod'
 import { FAILURE_LOG_BURST } from '../src/constants.js'
 import { RedisStreamsTransport, type RedisStreamsTransportOptions } from '../src/redis-streams-transport.js'
 import { type CapturedLogs, captureLogs, closeClientsAfterEach, testClient, waitFor } from './helpers.js'
@@ -279,6 +289,34 @@ d('RedisStreamsTransport retry', () => {
     expect(dlqReceived[0]?.meta.lastError).toBe('permanent fail')
     // The attempt that failed, not the `.dlq` stream's own delivery count of 1.
     expect(dlqReceived[0]?.meta.attempt).toBe(3)
+  })
+
+  it('moves a rejected message to <topic>.dlq on its first delivery, without retry', async () => {
+    const attempts: number[] = []
+    await transport.subscribe(
+      topic,
+      async (e): Promise<HandlerResult> => {
+        attempts.push(e.meta.attempt)
+        return { status: 'reject', error: new Error('does not match') }
+      },
+      { group: 'g' },
+    )
+    await wait(50)
+
+    await transport.publish(envelope(topic, { id: 42 }))
+    await waitFor(async () => (await dlqEnvelopes(client, topic)).length === 1, 'the DLQ record')
+    await waitFor(async () => (await pending(client, topic, 'g')).length === 0, 'an empty PEL')
+    // A parked retry would resurface one backoff later; give it a few housekeeping passes.
+    await wait(300)
+
+    expect(attempts).toEqual([1])
+    const dead = await dlqEnvelopes(client, topic)
+    expect(dead).toHaveLength(1)
+    expect(dead[0]?.topic).toBe(`${topic}.dlq`)
+    expect(dead[0]?.payload).toEqual({ id: 42 })
+    expect(dead[0]?.meta.attempt).toBe(1)
+    expect(dead[0]?.meta.lastError).toBe('does not match')
+    expect(await pending(client, topic, 'g')).toHaveLength(0)
   })
 
   it('leaves no pending entry behind after a successful ack', async () => {
@@ -900,6 +938,103 @@ d('RedisStreamsTransport retry', () => {
       expect(logs.errors.some((m) => m.includes(env.id))).toBe(true)
     } finally {
       await t.onDestroy?.()
+      await drainKeys(probe, tp)
+    }
+  })
+
+  it('acks and drops a rejected message when dlq is false', async () => {
+    const probe = testClient()
+    const tp = `miia-test:retry-nodlq-reject:${randomUUID()}`
+    const t = new RedisStreamsTransport({
+      client: testClient(),
+      retry: { backoffMs: 50, maxAttempts: 3, dlq: false },
+      retryIntervalMs: 50,
+      minIdleMs: HORIZON_MS,
+      blockMs: 100,
+    })
+    const logs = captureLogs(t)
+    await t.onInit?.()
+
+    const attempts: number[] = []
+    try {
+      await t.subscribe(
+        tp,
+        async (e): Promise<HandlerResult> => {
+          attempts.push(e.meta.attempt)
+          return { status: 'reject', error: new Error('does not match') }
+        },
+        { group: 'g' },
+      )
+      await wait(50)
+
+      const env = envelope(tp, { n: 1 })
+      await t.publish(env)
+      await waitFor(() => attempts.length === 1, 'the delivery')
+      await waitFor(async () => (await pending(probe, tp, 'g')).length === 0, 'the entry to be acked away')
+      await wait(300)
+
+      expect(attempts).toEqual([1])
+      expect(await probe.exists(`${tp}.dlq`)).toBe(0)
+      expect(logs.errors.some((m) => m.includes(env.id) && m.includes('rejected without retry'))).toBe(true)
+    } finally {
+      await t.onDestroy?.()
+      await drainKeys(probe, tp)
+    }
+  })
+
+  it('through MessageBus: coerces a payload that passes the event schema, dead-letters one that fails at once', async () => {
+    const probe = testClient()
+    const tp = `miia-test:retry-schema:${randomUUID()}`
+    const Stamped = defineEvent(tp, z.object({ id: z.string(), at: z.coerce.date() }))
+
+    @Injectable()
+    class StampHandler {
+      received: EventPayload<typeof Stamped>[] = []
+      @On(Stamped, { group: 'stamps' })
+      async on(payload: EventPayload<typeof Stamped>) {
+        this.received.push(payload)
+      }
+    }
+
+    @Module({
+      imports: [
+        MessagingModule.configure({
+          transport: new RedisStreamsTransport({
+            client: testClient(),
+            retry: { backoffMs: 50, maxAttempts: 3 },
+            retryIntervalMs: 50,
+            minIdleMs: HORIZON_MS,
+            blockMs: 100,
+            drainTimeoutMs: 200,
+          }),
+        }),
+      ],
+      providers: [StampHandler],
+    })
+    class Root {}
+
+    const app = new Miia({ logger: false }).register(Root)
+    try {
+      await app.init()
+      const bus = app.get(MessageBus)
+      const at = new Date('2026-10-31T12:00:00.000Z')
+      // The date crosses Redis as a JSON string; the schema turns it back into a Date.
+      await bus.publish(Stamped, { id: 's-1', at })
+      await bus.publish(Stamped, { id: 's-2', at: 'not a date' })
+
+      const handler = app.get(StampHandler)
+      await waitFor(async () => (await dlqEnvelopes(probe, tp)).length === 1, 'the DLQ record')
+      await waitFor(() => handler.received.length === 1, 'the valid delivery')
+      await waitFor(async () => (await pending(probe, tp, 'stamps')).length === 0, 'an empty PEL')
+
+      expect(handler.received[0]?.at).toBeInstanceOf(Date)
+      expect(handler.received[0]).toEqual({ id: 's-1', at })
+      const dead = await dlqEnvelopes(probe, tp)
+      expect(dead[0]?.payload).toEqual({ id: 's-2', at: 'not a date' })
+      expect(dead[0]?.meta.attempt).toBe(1)
+      expect(dead[0]?.meta.lastError).toStartWith(`Payload validation failed for '${tp}': at: `)
+    } finally {
+      await app.destroy()
       await drainKeys(probe, tp)
     }
   })

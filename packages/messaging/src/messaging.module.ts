@@ -58,7 +58,7 @@ export interface MessagingModuleOptions {
  * Pass `{ name }` to register a **named bus** alongside the default
  * one - useful when an app needs more than one transport (Kafka + Redis,
  * internal in-memory bus + external Redis, etc.). Handlers target a specific
- * bus via `@On(topic, { bus: name })`, providers inject it via `inject(messageBus(name))`.
+ * bus via `@On(event, { bus: name })`, providers inject it via `inject(messageBus(name))`.
  *
  * @example
  * ```ts
@@ -77,8 +77,8 @@ export interface MessagingModuleOptions {
  * MessagingModule.configure({ transport: kafkaTransport({ ... }) }, { name: 'kafka' })
  *
  * // In a handler
- * @On('order.placed')                      // default bus
- * @On('legacy.user', { bus: 'kafka' })     // named bus
+ * @On(OrderPlaced)                        // default bus
+ * @On(LegacyUser, { bus: 'kafka' })       // named bus
  *
  * // In a provider
  * private kafka = inject(messageBus('kafka'))

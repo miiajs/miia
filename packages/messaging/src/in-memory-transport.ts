@@ -160,8 +160,8 @@ export class InMemoryTransport implements MessageTransport {
 
     if (result.status === 'ack') return
 
-    // Nack: retry or DLQ.
-    if (envelope.meta.attempt < this.retry.maxAttempts) {
+    // Nack: retry or DLQ. Reject: straight to the DLQ.
+    if (result.status === 'nack' && envelope.meta.attempt < this.retry.maxAttempts) {
       const delay = nextBackoffMs(envelope.meta.attempt, this.retry)
       const timer = setTimeout(() => {
         this.pendingTimers.delete(timer)
@@ -180,10 +180,18 @@ export class InMemoryTransport implements MessageTransport {
     // `billing.dlq` and dropping their exhausted messages would lose data.
     const alreadyDeadLettered = envelope.meta.lastError !== undefined && envelope.topic.endsWith(DLQ_SUFFIX)
     const because = alreadyDeadLettered ? ' - dropped, already a dead-letter record, not nesting another DLQ' : ''
-    this.logger.error(
-      `Message ${envelope.id} on ${envelope.topic} exhausted ${this.retry.maxAttempts} attempts${because}`,
-      result.error.stack ?? result.error.message,
-    )
+    if (result.status === 'reject') {
+      // The bus has already logged why; the stack of a reject says nothing.
+      this.logger.error(
+        `Message ${envelope.id} on ${envelope.topic} rejected without retry${because}`,
+        result.error.message,
+      )
+    } else {
+      this.logger.error(
+        `Message ${envelope.id} on ${envelope.topic} exhausted ${this.retry.maxAttempts} attempts${because}`,
+        result.error.stack ?? result.error.message,
+      )
+    }
     if (this.retry.dlq && !alreadyDeadLettered) {
       await this.publish({
         ...envelope,

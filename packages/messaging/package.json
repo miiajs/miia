@@ -50,7 +50,8 @@
   },
   "devDependencies": {
     "@miiajs/core": "workspace:*",
-    "@miiajs/testing": "workspace:*"
+    "@miiajs/testing": "workspace:*",
+    "zod": "^4.3.6"
   },
   "scripts": {
     "build": "tsc --build",

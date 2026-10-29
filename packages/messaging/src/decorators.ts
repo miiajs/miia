@@ -1,12 +1,13 @@
 import { createMethodDecorator, pushMeta, setInMapMeta, type DiscoverableMethodMeta } from '@miiajs/core'
+import { assertEventContract, type EventContract, type EventPayload, type EventSchema } from './contract.js'
 import type { DispatchMode, InitialPosition, MessageMeta } from './types.js'
 
 export const ON = Symbol('miia:messaging:on')
 
 export const IDEMPOTENT = Symbol('miia:messaging:idempotent')
 
-export interface OnMeta extends DiscoverableMethodMeta {
-  topic: string
+/** Options of `@On(event, options)`. */
+export interface OnOptions {
   /**
    * Explicit broker consumer group (competing-consumers worker pool). When
    * omitted, the bus auto-derives a per-handler group `<topic>__<Class>_<method>`
@@ -50,6 +51,12 @@ export interface OnMeta extends DiscoverableMethodMeta {
   initialPosition?: InitialPosition
 }
 
+export interface OnMeta extends DiscoverableMethodMeta, OnOptions {
+  topic: string
+  /** The event's schema: the bus validates each payload against it before the handler runs. */
+  schema?: EventSchema
+}
+
 export interface IdempotentMeta {
   /** Claim lifetime in milliseconds. */
   ttl: number
@@ -57,11 +64,16 @@ export interface IdempotentMeta {
 }
 
 /**
- * Marks a method as a message handler for `topic`. At app startup, MessageBus
- * discovers all `@On` methods via DiscoveryService (during `onReady`) and
- * subscribes each one to the configured transport.
+ * Marks a method as a message handler for `event`, a contract from `defineEvent()`. At app startup, MessageBus
+ * discovers all `@On` methods via DiscoveryService (during `onReady`) and subscribes each one to the configured
+ * transport.
  *
- * @param topic   Free-form string. Transports do not interpret dots/slashes.
+ * The handler's first parameter is typed by the event: the schema's output, or `unknown` for an event without a
+ * schema; a parameter of any other type does not compile. Before the handler runs, the bus validates the payload
+ * against the event's schema and hands it the result (transforms and coercions applied); a payload that does not
+ * match is dead-lettered without retry and the handler is not called.
+ *
+ * @param event   The event contract. Its topic is a free-form string; transports do not interpret dots/slashes.
  * @param options.group        Explicit broker consumer group (competing-consumers
  *                             worker pool). Without it, an auto-derived
  *                             per-handler group is used.
@@ -91,46 +103,40 @@ export interface IdempotentMeta {
  * **Multi-topic handlers.** Decorating one method with multiple `@On` works
  * naturally - each decoration creates its own subscription with its own
  * auto-derived group. Useful when a single handler responds to several
- * topics:
+ * events whose payloads fit its parameter:
  * ```ts
- * @On('user.created')
- * @On('user.updated')
+ * @On(UserCreated)
+ * @On(UserUpdated)
  * async syncToCRM(user: User) { ... }
  * // → 2 subscriptions: user.created__SyncService_syncToCRM, user.updated__...
  * ```
  *
  * @example
  * ```ts
- * @On('user.created')                              // 1 worker, fan-out across handlers
- * @On('cache.invalidate', { broadcast: true })     // copy to every replica
- * @On('jobs', { group: 'workers' })                // explicit competing-consumers pool
- * @On('media.video', { initialPosition: { since: 60 * 60 * 1000 } }) // a new group picks up the last hour
+ * @On(UserCreated)                                 // 1 worker, fan-out across handlers
+ * @On(CacheInvalidate, { broadcast: true })        // copy to every replica
+ * @On(JobQueued, { group: 'workers' })             // explicit competing-consumers pool
+ * @On(VideoUploaded, { initialPosition: { since: 60 * 60 * 1000 } }) // a new group picks up the last hour
  * ```
  */
-export const On = createMethodDecorator<
-  [
-    topic: string,
-    options?: {
-      group?: string
-      concurrency?: number
-      bus?: string
-      mode?: DispatchMode
-      broadcast?: boolean
-      initialPosition?: InitialPosition
-    },
-  ]
->((_target, ctx, topic, options) => {
-  pushMeta(ctx.metadata!, ON, {
-    handlerName: ctx.name as string,
-    topic,
-    group: options?.group,
-    concurrency: options?.concurrency,
-    bus: options?.bus || undefined,
-    mode: options?.mode,
-    broadcast: options?.broadcast,
-    initialPosition: options?.initialPosition,
-  } satisfies OnMeta)
-})
+export const On: <C extends EventContract<any, any>>(
+  event: C,
+  options?: OnOptions,
+) => (target: (payload: EventPayload<C>, meta: MessageMeta) => unknown, context: ClassMethodDecoratorContext) => void =
+  createMethodDecorator<[event: EventContract<any, any>, options?: OnOptions]>((_target, ctx, event, options) => {
+    assertEventContract(event, '@On')
+    pushMeta(ctx.metadata!, ON, {
+      handlerName: ctx.name as string,
+      topic: event.topic,
+      schema: event.schema,
+      group: options?.group,
+      concurrency: options?.concurrency,
+      bus: options?.bus || undefined,
+      mode: options?.mode,
+      broadcast: options?.broadcast,
+      initialPosition: options?.initialPosition,
+    } satisfies OnMeta)
+  })
 
 /**
  * Skip the handler when the same logical message has already been processed.
@@ -157,7 +163,7 @@ export const On = createMethodDecorator<
  * ```ts
  * @Injectable()
  * class PaymentService {
- *   @On('order.placed')
+ *   @On(OrderPlaced)
  *   @Idempotent({ ttl: 24 * 60 * 60 * 1000 }) // dedupe within 24h
  *   async chargeCard(order: Order) {
  *     await this.payments.charge(order.cardId, order.total)
@@ -165,7 +171,7 @@ export const On = createMethodDecorator<
  *
  *   // Custom key when the upstream may republish the same business event
  *   // with different envelope.id values:
- *   @On('payment.received')
+ *   @On(PaymentReceived)
  *   @Idempotent({ ttl: 24 * 60 * 60 * 1000, key: (p: Payment) => `payment:${p.transactionId}` })
  *   async onPayment(payment: Payment) { ... }
  * }

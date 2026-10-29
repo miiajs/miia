@@ -30,7 +30,7 @@ packages/
   papr/          - MongoDB integration via Papr
   mongoose/      - MongoDB integration via Mongoose
   swagger/       - OpenAPI 3.1 spec generation, Swagger UI serving
-  messaging/         - Decorator-driven message bus (event-bus pattern), retry, DLQ, idempotency, named buses, W3C tracing
+  messaging/         - Decorator-driven message bus (event-bus pattern), typed event contracts (defineEvent), retry, DLQ, idempotency, named buses, W3C tracing
   messaging-redis/   - Redis Streams transport for messaging (consumer groups, PEL-backed retry)
   testing/       - TestApp harness for integration tests
   cli/           - CLI: new, add, generate, dev, build, start, check; project templates in cli/templates/
@@ -165,6 +165,16 @@ Semantics to remember:
 - **Stacking is middleware-only:** an explicit `@UseGuard(RateLimitGuard(policy))` still stacks with the global guard, but any `@RateLimit`/`@SkipRateLimit` on that route disables it; for guaranteed stacked limits use the `rateLimit()` middleware via `@Use`.
 - **Eager construction:** `app.useGuard(RateLimitGuard)` constructs the bare guard at startup, before any `onInit()`, even if every route replaces it - the guard is checked from the root, so without `RateLimitModule.configure(opts, { global: true })` (options visible from the root) the app fails at startup by design.
 - **`blockDuration`:** once exceeded, the key is blocked for that duration (the triggering request already gets `Retry-After` = blockDuration); after the block expires the client gets a fresh window. Optional geometric backoff (`blockBackoff` > 1 with a required `maxBlockDuration` ceiling, and `strikeReset` grace measured from the end of the block) grows the ban per repeat offence and resets strikes after a quiet period.
+
+### Messaging: event contracts
+
+`defineEvent(topic, schema?)` (`@miiajs/messaging`, `src/contract.ts`, no imports from core) returns a frozen `{ topic, schema }`, and it is the only thing `MessageBus.publish(event, payload, meta?)` and `@On(event, options?)` take - a string throws `TypeError` with a `defineEvent('x', schema)` hint (`publish()` rejects). Not memoized: an event is its topic; `schema` is anything with `safeParse()`. `EventPayload<typeof E>` is what the handler gets (schema output, `unknown` without a schema), `EventInput<typeof E>` what `publish()` takes (the Standard Schema input when declared, else the output); a handler parameter of another type does not compile. Convention: `export const OrderPlaced = defineEvent(...)` + `export type OrderPlaced = EventPayload<typeof OrderPlaced>`.
+
+Semantics to remember:
+- **Validated on consume, per handler:** `dispatch()` runs `safeParse()` before the handler and before any `@Idempotent` claim; the handler and `key()` get the parsed data (the envelope, shared by in-memory subscribers, is not mutated). `publish()` runs no schema - types only.
+- **`reject`:** a failure, or a `safeParse()` that throws (zod on an async refine/transform), returns `HandlerResult` `{ status: 'reject', error }`; both transports dead-letter it at once, no retry (Redis: the same `moveToDlq` Lua step, no `parkRetry`), `meta.lastError` = `Payload validation failed for '<topic>': <path>: <message>; ...`, `attempt: 1`; with `dlq: false` it is dropped (`rejected without retry`). N handlers on a topic -> N DLQ records. Custom transports must handle `reject`.
+- **`dlqEvent(E)`:** a schema-less contract for `<topic>.dlq` (payload `unknown`, reason in `meta.lastError`): `@On(dlqEvent(PaymentCharge), { group: 'payments-dlq' })`.
+- **JSON-form schemas:** Redis hands the consumer `JSON.parse` output, in-memory the object itself, so `z.coerce.date()`, not `z.date()`. Schemas must be synchronous.
 
 ### Validation: route schemas `{ body, query, params }`
 

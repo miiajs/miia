@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@miiajs/core'
 import { Idempotent, On } from '@miiajs/messaging'
-import { TOPIC } from '../orders.constants.js'
-import type { OrderPlaced } from '../orders.types.js'
+import { OrderPlaced } from '../events/index.js'
 
 @Injectable()
 export class OrderInventoryHandler {
@@ -10,7 +9,7 @@ export class OrderInventoryHandler {
   // No explicit group - the bus auto-derives `messaging-app:order.placed__OrderInventoryHandler_reserveStock`
   // (with `appName` from MessagingModule.configure). Showcases the auto-derived
   // grouping for handler-per-subscription model.
-  @On(TOPIC.orderPlaced, { bus: 'redis' })
+  @On(OrderPlaced, { bus: 'redis' })
   @Idempotent({
     ttl: 24 * 60 * 60 * 1000, // 24 hours
     key: (p: OrderPlaced) => `inventory:${p.orderId}`,

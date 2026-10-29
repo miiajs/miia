@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test'
 import { randomUUID } from 'node:crypto'
 import { hostname } from 'node:os'
 import { Injectable, Miia, Module } from '@miiajs/core'
-import { deriveGroupName, type MessageEnvelope, MessagingModule, On, type HandlerResult } from '@miiajs/messaging'
+import {
+  defineEvent,
+  deriveGroupName,
+  type HandlerResult,
+  type MessageEnvelope,
+  MessagingModule,
+  On,
+} from '@miiajs/messaging'
 import { Redis } from 'ioredis'
 import { ALIVE_KEY_PREFIX } from '../src/constants.js'
 import { RedisStreamsTransport, redisStreamsTransport } from '../src/redis-streams-transport.js'
@@ -925,7 +932,7 @@ d('RedisStreamsTransport', () => {
 
       @Injectable()
       class CacheHandler {
-        @On(tp, { broadcast: true })
+        @On(defineEvent(tp), { broadcast: true })
         async flush() {}
       }
 

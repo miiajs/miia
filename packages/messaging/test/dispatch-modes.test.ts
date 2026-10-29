@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { Injectable, Module } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
+import { defineEvent } from '../src/contract.js'
 import { On } from '../src/decorators.js'
 import { MessageBus } from '../src/message-bus.js'
 import { inMemoryTransport } from '../src/in-memory-transport.js'
@@ -8,6 +9,13 @@ import { MessagingModule } from '../src/messaging.module.js'
 import { idempotencyStoreToken, transportToken } from '../src/tokens.js'
 import type { MessageTransport } from '../src/types.js'
 import { stubTransport, StubTransport } from './fixtures/stub-transport.js'
+
+const Topic = defineEvent('topic')
+const Other = defineEvent('other')
+const UserCreated = defineEvent('user.created')
+const UserUpdated = defineEvent('user.updated')
+const CacheInvalidate = defineEvent('cache.invalidate')
+const Jobs = defineEvent('jobs')
 
 function busProviders(
   transport: MessageTransport,
@@ -34,7 +42,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class H {
-        @On('topic', { mode: 'sliding', concurrency: 8 })
+        @On(Topic, { mode: 'sliding', concurrency: 8 })
         async run() {}
       }
 
@@ -56,7 +64,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class H {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
 
@@ -77,7 +85,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class H {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
 
@@ -101,7 +109,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class H {
-        @On('topic', { mode: 'batch' })
+        @On(Topic, { mode: 'batch' })
         async run() {}
       }
 
@@ -123,7 +131,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class H {
-        @On('topic', { concurrency: 0 })
+        @On(Topic, { concurrency: 0 })
         async run() {}
       }
 
@@ -145,12 +153,12 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class A {
-        @On('topic', { mode: 'batch', concurrency: 4 })
+        @On(Topic, { mode: 'batch', concurrency: 4 })
         async run() {}
       }
       @Injectable()
       class B {
-        @On('topic', { mode: 'sliding', concurrency: 8 })
+        @On(Topic, { mode: 'sliding', concurrency: 8 })
         async run() {}
       }
 
@@ -175,7 +183,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class H {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
 
@@ -195,7 +203,7 @@ describe('Dispatch modes', () => {
     it('handlers requesting batch against in-memory transport throw at startup', async () => {
       @Injectable()
       class H {
-        @On('topic', { mode: 'batch' })
+        @On(Topic, { mode: 'batch' })
         async run() {}
       }
 
@@ -217,17 +225,17 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class A {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
       @Injectable()
       class B {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
       @Injectable()
       class C {
-        @On('other')
+        @On(Other)
         async run() {}
       }
 
@@ -250,8 +258,8 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class Sync {
-        @On('user.created')
-        @On('user.updated')
+        @On(UserCreated)
+        @On(UserUpdated)
         async run() {}
       }
 
@@ -273,12 +281,12 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class Auto {
-        @On('topic')
+        @On(Topic)
         async run() {}
       }
       @Injectable()
       class Explicit {
-        @On('topic', { group: 'my-pool' })
+        @On(Topic, { group: 'my-pool' })
         async run() {}
       }
 
@@ -299,7 +307,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class Cache {
-        @On('cache.invalidate', { broadcast: true })
+        @On(CacheInvalidate, { broadcast: true })
         async run() {}
       }
 
@@ -321,7 +329,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class Bad {
-        @On('topic', { broadcast: true, group: 'workers' })
+        @On(Topic, { broadcast: true, group: 'workers' })
         async run() {}
       }
 
@@ -344,7 +352,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class Worker {
-        @On('jobs', { group: 'pool' })
+        @On(Jobs, { group: 'pool' })
         async run() {}
       }
 
@@ -365,7 +373,7 @@ describe('Dispatch modes', () => {
       @Injectable()
       class Sibling {
         runs = 0
-        @On('topic')
+        @On(Topic)
         async run() {
           this.runs++
         }
@@ -374,7 +382,7 @@ describe('Dispatch modes', () => {
       @Injectable()
       class Throwing {
         runs = 0
-        @On('topic')
+        @On(Topic)
         async run() {
           this.runs++
           if (this.runs < 2) throw new Error('transient')
@@ -389,7 +397,7 @@ describe('Dispatch modes', () => {
         .compile()
       cleanup.push(() => app.close())
 
-      await app.resolve(MessageBus).publish('topic', {})
+      await app.resolve(MessageBus).publish(Topic, {})
       await new Promise((r) => setTimeout(r, 60))
 
       // Sibling success on attempt 1, never retried.
@@ -405,7 +413,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class Bad {
-        @On('topic', { broadcast: true })
+        @On(Topic, { broadcast: true })
         @Idempotent({ ttl: 60_000 })
         async run() {}
       }
@@ -433,7 +441,7 @@ describe('Dispatch modes', () => {
 
       @Injectable()
       class Ok {
-        @On('topic', { broadcast: true })
+        @On(Topic, { broadcast: true })
         @Idempotent({ ttl: 60_000, key: (_, m) => `topic:${m.timestamp}:${process.pid}` })
         async run() {}
       }

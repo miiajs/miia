@@ -1,8 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { Injectable, inject } from '@miiajs/core'
 import { MessageBus, messageBus } from '@miiajs/messaging'
-import { TOPIC } from './orders.constants.js'
-import type { NotificationSend, OrderPlaced, PaymentCharge } from './orders.types.js'
+import { NotificationSend, OrderPlaced, PaymentCharge } from './events/index.js'
 
 @Injectable()
 export class OrdersService {
@@ -20,7 +19,7 @@ export class OrdersService {
     }
 
     // Durable, multi-consumer event - goes to Redis Streams.
-    await this.redisBus.publish(TOPIC.orderPlaced, orderEvent, {
+    await this.redisBus.publish(OrderPlaced, orderEvent, {
       correlationId: orderId,
       // Synthetic W3C trace context for demonstration purposes.
       traceparent: `00-${'a'.repeat(32)}-${'b'.repeat(16)}-01`,
@@ -32,7 +31,7 @@ export class OrdersService {
       to: input.customerEmail,
       template: 'order-confirmation',
     }
-    await this.memoryBus.publish(TOPIC.notificationSend, notification, { correlationId: orderId })
+    await this.memoryBus.publish(NotificationSend, notification, { correlationId: orderId })
 
     return { orderId, accepted: true }
   }
@@ -44,8 +43,8 @@ export class OrdersService {
       template: 'order-confirmation',
     }
     // Two publishes with the same orderId; @Idempotent on the handler skips the second.
-    await this.memoryBus.publish(TOPIC.notificationSend, notification)
-    await this.memoryBus.publish(TOPIC.notificationSend, notification)
+    await this.memoryBus.publish(NotificationSend, notification)
+    await this.memoryBus.publish(NotificationSend, notification)
     return { orderId, emitted: 2 }
   }
 
@@ -56,7 +55,7 @@ export class OrdersService {
       amount,
     }
     // Flaky handler always throws → exhausts retries → goes to DLQ topic.
-    await this.redisBus.publish(TOPIC.paymentCharge, event, { correlationId: orderId })
+    await this.redisBus.publish(PaymentCharge, event, { correlationId: orderId })
     return { paymentId: event.paymentId, orderId, status: 'queued' }
   }
 }

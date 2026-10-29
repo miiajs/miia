@@ -7,12 +7,13 @@ Demonstrates:
 - **Two named buses** in a single app:
   - default bus → `inMemoryTransport` (fast, in-process, ephemeral)
   - `'redis'` bus → `redisStreamsTransport` (durable, cross-process)
-- `@On(topic)` vs `@On(topic, { bus: 'redis' })` routing
+- **Event contracts** - one `defineEvent(topic, schema)` per event in `orders/events/`: `publish()` and `@On()` are typed by the zod schema, and every consumer validates the payload against it before the handler runs
+- `@On(event)` vs `@On(event, { bus: 'redis' })` routing
 - **Consumer groups**: `order.placed` fans out to two groups - the explicit `analytics` and the group the bus derives for `OrderInventoryHandler` (`messaging-app:order.placed__OrderInventoryHandler_reserveStock`, prefixed by `appName`) - each group processes independently, and replicas sharing a group name load-balance
 - **`@Idempotent` deduplication** with both `MemoryIdempotencyStore` and `RedisIdempotencyStore`
 - **Retry with exponential backoff** (`maxAttempts: 2, backoffMs: 500, backoffMultiplier: 2`)
-- **Dead-letter queue** - `payment.charge` always throws → exhausts retries → re-published to `payment.charge.dlq` with `meta.lastError` populated
-- DLQ consumer that records failures
+- **Dead-letter queue** - `payment.charge` always throws → exhausts retries → re-published to `payment.charge.dlq` with `meta.lastError` populated; a payload that does not match the event schema goes there on its first delivery, without retry
+- DLQ consumer on `dlqEvent(PaymentCharge)` that records failures
 - Per-handler `concurrency` (`order.placed/analytics` uses `concurrency: 4`)
 - W3C `traceparent` propagation via `bus.publish(..., { traceparent })`
 
@@ -160,15 +161,14 @@ src/
     orders.module.ts
     orders.controller.ts               - HTTP endpoints, request body schemas
     orders.service.ts                  - publishes to both buses
-    orders.constants.ts                - topic constants (TOPIC, DLQ_TOPIC)
-    orders.types.ts                    - payload types
+    events/                            - event contracts: defineEvent(topic, zod schema) + payload type, one file per event
     schemas/                           - Zod schemas of the request bodies
     handlers/
       notification.handler.ts          - default bus, @Idempotent, MemoryIdempotencyStore
       order-analytics.handler.ts       - redis bus, group='analytics', concurrency=4
       order-inventory.handler.ts       - redis bus, auto-derived group, @Idempotent (Redis store)
       flaky-payment.handler.ts         - redis bus, throws every time → drives retry/DLQ
-      payment-dlq.handler.ts           - redis bus, listens on payment.charge.dlq
+      payment-dlq.handler.ts           - redis bus, listens on dlqEvent(PaymentCharge) (payment.charge.dlq)
 ```
 
 ## Notes
@@ -176,7 +176,7 @@ src/
 - `MessagingModule.configure(opts, { name: 'redis' })` registers a **named** bus. Inject it via
   `inject(messageBus('redis'))` (see `orders.service.ts`).
 - The default bus is injected as `inject(MessageBus)` - same pattern as a single-bus app.
-- DLQ topic is automatic: any topic `t` produces `<t>.dlq` after `maxAttempts` failures (when `dlq: true`).
+- DLQ topic is automatic: any topic `t` produces `<t>.dlq` after `maxAttempts` failures (when `dlq: true`), or at once for a payload that does not match the event schema. `dlqEvent(event)` is the contract to listen on; its payload is `unknown`, since a dead letter may be one that failed the schema.
 - Retry config is **per transport**, not per topic - two buses with different `maxAttempts` here illustrate that.
 - `RedisIdempotencyStore` uses `SET NX EX`; safe across processes. Key prefix is configured to `messaging-app:idem:` to avoid collisions if multiple services share the Redis instance.
 - **Connection model** of `redisStreamsTransport`: 1 publisher client + 1 duplicated subClient per `subscribe()` call. In this example the transport opens `1 + 4 = 5` Redis connections; the separately-configured `redisIdempotencyStore` adds one more (its own client), so `redis-cli CLIENT LIST` shows **6** connections from the app process.

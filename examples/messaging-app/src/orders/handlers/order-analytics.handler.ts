@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@miiajs/core'
 import { On } from '@miiajs/messaging'
-import { TOPIC } from '../orders.constants.js'
-import type { OrderPlaced } from '../orders.types.js'
+import { OrderPlaced } from '../events/index.js'
 
 @Injectable()
 export class OrderAnalyticsHandler {
@@ -10,7 +9,7 @@ export class OrderAnalyticsHandler {
   totalOrders = 0
   totalRevenue = 0
 
-  @On(TOPIC.orderPlaced, { bus: 'redis', group: 'analytics', concurrency: 4 })
+  @On(OrderPlaced, { bus: 'redis', group: 'analytics', concurrency: 4 })
   async record(payload: OrderPlaced): Promise<void> {
     this.totalOrders += 1
     this.totalRevenue += payload.total

@@ -1,13 +1,12 @@
 import { Injectable, Logger } from '@miiajs/core'
 import { Idempotent, On } from '@miiajs/messaging'
-import { TOPIC } from '../orders.constants.js'
-import type { NotificationSend } from '../orders.types.js'
+import { NotificationSend } from '../events/index.js'
 
 @Injectable()
 export class NotificationHandler {
   private logger = new Logger('NotificationHandler')
 
-  @On(TOPIC.notificationSend)
+  @On(NotificationSend)
   @Idempotent({
     ttl: 5 * 60 * 1000, // 5 minutes
     key: (p: NotificationSend) => `notification:${p.orderId}`,

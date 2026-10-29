@@ -268,6 +268,78 @@ describe('InMemoryTransport', () => {
     expect(dlqReceived[0]?.meta.lastError).toBe('permanent')
   })
 
+  it('moves a rejected message to <topic>.dlq at once, without retry', async () => {
+    const errors = captureErrors(transport)
+    const attempts: number[] = []
+    const dlqReceived: MessageEnvelope[] = []
+    await transport.subscribe(
+      'topic',
+      async (e): Promise<HandlerResult> => {
+        attempts.push(e.meta.attempt)
+        return { status: 'reject', error: new Error('does not match') }
+      },
+      {},
+    )
+    await transport.subscribe(
+      'topic.dlq',
+      async (e) => {
+        dlqReceived.push(e)
+        return { status: 'ack' }
+      },
+      {},
+    )
+
+    const env = envelope('topic', { id: 42 })
+    await transport.publish(env)
+    // Long enough for two retries at 10 + 20ms, had there been any.
+    await wait(80)
+
+    expect(attempts).toEqual([1])
+    expect(dlqReceived).toHaveLength(1)
+    expect(dlqReceived[0]?.payload).toEqual({ id: 42 })
+    expect(dlqReceived[0]?.meta.attempt).toBe(1)
+    expect(dlqReceived[0]?.meta.lastError).toBe('does not match')
+    expect(errors.some((m) => m.includes(env.id) && m.includes('rejected without retry'))).toBe(true)
+  })
+
+  it('drops a rejected dead-letter record instead of nesting a second DLQ', async () => {
+    const errors = captureErrors(transport)
+    const attempts: number[] = []
+    const nested: MessageEnvelope[] = []
+    await transport.subscribe(
+      'topic.dlq',
+      async (e): Promise<HandlerResult> => {
+        attempts.push(e.meta.attempt)
+        return { status: 'reject', error: new Error('does not match') }
+      },
+      {},
+    )
+    await transport.subscribe(
+      'topic.dlq.dlq',
+      async (e) => {
+        nested.push(e)
+        return { status: 'ack' }
+      },
+      {},
+    )
+
+    const record: MessageEnvelope = {
+      ...envelope('topic.dlq', { id: 42 }),
+      meta: { timestamp: Date.now(), attempt: 1, lastError: 'earlier' },
+    }
+    await transport.publish(record)
+    await wait(80)
+
+    expect(attempts).toEqual([1])
+    expect(nested).toHaveLength(0)
+    expect(
+      errors.some(
+        (m) =>
+          m.includes(record.id) && m.includes('rejected without retry') && m.includes('already a dead-letter record'),
+      ),
+    ).toBe(true)
+  })
+
   it('does not publish to DLQ when retry.dlq is false', async () => {
     const t = inMemoryTransport({ retry: { backoffMs: 5, maxAttempts: 2, dlq: false } })
     const dlqReceived: MessageEnvelope[] = []

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import { Injectable, inject, Module } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
+import { defineEvent } from '../src/contract.js'
 import { On } from '../src/decorators.js'
 import type { IdempotencyStore } from '../src/idempotency.js'
 import { MessageBus } from '../src/message-bus.js'
@@ -8,6 +9,11 @@ import { InMemoryTransport, inMemoryTransport } from '../src/in-memory-transport
 import { MessagingModule } from '../src/messaging.module.js'
 import { messageBus, transportToken } from '../src/tokens.js'
 import type { MessageTransport, Subscription } from '../src/types.js'
+
+const Topic = defineEvent('topic')
+const TEvent = defineEvent('t')
+const OrderPlaced = defineEvent('order.placed')
+const Job = defineEvent('job')
 
 function wait(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -25,7 +31,7 @@ describe('MessagingModule.configure', () => {
     @Injectable()
     class H {
       received: unknown[] = []
-      @On('topic')
+      @On(Topic)
       async on(p: unknown) {
         this.received.push(p)
       }
@@ -44,7 +50,7 @@ describe('MessagingModule.configure', () => {
     const transport = app.resolve(transportToken())
     expect(transport).toBeInstanceOf(InMemoryTransport)
 
-    await bus.publish('topic', { ok: true })
+    await bus.publish(Topic, { ok: true })
     await wait(15)
     expect(app.resolve(H).received).toEqual([{ ok: true }])
   })
@@ -59,7 +65,7 @@ describe('MessagingModule.configure', () => {
     @Injectable()
     class H {
       received: unknown[] = []
-      @On('t')
+      @On(TEvent)
       async on(p: unknown) {
         this.received.push(p)
       }
@@ -79,7 +85,7 @@ describe('MessagingModule.configure', () => {
     const app = await TestApp.create(AppModule).compile()
     cleanup.push(() => app.close())
 
-    await app.resolve(MessageBus).publish('t', { n: 1 })
+    await app.resolve(MessageBus).publish(TEvent, { n: 1 })
     await wait(15)
     expect(app.resolve(H).received).toEqual([{ n: 1 }])
   })
@@ -115,7 +121,7 @@ describe('MessagingModule.configure', () => {
     expect(app.resolve(transportToken())).toBe(built[0]!)
 
     const publish = spyOn(built[0]!, 'publish')
-    await app.resolve(MessageBus).publish('t', {})
+    await app.resolve(MessageBus).publish(TEvent, {})
     expect(publish).toHaveBeenCalledTimes(1)
   })
 
@@ -154,7 +160,7 @@ describe('MessagingModule.configure', () => {
     @Injectable()
     class OrderHandlers {
       received: unknown[] = []
-      @On('order.placed')
+      @On(OrderPlaced)
       async on(payload: unknown) {
         this.received.push(payload)
       }
@@ -169,7 +175,7 @@ describe('MessagingModule.configure', () => {
     const app = await TestApp.create(AppModule).compile()
     cleanup.push(() => app.close())
 
-    await app.resolve(MessageBus).publish('order.placed', { orderId: 'xyz' })
+    await app.resolve(MessageBus).publish(OrderPlaced, { orderId: 'xyz' })
     await wait(15)
 
     expect(app.resolve(OrderHandlers).received).toEqual([{ orderId: 'xyz' }])
@@ -194,7 +200,7 @@ describe('MessagingModule.configure', () => {
     @Injectable()
     class KafkaHandler {
       received: unknown[] = []
-      @On('topic', { bus: 'kafka' })
+      @On(Topic, { bus: 'kafka' })
       async on(p: unknown) {
         this.received.push(p)
       }
@@ -217,7 +223,7 @@ describe('MessagingModule.configure', () => {
     expect(app.resolve(transportToken('kafka'))).toBe(replacement)
     expect(app.resolve(transportToken())).toBe(defaultTransport)
 
-    await app.resolve(messageBus('kafka')).publish('topic', { n: 1 })
+    await app.resolve(messageBus('kafka')).publish(Topic, { n: 1 })
     await wait(15)
     expect(app.resolve(KafkaHandler).received).toEqual([{ n: 1 }])
   })
@@ -266,7 +272,7 @@ describe('MessagingModule shutdown', () => {
 
     @Injectable()
     class SlowHandler {
-      @On('job')
+      @On(Job)
       async on() {
         events.push('handler started')
         await wait(50)
@@ -289,7 +295,7 @@ describe('MessagingModule shutdown', () => {
     class AppModule {}
 
     const app = await TestApp.create(AppModule).compile()
-    await app.resolve(MessageBus).publish('job', {})
+    await app.resolve(MessageBus).publish(Job, {})
     await wait(5)
     expect(events).toEqual(['handler started'])
 
@@ -303,7 +309,7 @@ describe('MessagingModule shutdown', () => {
 
     @Injectable()
     class H {
-      @On('topic')
+      @On(Topic)
       async on() {}
     }
 

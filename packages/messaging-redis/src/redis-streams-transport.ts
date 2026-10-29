@@ -159,7 +159,8 @@ interface LuaCommands {
  *
  * - **The PEL is the retry queue.** A nack acks nothing and re-publishes nothing: the entry stays pending in its own
  *   group and is re-parked with `XCLAIM ... IDLE <horizon - backoff> JUSTID`, so it resurfaces one backoff later and
- *   only for that group. Exhaustion is a gated `XACK` plus an `XADD` to `${topic}.dlq`.
+ *   only for that group. Exhaustion is a gated `XACK` plus an `XADD` to `${topic}.dlq`; a reject takes the same move
+ *   on the delivery that returned it, with no retry.
  * - **Housekeeping**, every `retryIntervalMs` per (topic, group): `XPENDING ... IDLE <horizon>`, then claim and
  *   redeliver. A retry whose backoff elapsed and an entry whose consumer died are the same thing here, so crash
  *   recovery needs no branch of its own.
@@ -1048,6 +1049,10 @@ export class RedisStreamsTransport implements MessageTransport {
         await this.client.xack(sub.topic, sub.group, id)
         return
       }
+      if (result.status === 'reject') {
+        await this.exhaust(sub, id, envelope, attempt, result.error, true)
+        return
+      }
 
       await this.handleNack(sub, id, consumer, envelope, attempt, result.error)
     } finally {
@@ -1094,13 +1099,14 @@ export class RedisStreamsTransport implements MessageTransport {
     }
   }
 
-  /** Exhaustion tail shared by the nack path and the abandoned-entry path. */
+  /** Exhaustion tail shared by the nack path, the reject path and the abandoned-entry path. */
   private async exhaust(
     sub: ActiveSub,
     id: string,
     envelope: MessageEnvelope,
     attempt: number,
     error: Error,
+    rejected = false,
   ): Promise<void> {
     // `lastError` is written only by the DLQ move below, so it is the honest marker of a dead-letter record; the
     // `.dlq` suffix alone proves nothing, since a user is free to name an ordinary topic `billing.dlq` and dropping
@@ -1110,9 +1116,10 @@ export class RedisStreamsTransport implements MessageTransport {
     if (!this.retry.dlq || alreadyDeadLettered) {
       await this.client.xack(sub.topic, sub.group, id)
       const because = alreadyDeadLettered ? ' - already a dead-letter record, not nesting another DLQ' : ''
+      const why = rejected ? 'rejected without retry' : `after ${this.retry.maxAttempts} attempts`
       this.logger.error(
-        `Dropped ${envelope.id} on ${sub.topic} after ${this.retry.maxAttempts} attempts${because}`,
-        error.stack ?? error.message,
+        `Dropped ${envelope.id} on ${sub.topic} ${why}${because}`,
+        rejected ? error.message : (error.stack ?? error.message),
       )
       return
     }

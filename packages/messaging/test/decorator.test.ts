@@ -1,12 +1,21 @@
 import { describe, expect, it } from 'bun:test'
 import { getMeta } from '@miiajs/core'
+import { defineEvent } from '../src/contract.js'
 import { IDEMPOTENT, Idempotent, type IdempotentMeta, On, ON, type OnMeta } from '../src/decorators.js'
 import type { MessageMeta } from '../src/types.js'
+
+const UserCreated = defineEvent('user.created')
+const MediaVideo = defineEvent('media.video')
+const EventA = defineEvent('a')
+const EventB = defineEvent('b')
+const EventC = defineEvent('c')
+const Created = defineEvent('created')
+const Updated = defineEvent('updated')
 
 describe('@On decorator', () => {
   it('writes metadata with topic and handlerName', () => {
     class S {
-      @On('user.created')
+      @On(UserCreated)
       handleUserCreated() {}
     }
 
@@ -22,7 +31,7 @@ describe('@On decorator', () => {
 
   it('stores group and concurrency when provided', () => {
     class S {
-      @On('user.created', { group: 'workers', concurrency: 4 })
+      @On(UserCreated, { group: 'workers', concurrency: 4 })
       handle() {}
     }
 
@@ -36,7 +45,7 @@ describe('@On decorator', () => {
 
   it('stores initialPosition when provided', () => {
     class S {
-      @On('media.video', { initialPosition: { since: 3_600_000 } })
+      @On(MediaVideo, { initialPosition: { since: 3_600_000 } })
       handle() {}
     }
 
@@ -46,13 +55,13 @@ describe('@On decorator', () => {
 
   it('accumulates multiple @On on the same class', () => {
     class S {
-      @On('a')
+      @On(EventA)
       onA() {}
 
-      @On('b')
+      @On(EventB)
       onB() {}
 
-      @On('c', { group: 'g' })
+      @On(EventC, { group: 'g' })
       onC() {}
     }
 
@@ -66,8 +75,8 @@ describe('@On decorator', () => {
 
   it('allows multiple @On on the same method (same method, different topics)', () => {
     class S {
-      @On('created')
-      @On('updated')
+      @On(Created)
+      @On(Updated)
       handleAny() {}
     }
 
@@ -79,12 +88,12 @@ describe('@On decorator', () => {
 
   it('a subclass @On does not change the parent list', () => {
     class Parent {
-      @On('a')
+      @On(EventA)
       onA() {}
     }
 
     class Child extends Parent {
-      @On('b')
+      @On(EventB)
       onB() {}
     }
 
