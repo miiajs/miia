@@ -29,9 +29,9 @@
  *   read into a `Promise<Uint8Array>` and decoded straight into `json()`,
  *   `text()`, `arrayBuffer()` and `bytes()`, without a real Request.
  * - **Streamed** - a larger or chunked body goes through a lazily created
- *   GlobalRequest backed by `Readable.toWeb(incoming)`; a chunked one is capped
- *   in-stream at `_bodyLimit` (the adapter ceiling, narrowed by @miiajs/core to
- *   the route's own limit before the body is first read).
+ *   GlobalRequest backed by `incomingBody()`; a chunked one is capped in-stream
+ *   at `_bodyLimit` (the adapter ceiling, narrowed by @miiajs/core to the route's
+ *   own limit before the body is first read).
  * - **Early 413** - a declared Content-Length over `maxBodySize` is answered
  *   before the handler runs, and the body is drained.
  * - Body can only be consumed once (Web API spec).
@@ -43,7 +43,8 @@
  * - **Body drain** - for a request with a body, the close listener is
  *   registered eagerly to drain an unconsumed body (500ms timeout, 64MB
  *   limit); a response written while the body is still unread gets
- *   `Connection: close`.
+ *   `Connection: close`, unless the handler cancelled the body: that one keeps
+ *   the connection and is drained after the response.
  * - **GET/HEAD** - no close listener overhead (lazy via `_ensureCloseListener`).
  *
  * ## Global Override
@@ -70,7 +71,7 @@
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { Readable } from 'node:stream'
+import { finished } from 'node:stream'
 
 // ─── Symbols ─────────────────────────────────────────────────
 
@@ -233,10 +234,10 @@ const requestProto: Record<string | symbol, any> = {
             ;(init as any).duplex = 'half'
           }
         } else {
-          // Stream path - original Readable.toWeb, capped when a body limit is
-          // set (chunked bodies). Single injection point: every consumer
+          // Stream path - the request as a web stream, capped when a body limit
+          // is set (chunked bodies). Single injection point: every consumer
           // (json/text/arrayBuffer/blob/formData/body) goes through here.
-          let stream = Readable.toWeb(this._incoming) as any
+          let stream = incomingBody(this._incoming) as any
           if (this._bodyLimit !== null) {
             const incoming = this._incoming
             stream = limitStream(stream, this._bodyLimit, () => drainIncoming(incoming))
@@ -331,7 +332,7 @@ const requestProto: Record<string | symbol, any> = {
       }
       return this._bodyStream
     }
-    // Stream path - fallback to _getReal().body (Readable.toWeb)
+    // Stream path - fallback to _getReal().body (incomingBody)
     const method = this._incoming.method || 'GET'
     if (method === 'GET' || method === 'HEAD') return null
     return this._getReal().body
@@ -634,6 +635,8 @@ function sendError(nodeRes: ServerResponse, error: unknown, logger: LoggerLike):
 function closeIfBodyUnread(incoming: IncomingMessage, nodeRes: ServerResponse, hasBody: boolean): void {
   if (!hasBody || incoming.readableEnded || incoming.destroyed) return
   if (nodeRes.headersSent || nodeRes.closed || nodeRes.writableEnded) return
+  // Drained after the response instead, as for send413: a close now would reset the connection under the response
+  if (cancelledBodies.has(incoming)) return
   nodeRes.setHeader('Connection', 'close')
 }
 
@@ -659,13 +662,75 @@ function payloadTooLargeError(limit: number): Error {
   return err
 }
 
+/** Bodies a handler cancelled before they ended - see incomingBody(). Only looked at for a body still unread. */
+const cancelledBodies = new WeakSet<IncomingMessage>()
+
+/** What Readable.toWeb errors its stream with when the request closes before its end, as `incoming.destroy()` does. */
+function abortError(cause: Error): Error {
+  const err = new Error('The operation was aborted', { cause })
+  err.name = 'AbortError'
+  ;(err as NodeJS.ErrnoException).code = 'ABORT_ERR'
+  return err
+}
+
+/**
+ * `Readable.toWeb(incoming)`, but for its cancel, which a server cannot use. Node's closes the stream's controller and
+ * leaves its `data` listener on, so a chunk already buffered in the request reaches the closed controller on the next
+ * tick: an uncaught ERR_INVALID_STATE, which ends the process. It also destroys the request with the socket taken off
+ * it. The parser then stops reading, and a response that says keep-alive strands what the client sends next.
+ *
+ * Here a cancel only stops reading: the response goes out as usual, the request stays paused until then, and
+ * drainIncoming takes the rest after it.
+ */
+function incomingBody(incoming: IncomingMessage, onCancel?: () => void): ReadableStream<Uint8Array> {
+  if (incoming.destroyed || !incoming.readable) {
+    const closed = new ReadableStream<Uint8Array>()
+    closed.cancel()
+    return closed
+  }
+
+  let controller: ReadableStreamDefaultController<Uint8Array>
+  const onData = (chunk: Buffer) => {
+    controller.enqueue(new Uint8Array(chunk)) // a copy: `chunk` may be a view of Node's pool
+    if (controller.desiredSize! <= 0) incoming.pause()
+  }
+
+  incoming.pause()
+  const stopWatching = finished(incoming, (error) => {
+    stopWatching()
+    incoming.on('error', () => {}) // the watcher's listener is gone, and a later error must stay quiet
+    if (error) controller.error(error.code === 'ERR_STREAM_PREMATURE_CLOSE' ? abortError(error) : error)
+    else controller.close()
+  })
+  incoming.on('data', onData)
+
+  return new ReadableStream<Uint8Array>(
+    {
+      start(c) {
+        controller = c
+      },
+      pull() {
+        incoming.resume()
+      },
+      cancel() {
+        stopWatching()
+        incoming.off('data', onData)
+        incoming.pause()
+        cancelledBodies.add(incoming)
+        onCancel?.()
+      },
+    },
+    new ByteLengthQueuingStrategy({ highWaterMark: incoming.readableHighWaterMark }),
+  )
+}
+
 /**
  * Caps a body stream at `limit` bytes. On exceed, errors only the
  * consumer-facing side (req.text()/json() reject with PayloadTooLargeError)
- * WITHOUT cancelling the source: cancelling Readable.toWeb destroys the
- * underlying socket, which would kill the 413 response the handler is about
- * to send. `onExceed` (drainIncoming) disposes of the connection instead -
- * after the response is written.
+ * WITHOUT cancelling the source: a body over the cap gets its 413 with
+ * `Connection: close` (closeIfBodyUnread), which a cancel would turn off.
+ * `onExceed` (drainIncoming) disposes of the connection instead - after the
+ * response is written.
  */
 function limitStream(
   source: ReadableStream<Uint8Array>,
@@ -751,7 +816,7 @@ export interface ServeOptions {
   /** @default 'optimized' */
   mode?: 'optimized' | 'native'
   /** Bodies with Content-Length <= threshold are buffered as Promise<Uint8Array> for fast path.
-   *  Larger or without Content-Length → Readable.toWeb stream. @default 102400 (100KB) */
+   *  Larger or without Content-Length → a stream of the request. @default 102400 (100KB) */
   bufferThreshold?: number
   /** Max request body size in bytes. A larger declared Content-Length gets an immediate
    *  413 response (handler never runs); chunked bodies error mid-stream past the cap
@@ -958,7 +1023,7 @@ function createNativeListener(
       }
       let request: Request
       try {
-        request = toWebRequest(nodeReq, port, hostname, maxBodySize)
+        request = toWebRequest(nodeReq, nodeRes, port, hostname, maxBodySize)
       } catch {
         closeIfBodyUnread(nodeReq, nodeRes, method !== 'GET' && method !== 'HEAD')
         sendRefusal(nodeRes, method)
@@ -973,7 +1038,13 @@ function createNativeListener(
   }
 }
 
-function toWebRequest(nodeReq: IncomingMessage, port: number, hostname: string, maxBodySize: number | false): Request {
+function toWebRequest(
+  nodeReq: IncomingMessage,
+  nodeRes: ServerResponse,
+  port: number,
+  hostname: string,
+  maxBodySize: number | false,
+): Request {
   const header = nodeReq.headers.host
   const host = !header ? `${hostname}:${port}` : PLAIN_HOST.test(header) ? header : 'localhost'
   const target = nodeReq.url ?? '/'
@@ -991,7 +1062,10 @@ function toWebRequest(nodeReq: IncomingMessage, port: number, hostname: string, 
   const method = (nodeReq.method ?? 'GET').toUpperCase()
   const hasBody = method !== 'GET' && method !== 'HEAD'
 
-  let body = hasBody ? (Readable.toWeb(nodeReq) as any) : undefined
+  // No close listener here to drain a body, as the optimized listener has for every one: only a cancel needs it
+  let body = hasBody
+    ? (incomingBody(nodeReq, () => nodeRes.once('close', () => drainIncoming(nodeReq))) as any)
+    : undefined
   // Cap chunked bodies in-stream (no Content-Length to pre-check; oversized
   // declared lengths were already rejected in the listener).
   if (body && maxBodySize !== false && nodeReq.headers['content-length'] == null) {
