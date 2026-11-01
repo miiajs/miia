@@ -38,6 +38,16 @@ describe.skipIf(process.platform === 'win32')('miia start', () => {
     expect(await run.exited).toBe(42)
   })
 
+  it('names the runtime only when it was detected', async () => {
+    const given = runCli(fixture({ 'main.ts': '' }), ['start', '--runtime', 'bun', '--entry', 'main.ts'])
+    expect(await given.exited).toBe(0)
+    expect(given.output()).not.toContain('Runtime:')
+
+    const detected = runCli(fixture({ 'main.ts': '', 'bun.lock': '' }), ['start', '--entry', 'main.ts'])
+    expect(await detected.exited).toBe(0)
+    expect(detected.output()).toContain('Runtime: bun (bun.lock)')
+  })
+
   it(
     'forwards SIGTERM and waits for a graceful shutdown past execa 5s force-kill',
     async () => {
@@ -53,14 +63,21 @@ describe.skipIf(process.platform === 'win32')('miia start', () => {
       await run.waitFor('app ready')
       const started = Date.now()
       run.child.kill('SIGTERM')
-      // A clean shutdown after a forwarded SIGTERM reports the signal
-      expect(await run.exited).toBe(143)
+      expect(await run.exited).toBe(0)
       expect(Date.now() - started).toBeGreaterThanOrEqual(6500)
     },
     { timeout: 20_000 },
   )
 
-  it('lets a non-zero exit code of the app win over the signal', async () => {
+  it('reports 128 + n when the forwarded signal ends an app without a handler', async () => {
+    const cwd = fixture({ 'main.ts': "console.log('app ready')\nsetInterval(() => {}, 1000)\n" })
+    const run = runCli(cwd, ['start', '--runtime', 'bun', '--entry', 'main.ts'])
+    await run.waitFor('app ready')
+    run.child.kill('SIGINT')
+    expect(await run.exited).toBe(143)
+  })
+
+  it('exits with the code the app chose on a signal', async () => {
     const cwd = fixture({
       'main.ts': [
         "process.on('SIGTERM', () => process.exit(3))",

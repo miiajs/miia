@@ -43,13 +43,14 @@ describe('createSignalPolicy', () => {
 })
 
 describe('childExitCode', () => {
-  it('lets a non-zero app code win, then the forwarded signal, then the signal that ended it', () => {
-    expect(childExitCode({ exitCode: 3 }, 'SIGINT')).toBe(3)
-    expect(childExitCode({ exitCode: 0 }, 'SIGINT')).toBe(130)
-    expect(childExitCode({ signal: 'SIGKILL' }, 'SIGTERM')).toBe(143)
-    expect(childExitCode({ signal: 'SIGKILL' }, null)).toBe(137)
-    expect(childExitCode({ exitCode: 0 }, null)).toBe(0)
-    expect(childExitCode({ exitCode: 42 }, null)).toBe(42)
+  it('is the code the app exited with', () => {
+    expect(childExitCode({ exitCode: 0 })).toBe(0)
+    expect(childExitCode({ exitCode: 42 })).toBe(42)
+  })
+
+  it('is 128 + n when a signal ended the app', () => {
+    expect(childExitCode({ signal: 'SIGTERM' })).toBe(143)
+    expect(childExitCode({ signal: 'SIGKILL' })).toBe(137)
   })
 })
 

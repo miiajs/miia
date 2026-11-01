@@ -59,7 +59,7 @@ export async function startDev(options: DevOptions): Promise<number> {
   })
   pipeTsc(tsc)
 
-  let signalled = null as NodeJS.Signals | null
+  let stopping = false
   let serverExited = false
   let forceKillTimer: NodeJS.Timeout | undefined
 
@@ -67,8 +67,7 @@ export async function startDev(options: DevOptions): Promise<number> {
   const stopListening = onTerminationSignals((signal) => {
     const decision = policy(signal)
     if (decision === 'forward') {
-      signalled = signal
-      logger.info('Shutting down...')
+      stopping = true
       killServer('SIGTERM')
       tsc.kill('SIGTERM')
       forceKillTimer = setTimeout(() => {
@@ -83,7 +82,7 @@ export async function startDev(options: DevOptions): Promise<number> {
   })
 
   tsc.then((result) => {
-    if (serverExited || signalled) return
+    if (serverExited || stopping) return
     logger.warn(`Type-checking stopped (tsc exited with ${result.exitCode ?? result.signal})`)
   })
 
@@ -104,7 +103,7 @@ export async function startDev(options: DevOptions): Promise<number> {
     if (result.failed && result.exitCode === undefined && !result.signal) {
       throw new CliError(result.shortMessage ?? `Failed to start ${serverCmd.command}`)
     }
-    return childExitCode(result, signalled)
+    return childExitCode(result)
   } finally {
     clearTimeout(forceKillTimer)
     stopListening()

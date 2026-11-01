@@ -21,7 +21,7 @@ export default defineCommand({
   run: action(async ({ args }) => {
     const cwd = process.cwd()
     const { runtime, source } = resolveRuntime(cwd, args.runtime)
-    logger.info(`Runtime: ${runtime} (${source})`)
+    if (!args.runtime) logger.info(`Runtime: ${runtime} (${source})`)
 
     const cmd = getBuildCommand(runtime, cwd, requireTypeScript(cwd))
     if (runtime === 'node') await assertEmits(cmd.command, cmd.args, cwd)

@@ -9,9 +9,8 @@ export function formatTscLine(line: string): string | null {
   const clean = line.replace(/\r/g, '').replace(TSC_TIMESTAMP, '')
   if (!clean.trim()) return null
 
-  if (/Starting compilation in watch mode/.test(clean)) return colors.cyan('Type-checking in progress...')
-  if (/File change detected/.test(clean)) return colors.cyan('File changed, rechecking...')
-  if (/Found 0 errors/.test(clean)) return colors.green('No errors found.')
+  if (/Starting compilation in watch mode|File change detected/.test(clean)) return null
+  if (/Found 0 errors/.test(clean)) return colors.green('No type errors found')
   if (/Found \d+ errors?/.test(clean)) return colors.red(clean)
 
   const match = TSC_ERROR_LINE.exec(clean)

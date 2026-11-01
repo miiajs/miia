@@ -39,13 +39,8 @@ export function signalExitCode(signal: NodeJS.Signals): number {
   return 128 + (constants.signals[signal] ?? 0)
 }
 
-/** The app's own non-zero exit code wins; otherwise the signal we forwarded, or the one that ended it, as 128 + n. */
-export function childExitCode(
-  result: { exitCode?: number; signal?: string },
-  forwarded: NodeJS.Signals | null,
-): number {
-  if (result.exitCode !== undefined && result.exitCode !== 0) return result.exitCode
-  if (forwarded) return signalExitCode(forwarded)
+/** The app's own exit code when it exited by itself, 128 + n when a signal ended it. */
+export function childExitCode(result: { exitCode?: number; signal?: string }): number {
   if (result.signal) return signalExitCode(result.signal as NodeJS.Signals)
   return result.exitCode ?? 1
 }

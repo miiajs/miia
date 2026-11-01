@@ -36,11 +36,10 @@ export default defineCommand({
   run: action(async ({ args }) => {
     const cwd = process.cwd()
     const { runtime, source } = resolveRuntime(cwd, args.runtime)
-    logger.info(`Runtime: ${runtime} (${source})`)
+    if (!args.runtime) logger.info(`Runtime: ${runtime} (${source})`)
     requireRuntime(runtime)
 
     const cmd = getStartCommand(runtime, args.entry, args.dist, cwd, args['env-file'])
-    logger.info('Starting production server...')
 
     // execa would SIGKILL 5s after kill() by default - long enough to cut a graceful shutdown short
     const child = execa(cmd.command, cmd.args, {
@@ -51,12 +50,10 @@ export default defineCommand({
       forceKillAfterDelay: false,
     })
 
-    let forwarded = null as NodeJS.Signals | null
     const policy = createSignalPolicy()
     const stopListening = onTerminationSignals((signal) => {
       const decision = policy(signal)
       if (decision === 'forward') {
-        forwarded = signal
         child.kill('SIGTERM')
       } else if (decision === 'kill') {
         child.kill('SIGKILL')
@@ -67,6 +64,6 @@ export default defineCommand({
     if (result.failed && result.exitCode === undefined && !result.signal) {
       throw new CliError(result.shortMessage ?? `Failed to start ${cmd.command}`)
     }
-    process.exitCode = childExitCode(result, forwarded)
+    process.exitCode = childExitCode(result)
   }),
 })

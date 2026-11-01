@@ -29,7 +29,7 @@ export default defineCommand({
   run: action(async ({ args }) => {
     const cwd = process.cwd()
     const { runtime, source } = resolveRuntime(cwd, args.runtime)
-    logger.info(`Detected runtime: ${runtime} (${source})`)
+    if (!args.runtime) logger.info(`Runtime: ${runtime} (${source})`)
 
     requireRuntime(runtime)
     const tsc = requireTypeScript(cwd)

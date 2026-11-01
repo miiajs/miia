@@ -8,17 +8,15 @@ const plain = (line: string) => {
 }
 
 describe('formatTscLine', () => {
-  it('strips 12-hour timestamps', () => {
-    expect(plain('7:08:25 AM - Starting compilation in watch mode...')).toBe('Type-checking in progress...')
-    expect(plain('11:59:59 PM - File change detected. Starting incremental compilation...')).toBe(
-      'File changed, rechecking...',
-    )
+  it('drops the progress lines', () => {
+    expect(plain('7:08:25 AM - Starting compilation in watch mode...')).toBeNull()
+    expect(plain('11:59:59 PM - File change detected. Starting incremental compilation...')).toBeNull()
   })
 
   it('strips 24-hour and lower-case am/pm timestamps', () => {
-    expect(plain('19:08:25 - Found 0 errors. Watching for file changes.')).toBe('No errors found.')
-    expect(plain('[7:08:25 pm] - Found 0 errors. Watching for file changes.')).toBe('No errors found.')
-    expect(plain('7:08:25 AM - Found 0 errors. Watching for file changes.')).toBe('No errors found.')
+    expect(plain('19:08:25 - Found 0 errors. Watching for file changes.')).toBe('No type errors found')
+    expect(plain('[7:08:25 pm] - Found 0 errors. Watching for file changes.')).toBe('No type errors found')
+    expect(plain('7:08:25 AM - Found 0 errors. Watching for file changes.')).toBe('No type errors found')
   })
 
   it('keeps timestamp-looking text that is not at the line start', () => {
@@ -26,7 +24,7 @@ describe('formatTscLine', () => {
   })
 
   it('drops carriage returns', () => {
-    expect(plain('7:08:25 AM - Found 0 errors. Watching for file changes.\r')).toBe('No errors found.')
+    expect(plain('7:08:25 AM - Found 0 errors. Watching for file changes.\r')).toBe('No type errors found')
     expect(plain('\r')).toBeNull()
   })
 
