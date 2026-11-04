@@ -1,21 +1,12 @@
 import { Injectable } from '@miiajs/core'
-
-export interface User {
-  id: number
-  email: string
-}
-
-interface StoredUser extends User {
-  passwordHash: string
-}
+import type { StoredUser, User } from './users.types.js'
 
 // In-memory store: replace it with your database
 @Injectable()
 export class UsersService {
-  private readonly users = new Map<number, StoredUser>()
-  private nextId = 1
+  private readonly users = new Map<string, StoredUser>()
 
-  async findById(id: number): Promise<User | undefined> {
+  async findById(id: string): Promise<User | undefined> {
     const user = this.users.get(id)
     return user && toUser(user)
   }
@@ -33,7 +24,7 @@ export class UsersService {
   }
 
   async create(data: { email: string; passwordHash: string }): Promise<User> {
-    const user = { id: this.nextId++, ...data }
+    const user = { id: crypto.randomUUID(), ...data }
     this.users.set(user.id, user)
     return toUser(user)
   }

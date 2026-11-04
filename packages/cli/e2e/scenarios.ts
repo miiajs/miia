@@ -51,6 +51,8 @@ export function probe(
     json?: unknown
     contentType?: string
     header?: [string, string]
+    /** For a body not known in advance, e.g. a generated id */
+    check?: (body: unknown) => boolean
     save?: (body: unknown, state: Record<string, unknown>) => void
   },
 ): Probe {
@@ -82,9 +84,18 @@ export function probe(
       if (expected.json !== undefined && JSON.stringify(body) !== JSON.stringify(expected.json)) {
         throw new Error(`${name}: body ${text}`)
       }
+      if (expected.check && !expected.check(body)) throw new Error(`${name}: body ${text}`)
       expected.save?.(body, state)
     },
   }
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
+
+// The body is `rest` plus an id that is a UUID string
+const withUuid = (rest: Record<string, unknown>) => (body: unknown) => {
+  const { id, ...others } = body as { id?: unknown }
+  return typeof id === 'string' && UUID.test(id) && JSON.stringify(others) === JSON.stringify(rest)
 }
 
 const greets = probe('GET /', { path: '/' }, { status: 200, json: { message: 'Hello, Miia!' } })
@@ -98,7 +109,7 @@ const register = probe(
 const me = probe(
   'GET /auth/me',
   { path: '/auth/me', headers: { authorization: 'Bearer {{token}}' } },
-  { status: 200, json: { id: 1, email: 'e2e@example.com' } },
+  { status: 200, check: withUuid({ email: 'e2e@example.com' }) },
 )
 const preflight = probe(
   'OPTIONS / (CORS)',
@@ -109,10 +120,11 @@ const preflight = probe(
 const createWidget = probe(
   'POST /widgets',
   { method: 'POST', path: '/widgets', body: { name: 'First' } },
-  { status: 201, json: { id: 1, name: 'First' } },
+  { status: 201, check: withUuid({ name: 'First' }) },
 )
 
-// Every schematic, then the project must still type-check and pass its tests (the resource test included)
+// Every schematic that needs no database, then the project must still type-check and pass its tests
+// (the resource test included)
 const generateAll: Step[] = [
   miia('g', 'resource', 'widgets'),
   miia('g', 'service', 'audit', '--export'),
@@ -162,7 +174,15 @@ export const scenarios: Scenario[] = [
     pm: 'bun',
     installWith: 'bun',
     args: ['--features', FEATURES, '--db', 'drizzle-sqlite'],
-    steps: [install(), ...basics('bun'), run('lint'), run('db:generate'), run('db:migrate'), start(...fullProbes)],
+    steps: [
+      install(),
+      miia('g', 'table', 'notes'),
+      ...basics('bun'),
+      run('lint'),
+      run('db:generate'),
+      run('db:migrate'),
+      start(...fullProbes),
+    ],
   },
   {
     name: 'full-node',
@@ -170,7 +190,14 @@ export const scenarios: Scenario[] = [
     pm: 'npm',
     installWith: 'npm',
     args: ['--features', FEATURES, '--db', 'drizzle-sqlite'],
-    steps: [install(), ...basics('node'), run('db:generate'), run('db:migrate'), start(...fullProbes)],
+    steps: [
+      install(),
+      miia('g', 'table', 'notes'),
+      ...basics('node'),
+      run('db:generate'),
+      run('db:migrate'),
+      start(...fullProbes),
+    ],
   },
   {
     // sqlite is not available on Deno
@@ -188,7 +215,14 @@ export const scenarios: Scenario[] = [
     pm: 'bun',
     installWith: 'bun',
     args: ['--db', 'drizzle-postgres'],
-    steps: [install(), ...basics('bun'), run('db:generate')],
+    steps: [
+      install(),
+      ...basics('bun'),
+      run('db:generate'),
+      miia('g', 'table', 'notes'),
+      run('check'),
+      run('db:generate'),
+    ],
   },
   {
     name: 'db-mysql-bun',
@@ -196,7 +230,32 @@ export const scenarios: Scenario[] = [
     pm: 'bun',
     installWith: 'bun',
     args: ['--db', 'drizzle-mysql'],
-    steps: [install(), ...basics('bun'), run('db:generate')],
+    steps: [
+      install(),
+      ...basics('bun'),
+      run('db:generate'),
+      miia('g', 'table', 'notes'),
+      run('check'),
+      run('db:generate'),
+    ],
+  },
+  {
+    // The empty schema barrel starts too; sqlite needs no server, so the table reaches a real database
+    name: 'db-sqlite-bun',
+    runtime: 'bun',
+    pm: 'bun',
+    installWith: 'bun',
+    args: ['--db', 'drizzle-sqlite'],
+    steps: [
+      install(),
+      ...basics('bun'),
+      start(greets),
+      miia('g', 'table', 'notes'),
+      run('check'),
+      run('db:generate'),
+      run('db:migrate'),
+      start(greets),
+    ],
   },
   {
     name: 'papr-bun',
@@ -212,6 +271,39 @@ export const scenarios: Scenario[] = [
     pm: 'bun',
     installWith: 'bun',
     args: ['--db', 'mongoose'],
+    steps: [install(), ...basics('bun')],
+  },
+  // jwt-auth keeps users in the database: its variants type-check and their tests pass on a fake
+  {
+    name: 'auth-postgres-bun',
+    runtime: 'bun',
+    pm: 'bun',
+    installWith: 'bun',
+    args: ['--features', 'jwt-auth', '--db', 'drizzle-postgres'],
+    steps: [install(), ...basics('bun'), run('db:generate')],
+  },
+  {
+    name: 'auth-mysql-bun',
+    runtime: 'bun',
+    pm: 'bun',
+    installWith: 'bun',
+    args: ['--features', 'jwt-auth', '--db', 'drizzle-mysql'],
+    steps: [install(), ...basics('bun'), run('db:generate')],
+  },
+  {
+    name: 'auth-papr-bun',
+    runtime: 'bun',
+    pm: 'bun',
+    installWith: 'bun',
+    args: ['--features', 'jwt-auth', '--db', 'papr'],
+    steps: [install(), ...basics('bun')],
+  },
+  {
+    name: 'auth-mongoose-bun',
+    runtime: 'bun',
+    pm: 'bun',
+    installWith: 'bun',
+    args: ['--features', 'jwt-auth', '--db', 'mongoose'],
     steps: [install(), ...basics('bun')],
   },
   {

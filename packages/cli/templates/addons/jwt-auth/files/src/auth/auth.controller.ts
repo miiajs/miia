@@ -1,9 +1,9 @@
 import { AuthGuard } from '@miiajs/auth'
 import { Controller, Get, inject, Post, type RequestContext, Status, UseGuard } from '@miiajs/core'
-import { type RegisterInput, RegisterSchema } from './auth.schemas.js'
 import { AuthService } from './auth.service.js'
 import { JwtAuth } from './providers/jwt-auth.provider.js'
 import { LocalAuth } from './providers/local-auth.provider.js'
+import { type RegisterInput, RegisterSchema } from './schemas/register.schema.js'
 
 @Controller('/auth')
 export class AuthController {

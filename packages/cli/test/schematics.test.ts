@@ -10,6 +10,7 @@ describe('schematics', () => {
     expect(resolveSchematic('r')?.name).toBe('resource')
     expect(resolveSchematic('guard')?.name).toBe('guard')
     expect(resolveSchematic('middleware')?.name).toBe('middleware')
+    expect(resolveSchematic('table')?.name).toBe('table')
     expect(resolveSchematic('mw')).toBeUndefined()
     expect(resolveSchematic('xyz')).toBeUndefined()
   })
@@ -23,6 +24,7 @@ describe('schematics', () => {
       guard: null,
       middleware: null,
       resource: 'imports',
+      table: null,
     })
   })
 
@@ -39,7 +41,20 @@ describe('schematics', () => {
     ).toEqual(['resource'])
   })
 
+  it('put guards and middleware under src/common/', () => {
+    const dirs = Object.fromEntries(listSchematics().map((s) => [s.name, s.commonDir ?? null]))
+    expect(dirs).toEqual({
+      module: null,
+      controller: null,
+      service: null,
+      guard: 'common/guards',
+      middleware: 'common/middleware',
+      resource: null,
+      table: null,
+    })
+  })
+
   it('describe themselves for usage messages', () => {
-    expect(describeSchematics()).toBe('module (m), controller (c), service (s), guard, middleware, resource (r)')
+    expect(describeSchematics()).toBe('module (m), controller (c), service (s), guard, middleware, resource (r), table')
   })
 })

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'bun:test'
 import { CliError } from '../src/utils/errors.js'
-import { splitWords, toCamelCase, toKebabCase, toPascalCase, validateArtifactName } from '../src/utils/naming.js'
+import {
+  splitWords,
+  toCamelCase,
+  toKebabCase,
+  toPascalCase,
+  toSnakeCase,
+  validateArtifactName,
+} from '../src/utils/naming.js'
 
 describe('splitWords', () => {
   it('splits camel, Pascal, snake and kebab case and acronyms', () => {
@@ -30,6 +37,16 @@ describe('case conversion', () => {
       expect(toKebabCase(input)).toBe(kebab)
     })
   }
+})
+
+describe('toSnakeCase', () => {
+  it('joins lower-case words with an underscore', () => {
+    expect(toSnakeCase('user-profile')).toBe('user_profile')
+    expect(toSnakeCase('userProfile')).toBe('user_profile')
+    expect(toSnakeCase('user_profile')).toBe('user_profile')
+    expect(toSnakeCase('HTTPServer')).toBe('http_server')
+    expect(toSnakeCase('posts')).toBe('posts')
+  })
 })
 
 describe('validateArtifactName', () => {

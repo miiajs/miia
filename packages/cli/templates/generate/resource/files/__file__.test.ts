@@ -31,10 +31,11 @@ describe('__Name__Controller', () => {
     }
   })
 
-  it('answers 404 for a missing item and 422 for an invalid body', async () => {
+  it('answers 404 for a missing item and 422 for an invalid id or body', async () => {
     const app = await createApp()
     try {
-      expect((await app.request('GET', '/__file__/999')).status).toBe(404)
+      expect((await app.request('GET', `/__file__/${crypto.randomUUID()}`)).status).toBe(404)
+      expect((await app.request('GET', '/__file__/999')).status).toBe(422)
       expect((await app.request('POST', '/__file__', { body: { name: '' } })).status).toBe(422)
     } finally {
       await app.close()

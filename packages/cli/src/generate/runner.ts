@@ -1,17 +1,20 @@
 import { randomBytes } from 'node:crypto'
 import { existsSync } from 'node:fs'
 import { isAbsolute, join, posix, relative, sep } from 'node:path'
+import type { StringLiteral } from 'typescript'
 import type { PackageJson } from '../codemod/json.js'
 import { addToModuleArray } from '../codemod/source.js'
 import { ProjectTree } from '../codemod/tree.js'
-import { loadTypeScript, type TS } from '../codemod/typescript.js'
+import { loadTypeScript, parse, type TS } from '../codemod/typescript.js'
+import { defaultPackageManager, detectPackageManager, runScriptCommand } from '../runtime/package-manager.js'
 import { projectRuntime } from '../scaffold/add.js'
 import { applyTemplate, flavorOf } from '../scaffold/apply.js'
+import { addTableToSchema, readDrizzleConfig } from '../scaffold/drizzle-config.js'
 import { detectLayout } from '../scaffold/layout.js'
 import { CliError } from '../utils/errors.js'
 import { formatFiles } from '../utils/format.js'
 import { logger } from '../utils/logger.js'
-import { toCamelCase, toKebabCase, toPascalCase, validateArtifactName } from '../utils/naming.js'
+import { toCamelCase, toKebabCase, toPascalCase, toSnakeCase, validateArtifactName } from '../utils/naming.js'
 import { cliVersion } from '../utils/package-info.js'
 import { findParentModule } from './parent-module.js'
 import { registerInModule } from './register.js'
@@ -30,7 +33,7 @@ export interface GenerateOptions {
 export function planGenerate(
   options: GenerateOptions,
   deps: { cwd: string; ts: TS; cliVersion?: string },
-): { tree: ProjectTree; warnings: string[] } {
+): { tree: ProjectTree; warnings: string[]; next: string[] } {
   const { cwd, ts } = deps
   if (!existsSync(join(cwd, 'src'))) throw new CliError('Not a MiiaJS project (no src/ found). Run from project root.')
 
@@ -49,12 +52,18 @@ export function planGenerate(
   const className = toPascalCase(name)
   const file = toKebabCase(name)
   const base = posix.join('src', path.replaceAll('\\', '/'), dir)
-  const nested = schematic.alwaysNested || (!options.flat && !dir)
-  const target = nested ? posix.join(base, file) : base
+  let target = base
+  if (schematic.commonDir) {
+    if (!dir && !path) target = posix.join('src', schematic.commonDir)
+  } else if (schematic.alwaysNested || (!options.flat && !dir)) {
+    target = posix.join(base, file)
+  }
 
   const tree = new ProjectTree(cwd)
+  const drizzle = schematic.name === 'table' ? readDrizzleConfig(tree, ts) : null
   const pkgText = tree.read('package.json')
-  const runtime = projectRuntime(pkgText ? (JSON.parse(pkgText) as PackageJson) : null, cwd)
+  const pkg = pkgText ? (JSON.parse(pkgText) as PackageJson) : null
+  const runtime = projectRuntime(pkg, cwd)
   const ctx = {
     tree,
     ts,
@@ -64,15 +73,29 @@ export function planGenerate(
     cliVersion: deps.cliVersion ?? cliVersion(),
     random: (bytes: number) => randomBytes(bytes).toString('hex'),
   }
-  applyTemplate(ctx, `generate/${schematic.name}`, {
+  const constant = toCamelCase(name)
+  const identifiers = { __Name__: className, __name__: constant, __file__: file }
+  applyTemplate(ctx, drizzle ? `generate/table/${drizzle.dialect}` : `generate/${schematic.name}`, {
     target,
-    identifiers: { __Name__: className, __name__: toCamelCase(name), __file__: file },
+    identifiers: drizzle ? { ...identifiers, __table__: toSnakeCase(name) } : identifiers,
     strict: true,
   })
 
   const warnings: string[] = []
+  const next: string[] = []
+  if (drizzle) {
+    const tableFile = posix.join(target, `${file}.table.ts`)
+    checkTableName(ts, constant, tree.read(tableFile) ?? '')
+    const warning = addTableToSchema(tree, ts, drizzle.schema, tableFile)
+    if (warning) warnings.push(warning)
+    const pm = detectPackageManager(cwd) ?? defaultPackageManager(runtime)
+    for (const script of ['db:generate', 'db:migrate']) {
+      if (pkg?.scripts?.[script]) next.push(runScriptCommand(pm, script))
+    }
+  }
+
   const register = schematic.register
-  if (!register) return { tree, warnings }
+  if (!register) return { tree, warnings, next }
 
   const registered = register.className(className)
   const registeredFile = posix.join(target, register.file(file))
@@ -82,7 +105,7 @@ export function planGenerate(
   const parent = findParentModule(join(cwd, searchFrom), join(cwd, registeredFile), rootModule && join(cwd, rootModule))
   if (!parent) {
     warnings.push(`No parent module found. Register ${registered} manually.`)
-    return { tree, warnings }
+    return { tree, warnings, next }
   }
 
   const modulePath = relative(cwd, parent).split(sep).join('/')
@@ -103,12 +126,33 @@ export function planGenerate(
     })
     if (exported === 'unsupported') warnings.push(`Add ${registered} to exports of ${modulePath} manually`)
   }
-  return { tree, warnings }
+  return { tree, warnings, next }
+}
+
+const RESERVED_WORDS = new Set(
+  `arguments await break case catch class const continue debugger default delete do else enum eval export extends
+  false finally for function if implements import in instanceof interface let new null package private protected
+  public return static super switch this throw true try typeof var void while with yield`.split(/\s+/),
+)
+
+// A table is a top-level const next to the imports of its file: neither a reserved word nor one of them fits
+function checkTableName(ts: TS, constant: string, rendered: string): void {
+  if (RESERVED_WORDS.has(constant)) {
+    throw new CliError(`Cannot name a table "${constant}": it becomes a const of that name, and the word is reserved`)
+  }
+  for (const stmt of parse(ts, rendered).statements) {
+    if (!ts.isImportDeclaration(stmt)) continue
+    const bindings = stmt.importClause?.namedBindings
+    if (bindings && ts.isNamedImports(bindings) && bindings.elements.some((el) => el.name.text === constant)) {
+      const from = (stmt.moduleSpecifier as StringLiteral).text
+      throw new CliError(`Cannot name a table "${constant}": the table file imports ${constant} from ${from}`)
+    }
+  }
 }
 
 export async function runGenerate(options: GenerateOptions): Promise<void> {
   const cwd = process.cwd()
-  const { tree, warnings } = planGenerate(options, { cwd, ts: await loadTypeScript() })
+  const { tree, warnings, next } = planGenerate(options, { cwd, ts: await loadTypeScript() })
 
   if (options.dryRun) {
     logger.info('DRY RUN - no files will be written\n')
@@ -119,4 +163,5 @@ export async function runGenerate(options: GenerateOptions): Promise<void> {
     await formatFiles(written, cwd)
   }
   for (const warning of warnings) logger.warn(`  ${warning}`)
+  if (next.length > 0) logger.info(`\nNext:\n\n  ${next.join('\n  ')}`)
 }

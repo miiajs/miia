@@ -53,6 +53,7 @@ import { envSchema, type Env } from '../env.schema.js'
 import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
 import { JwtModule } from '@miiajs/jwt'
+import { UsersModule } from '../users/users.module.js'
 import { AuthModule } from '../auth/auth.module.js'
 
 @Module({
@@ -65,6 +66,7 @@ import { AuthModule } from '../auth/auth.module.js'
       }),
       { global: true },
     ),
+    UsersModule,
     AuthModule,
   ],
   controllers: [AppController],
@@ -76,10 +78,10 @@ export class AppModule {}
   "src/auth/auth.controller.ts": 
 "import { AuthGuard } from '@miiajs/auth'
 import { Controller, Get, inject, Post, type RequestContext, Status, UseGuard } from '@miiajs/core'
-import { type RegisterInput, RegisterSchema } from './auth.schemas.js'
 import { AuthService } from './auth.service.js'
 import { JwtAuth } from './providers/jwt-auth.provider.js'
 import { LocalAuth } from './providers/local-auth.provider.js'
+import { type RegisterInput, RegisterSchema } from './schemas/register.schema.js'
 
 @Controller('/auth')
 export class AuthController {
@@ -110,6 +112,7 @@ export class AuthController {
 import { UsersModule } from '../users/users.module.js'
 import { AuthController } from './auth.controller.js'
 import { AuthService } from './auth.service.js'
+import { PasswordService } from './password.service.js'
 import { JwtAuth } from './providers/jwt-auth.provider.js'
 import { LocalAuth } from './providers/local-auth.provider.js'
 
@@ -118,51 +121,36 @@ import { LocalAuth } from './providers/local-auth.provider.js'
   global: true,
   imports: [UsersModule],
   controllers: [AuthController],
-  providers: [AuthService, LocalAuth, JwtAuth],
+  providers: [AuthService, PasswordService, LocalAuth, JwtAuth],
   exports: [JwtAuth],
 })
 export class AuthModule {}
 "
 ,
-  "src/auth/auth.schemas.ts": 
-"import { z } from 'zod'
-
-export const LoginSchema = z.object({
-  email: z.email(),
-  password: z.string().min(1),
-})
-
-export const RegisterSchema = z.object({
-  email: z.email(),
-  password: z.string().min(8),
-})
-
-export type LoginInput = z.infer<typeof LoginSchema>
-export type RegisterInput = z.infer<typeof RegisterSchema>
-"
-,
   "src/auth/auth.service.ts": 
 "import { ConflictException, Injectable, inject } from '@miiajs/core'
 import { JwtService } from '@miiajs/jwt'
-import { type User, UsersService } from '../users/users.service.js'
-import type { RegisterInput } from './auth.schemas.js'
-import { hashPassword } from './password.js'
+import { UsersService } from '../users/users.service.js'
+import type { User } from '../users/users.types.js'
+import { PasswordService } from './password.service.js'
+import type { RegisterInput } from './schemas/register.schema.js'
 
 @Injectable()
 export class AuthService {
   private readonly usersService = inject(UsersService)
   private readonly jwtService = inject(JwtService)
+  private readonly passwordService = inject(PasswordService)
 
   async register({ email, password }: RegisterInput) {
     if (await this.usersService.findByEmail(email)) {
       throw new ConflictException('Email is already registered')
     }
-    const user = await this.usersService.create({ email, passwordHash: await hashPassword(password) })
+    const user = await this.usersService.create({ email, passwordHash: await this.passwordService.hash(password) })
     return this.issueTokenFor(user)
   }
 
   async issueTokenFor(user: User) {
-    return { accessToken: await this.jwtService.sign({ sub: String(user.id), email: user.email }) }
+    return { accessToken: await this.jwtService.sign({ sub: user.id, email: user.email }) }
   }
 }
 "
@@ -220,13 +208,18 @@ describe('auth', () => {
 })
 "
 ,
-  "src/auth/password.ts": 
-"export function hashPassword(password: string): Promise<string> {
-  return Bun.password.hash(password)
-}
+  "src/auth/password.service.ts": 
+"import { Injectable } from '@miiajs/core'
 
-export function verifyPassword(password: string, hash: string): Promise<boolean> {
-  return Bun.password.verify(password, hash)
+@Injectable()
+export class PasswordService {
+  hash(password: string): Promise<string> {
+    return Bun.password.hash(password)
+  }
+
+  verify(password: string, hash: string): Promise<boolean> {
+    return Bun.password.verify(password, hash)
+  }
 }
 "
 ,
@@ -251,7 +244,7 @@ export class JwtAuth implements AuthProvider {
       throw new UnauthorizedException('Invalid token')
     })
 
-    const user = await this.usersService.findById(Number(payload.sub))
+    const user = await this.usersService.findById(payload.sub)
     if (!user) throw new UnauthorizedException('User not found')
     return user
   }
@@ -262,12 +255,13 @@ export class JwtAuth implements AuthProvider {
 "import type { AuthProvider } from '@miiajs/auth'
 import { Injectable, inject, type RequestContext, UnauthorizedException } from '@miiajs/core'
 import { UsersService } from '../../users/users.service.js'
-import { LoginSchema } from '../auth.schemas.js'
-import { verifyPassword } from '../password.js'
+import { PasswordService } from '../password.service.js'
+import { LoginSchema } from '../schemas/login.schema.js'
 
 @Injectable()
 export class LocalAuth implements AuthProvider {
   private readonly usersService = inject(UsersService)
+  private readonly passwordService = inject(PasswordService)
 
   async authenticate(ctx: RequestContext) {
     const parsed = LoginSchema.safeParse(await ctx.json().catch(() => null))
@@ -277,12 +271,34 @@ export class LocalAuth implements AuthProvider {
     const { email, password } = parsed.data
 
     const found = await this.usersService.findByEmailForAuth(email)
-    if (!found || !(await verifyPassword(password, found.passwordHash))) {
+    if (!found || !(await this.passwordService.verify(password, found.passwordHash))) {
       throw new UnauthorizedException('Invalid credentials')
     }
     return { id: found.id, email: found.email }
   }
 }
+"
+,
+  "src/auth/schemas/login.schema.ts": 
+"import { z } from 'zod'
+
+export const LoginSchema = z.object({
+  email: z.email(),
+  password: z.string().min(1),
+})
+
+export type LoginInput = z.infer<typeof LoginSchema>
+"
+,
+  "src/auth/schemas/register.schema.ts": 
+"import { z } from 'zod'
+
+export const RegisterSchema = z.object({
+  email: z.email(),
+  password: z.string().min(8),
+})
+
+export type RegisterInput = z.infer<typeof RegisterSchema>
 "
 ,
   "src/env.schema.ts": 
@@ -299,7 +315,7 @@ export type Env = z.infer<typeof envSchema>
 "
 ,
   "src/types/core.d.ts": 
-"import type { User } from '../users/users.service.js'
+"import type { User } from '../users/users.types.js'
 
 declare module '@miiajs/core' {
   interface RequestContext {
@@ -321,23 +337,14 @@ export class UsersModule {}
 ,
   "src/users/users.service.ts": 
 "import { Injectable } from '@miiajs/core'
-
-export interface User {
-  id: number
-  email: string
-}
-
-interface StoredUser extends User {
-  passwordHash: string
-}
+import type { StoredUser, User } from './users.types.js'
 
 // In-memory store: replace it with your database
 @Injectable()
 export class UsersService {
-  private readonly users = new Map<number, StoredUser>()
-  private nextId = 1
+  private readonly users = new Map<string, StoredUser>()
 
-  async findById(id: number): Promise<User | undefined> {
+  async findById(id: string): Promise<User | undefined> {
     const user = this.users.get(id)
     return user && toUser(user)
   }
@@ -355,7 +362,7 @@ export class UsersService {
   }
 
   async create(data: { email: string; passwordHash: string }): Promise<User> {
-    const user = { id: this.nextId++, ...data }
+    const user = { id: crypto.randomUUID(), ...data }
     this.users.set(user.id, user)
     return toUser(user)
   }
@@ -363,6 +370,17 @@ export class UsersService {
 
 function toUser({ id, email }: StoredUser): User {
   return { id, email }
+}
+"
+,
+  "src/users/users.types.ts": 
+"export interface User {
+  id: string
+  email: string
+}
+
+export interface StoredUser extends User {
+  passwordHash: string
 }
 "
 ,
@@ -425,6 +443,7 @@ import { envSchema, type Env } from '../env.schema.js'
 import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
 import { JwtModule } from '@miiajs/jwt'
+import { UsersModule } from '../users/users.module.js'
 import { AuthModule } from '../auth/auth.module.js'
 
 @Module({
@@ -437,6 +456,7 @@ import { AuthModule } from '../auth/auth.module.js'
       }),
       { global: true },
     ),
+    UsersModule,
     AuthModule,
   ],
   controllers: [AppController],
@@ -448,10 +468,10 @@ export class AppModule {}
   "src/auth/auth.controller.ts": 
 "import { AuthGuard } from '@miiajs/auth'
 import { Controller, Get, inject, Post, type RequestContext, Status, UseGuard } from '@miiajs/core'
-import { type RegisterInput, RegisterSchema } from './auth.schemas.js'
 import { AuthService } from './auth.service.js'
 import { JwtAuth } from './providers/jwt-auth.provider.js'
 import { LocalAuth } from './providers/local-auth.provider.js'
+import { type RegisterInput, RegisterSchema } from './schemas/register.schema.js'
 
 @Controller('/auth')
 export class AuthController {
@@ -482,6 +502,7 @@ export class AuthController {
 import { UsersModule } from '../users/users.module.js'
 import { AuthController } from './auth.controller.js'
 import { AuthService } from './auth.service.js'
+import { PasswordService } from './password.service.js'
 import { JwtAuth } from './providers/jwt-auth.provider.js'
 import { LocalAuth } from './providers/local-auth.provider.js'
 
@@ -490,51 +511,36 @@ import { LocalAuth } from './providers/local-auth.provider.js'
   global: true,
   imports: [UsersModule],
   controllers: [AuthController],
-  providers: [AuthService, LocalAuth, JwtAuth],
+  providers: [AuthService, PasswordService, LocalAuth, JwtAuth],
   exports: [JwtAuth],
 })
 export class AuthModule {}
 "
 ,
-  "src/auth/auth.schemas.ts": 
-"import { z } from 'zod'
-
-export const LoginSchema = z.object({
-  email: z.email(),
-  password: z.string().min(1),
-})
-
-export const RegisterSchema = z.object({
-  email: z.email(),
-  password: z.string().min(8),
-})
-
-export type LoginInput = z.infer<typeof LoginSchema>
-export type RegisterInput = z.infer<typeof RegisterSchema>
-"
-,
   "src/auth/auth.service.ts": 
 "import { ConflictException, Injectable, inject } from '@miiajs/core'
 import { JwtService } from '@miiajs/jwt'
-import { type User, UsersService } from '../users/users.service.js'
-import type { RegisterInput } from './auth.schemas.js'
-import { hashPassword } from './password.js'
+import { UsersService } from '../users/users.service.js'
+import type { User } from '../users/users.types.js'
+import { PasswordService } from './password.service.js'
+import type { RegisterInput } from './schemas/register.schema.js'
 
 @Injectable()
 export class AuthService {
   private readonly usersService = inject(UsersService)
   private readonly jwtService = inject(JwtService)
+  private readonly passwordService = inject(PasswordService)
 
   async register({ email, password }: RegisterInput) {
     if (await this.usersService.findByEmail(email)) {
       throw new ConflictException('Email is already registered')
     }
-    const user = await this.usersService.create({ email, passwordHash: await hashPassword(password) })
+    const user = await this.usersService.create({ email, passwordHash: await this.passwordService.hash(password) })
     return this.issueTokenFor(user)
   }
 
   async issueTokenFor(user: User) {
-    return { accessToken: await this.jwtService.sign({ sub: String(user.id), email: user.email }) }
+    return { accessToken: await this.jwtService.sign({ sub: user.id, email: user.email }) }
   }
 }
 "
@@ -593,8 +599,9 @@ describe('auth', () => {
 })
 "
 ,
-  "src/auth/password.ts": 
+  "src/auth/password.service.ts": 
 "import { randomBytes, type ScryptOptions, scrypt, timingSafeEqual } from 'node:crypto'
+import { Injectable } from '@miiajs/core'
 
 // OWASP minimum for scrypt: N=2^17, r=8, p=1 (128 MiB per hash)
 const COST = { N: 2 ** 17, r: 8, p: 1 }
@@ -607,23 +614,26 @@ function derive(password: string, salt: Buffer, keylen: number, cost: typeof COS
   })
 }
 
-// Stored as scrypt$<N>$<r>$<p>$<salt hex>$<hash hex>, so the cost can grow without breaking old hashes
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16)
-  const hash = await derive(password, salt, KEY_LENGTH, COST)
-  return ['scrypt', COST.N, COST.r, COST.p, salt.toString('hex'), hash.toString('hex')].join('$')
-}
+@Injectable()
+export class PasswordService {
+  // Stored as scrypt$<N>$<r>$<p>$<salt hex>$<hash hex>, so the cost can grow without breaking old hashes
+  async hash(password: string): Promise<string> {
+    const salt = randomBytes(16)
+    const hash = await derive(password, salt, KEY_LENGTH, COST)
+    return ['scrypt', COST.N, COST.r, COST.p, salt.toString('hex'), hash.toString('hex')].join('$')
+  }
 
-export async function verifyPassword(password: string, stored: string): Promise<boolean> {
-  const [algorithm, N, r, p, salt, hash] = stored.split('$')
-  if (algorithm !== 'scrypt' || !salt || !hash) return false
-  const expected = Buffer.from(hash, 'hex')
-  const actual = await derive(password, Buffer.from(salt, 'hex'), expected.length, {
-    N: Number(N),
-    r: Number(r),
-    p: Number(p),
-  })
-  return timingSafeEqual(actual, expected)
+  async verify(password: string, stored: string): Promise<boolean> {
+    const [algorithm, N, r, p, salt, hash] = stored.split('$')
+    if (algorithm !== 'scrypt' || !salt || !hash) return false
+    const expected = Buffer.from(hash, 'hex')
+    const actual = await derive(password, Buffer.from(salt, 'hex'), expected.length, {
+      N: Number(N),
+      r: Number(r),
+      p: Number(p),
+    })
+    return timingSafeEqual(actual, expected)
+  }
 }
 "
 ,
@@ -648,7 +658,7 @@ export class JwtAuth implements AuthProvider {
       throw new UnauthorizedException('Invalid token')
     })
 
-    const user = await this.usersService.findById(Number(payload.sub))
+    const user = await this.usersService.findById(payload.sub)
     if (!user) throw new UnauthorizedException('User not found')
     return user
   }
@@ -659,12 +669,13 @@ export class JwtAuth implements AuthProvider {
 "import type { AuthProvider } from '@miiajs/auth'
 import { Injectable, inject, type RequestContext, UnauthorizedException } from '@miiajs/core'
 import { UsersService } from '../../users/users.service.js'
-import { LoginSchema } from '../auth.schemas.js'
-import { verifyPassword } from '../password.js'
+import { PasswordService } from '../password.service.js'
+import { LoginSchema } from '../schemas/login.schema.js'
 
 @Injectable()
 export class LocalAuth implements AuthProvider {
   private readonly usersService = inject(UsersService)
+  private readonly passwordService = inject(PasswordService)
 
   async authenticate(ctx: RequestContext) {
     const parsed = LoginSchema.safeParse(await ctx.json().catch(() => null))
@@ -674,12 +685,34 @@ export class LocalAuth implements AuthProvider {
     const { email, password } = parsed.data
 
     const found = await this.usersService.findByEmailForAuth(email)
-    if (!found || !(await verifyPassword(password, found.passwordHash))) {
+    if (!found || !(await this.passwordService.verify(password, found.passwordHash))) {
       throw new UnauthorizedException('Invalid credentials')
     }
     return { id: found.id, email: found.email }
   }
 }
+"
+,
+  "src/auth/schemas/login.schema.ts": 
+"import { z } from 'zod'
+
+export const LoginSchema = z.object({
+  email: z.email(),
+  password: z.string().min(1),
+})
+
+export type LoginInput = z.infer<typeof LoginSchema>
+"
+,
+  "src/auth/schemas/register.schema.ts": 
+"import { z } from 'zod'
+
+export const RegisterSchema = z.object({
+  email: z.email(),
+  password: z.string().min(8),
+})
+
+export type RegisterInput = z.infer<typeof RegisterSchema>
 "
 ,
   "src/env.schema.ts": 
@@ -696,7 +729,7 @@ export type Env = z.infer<typeof envSchema>
 "
 ,
   "src/types/core.d.ts": 
-"import type { User } from '../users/users.service.js'
+"import type { User } from '../users/users.types.js'
 
 declare module '@miiajs/core' {
   interface RequestContext {
@@ -718,23 +751,14 @@ export class UsersModule {}
 ,
   "src/users/users.service.ts": 
 "import { Injectable } from '@miiajs/core'
-
-export interface User {
-  id: number
-  email: string
-}
-
-interface StoredUser extends User {
-  passwordHash: string
-}
+import type { StoredUser, User } from './users.types.js'
 
 // In-memory store: replace it with your database
 @Injectable()
 export class UsersService {
-  private readonly users = new Map<number, StoredUser>()
-  private nextId = 1
+  private readonly users = new Map<string, StoredUser>()
 
-  async findById(id: number): Promise<User | undefined> {
+  async findById(id: string): Promise<User | undefined> {
     const user = this.users.get(id)
     return user && toUser(user)
   }
@@ -752,7 +776,7 @@ export class UsersService {
   }
 
   async create(data: { email: string; passwordHash: string }): Promise<User> {
-    const user = { id: this.nextId++, ...data }
+    const user = { id: crypto.randomUUID(), ...data }
     this.users.set(user.id, user)
     return toUser(user)
   }
@@ -760,6 +784,17 @@ export class UsersService {
 
 function toUser({ id, email }: StoredUser): User {
   return { id, email }
+}
+"
+,
+  "src/users/users.types.ts": 
+"export interface User {
+  id: string
+  email: string
+}
+
+export interface StoredUser extends User {
+  passwordHash: string
 }
 "
 ,
@@ -1345,6 +1380,75 @@ PORT=3000
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/demo_app
 "
 ,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`bun run dev\` | Dev server with reload and type-checking |
+| \`bun run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`bun run check\` | Type-check |
+| \`bun run build\` | Build |
+| \`bun run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
+
+## Database
+
+The app connects to \`DATABASE_URL\` in \`.env\`, by default \`postgres://postgres:postgres@localhost:5432/demo_app\`.
+
+Start PostgreSQL with a \`demo_app\` database, for example in Docker:
+
+\`\`\`bash
+docker run -d --name demo_app-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=demo_app -p 5432:5432 postgres:17
+\`\`\`
+
+Or create it in a PostgreSQL you already run (\`createdb demo_app\`), or set \`DATABASE_URL\` to another database. Then start the app:
+
+\`\`\`bash
+bun run dev
+\`\`\`
+
+Add a table, then create it in the database:
+
+\`\`\`bash
+bunx miia g table posts
+bun run db:generate
+bun run db:migrate
+\`\`\`
+
+\`miia g table\` writes \`src/posts/posts.table.ts\` and adds it to \`src/db.schema.ts\`, \`db:generate\` writes SQL migrations for that schema to \`drizzle/\`, \`db:migrate\` applies them. Run both again after changing a table.
+
+In a service next to the table, inject the typed handle from \`src/db.ts\`:
+
+\`\`\`ts
+import { Injectable, inject } from '@miiajs/core'
+import { db } from '../db.js'
+import { posts } from './posts.table.js'
+
+@Injectable()
+export class PostsService {
+  private readonly db = inject(db)
+
+  findAll() {
+    return this.db.select().from(posts)
+  }
+}
+\`\`\`
+
+## Next steps
+
+- \`bunx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`bunx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
   "drizzle.config.ts": 
 "import { defineConfig } from 'drizzle-kit'
 
@@ -1357,7 +1461,7 @@ try {
 
 export default defineConfig({
   dialect: 'postgresql',
-  schema: './src/db/schema.ts',
+  schema: './src/db.schema.ts',
   out: './drizzle',
   dbCredentials: { url: process.env.DATABASE_URL! },
 })
@@ -1403,7 +1507,7 @@ import { envSchema, type Env } from '../env.schema.js'
 import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
 import { DrizzleModule } from '@miiajs/drizzle'
-import * as schema from '../db/schema.js'
+import * as schema from '../db.schema.js'
 
 @Module({
   imports: [
@@ -1423,23 +1527,18 @@ import * as schema from '../db/schema.js'
 export class AppModule {}
 "
 ,
-  "src/db/db.ts": 
+  "src/db.schema.ts": 
+"// Every table, for DrizzleModule and \`typeof schema\` in db.ts: \`miia g table <name>\` adds a line here
+export {}
+"
+,
+  "src/db.ts": 
 "import { drizzleDb } from '@miiajs/drizzle'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import type * as schema from './schema.js'
+import type * as schema from './db.schema.js'
 
 // The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
 export const db = drizzleDb<PostgresJsDatabase<typeof schema>>()
-"
-,
-  "src/db/schema.ts": 
-"import { pgTable, serial, text, timestamp } from 'drizzle-orm/pg-core'
-
-export const notes = pgTable('notes', {
-  id: serial('id').primaryKey(),
-  title: text('title').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-})
 "
 ,
   "src/env.schema.ts": 
@@ -1472,6 +1571,75 @@ PORT=3000
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/demo_app
 "
 ,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`npm run dev\` | Dev server with reload and type-checking |
+| \`npm run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`npm run check\` | Type-check |
+| \`npm run build\` | Build |
+| \`npm run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
+
+## Database
+
+The app connects to \`DATABASE_URL\` in \`.env\`, by default \`postgres://postgres:postgres@localhost:5432/demo_app\`.
+
+Start PostgreSQL with a \`demo_app\` database, for example in Docker:
+
+\`\`\`bash
+docker run -d --name demo_app-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=demo_app -p 5432:5432 postgres:17
+\`\`\`
+
+Or create it in a PostgreSQL you already run (\`createdb demo_app\`), or set \`DATABASE_URL\` to another database. Then start the app:
+
+\`\`\`bash
+npm run dev
+\`\`\`
+
+Add a table, then create it in the database:
+
+\`\`\`bash
+npx miia g table posts
+npm run db:generate
+npm run db:migrate
+\`\`\`
+
+\`miia g table\` writes \`src/posts/posts.table.ts\` and adds it to \`src/db.schema.ts\`, \`db:generate\` writes SQL migrations for that schema to \`drizzle/\`, \`db:migrate\` applies them. Run both again after changing a table.
+
+In a service next to the table, inject the typed handle from \`src/db.ts\`:
+
+\`\`\`ts
+import { Injectable, inject } from '@miiajs/core'
+import { db } from '../db.js'
+import { posts } from './posts.table.js'
+
+@Injectable()
+export class PostsService {
+  private readonly db = inject(db)
+
+  findAll() {
+    return this.db.select().from(posts)
+  }
+}
+\`\`\`
+
+## Next steps
+
+- \`npx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`npx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
   "drizzle.config.ts": 
 "import { defineConfig } from 'drizzle-kit'
 
@@ -1484,7 +1652,7 @@ try {
 
 export default defineConfig({
   dialect: 'postgresql',
-  schema: './src/db/schema.ts',
+  schema: './src/db.schema.ts',
   out: './drizzle',
   dbCredentials: { url: process.env.DATABASE_URL! },
 })
@@ -1533,7 +1701,7 @@ import { envSchema, type Env } from '../env.schema.js'
 import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
 import { DrizzleModule } from '@miiajs/drizzle'
-import * as schema from '../db/schema.js'
+import * as schema from '../db.schema.js'
 
 @Module({
   imports: [
@@ -1553,23 +1721,18 @@ import * as schema from '../db/schema.js'
 export class AppModule {}
 "
 ,
-  "src/db/db.ts": 
+  "src/db.schema.ts": 
+"// Every table, for DrizzleModule and \`typeof schema\` in db.ts: \`miia g table <name>\` adds a line here
+export {}
+"
+,
+  "src/db.ts": 
 "import { drizzleDb } from '@miiajs/drizzle'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import type * as schema from './schema.js'
+import type * as schema from './db.schema.js'
 
 // The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
 export const db = drizzleDb<PostgresJsDatabase<typeof schema>>()
-"
-,
-  "src/db/schema.ts": 
-"import { pgTable, serial, text, timestamp } from 'drizzle-orm/pg-core'
-
-export const notes = pgTable('notes', {
-  id: serial('id').primaryKey(),
-  title: text('title').notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-})
 "
 ,
   "src/env.schema.ts": 
@@ -1602,6 +1765,75 @@ PORT=3000
 DATABASE_URL=mysql://root:root@localhost:3306/demo_app
 "
 ,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`bun run dev\` | Dev server with reload and type-checking |
+| \`bun run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`bun run check\` | Type-check |
+| \`bun run build\` | Build |
+| \`bun run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
+
+## Database
+
+The app connects to \`DATABASE_URL\` in \`.env\`, by default \`mysql://root:root@localhost:3306/demo_app\`.
+
+Start MySQL with a \`demo_app\` database, for example in Docker:
+
+\`\`\`bash
+docker run -d --name demo_app-mysql -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=demo_app -p 3306:3306 mysql:8.4
+\`\`\`
+
+Or create it in a MySQL you already run (\`CREATE DATABASE demo_app\`), or set \`DATABASE_URL\` to another database. Then start the app:
+
+\`\`\`bash
+bun run dev
+\`\`\`
+
+Add a table, then create it in the database:
+
+\`\`\`bash
+bunx miia g table posts
+bun run db:generate
+bun run db:migrate
+\`\`\`
+
+\`miia g table\` writes \`src/posts/posts.table.ts\` and adds it to \`src/db.schema.ts\`, \`db:generate\` writes SQL migrations for that schema to \`drizzle/\`, \`db:migrate\` applies them. Run both again after changing a table.
+
+In a service next to the table, inject the typed handle from \`src/db.ts\`:
+
+\`\`\`ts
+import { Injectable, inject } from '@miiajs/core'
+import { db } from '../db.js'
+import { posts } from './posts.table.js'
+
+@Injectable()
+export class PostsService {
+  private readonly db = inject(db)
+
+  findAll() {
+    return this.db.select().from(posts)
+  }
+}
+\`\`\`
+
+## Next steps
+
+- \`bunx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`bunx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
   "drizzle.config.ts": 
 "import { defineConfig } from 'drizzle-kit'
 
@@ -1614,7 +1846,7 @@ try {
 
 export default defineConfig({
   dialect: 'mysql',
-  schema: './src/db/schema.ts',
+  schema: './src/db.schema.ts',
   out: './drizzle',
   dbCredentials: { url: process.env.DATABASE_URL! },
 })
@@ -1660,7 +1892,7 @@ import { envSchema, type Env } from '../env.schema.js'
 import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
 import { DrizzleModule } from '@miiajs/drizzle'
-import * as schema from '../db/schema.js'
+import * as schema from '../db.schema.js'
 
 @Module({
   imports: [
@@ -1680,23 +1912,18 @@ import * as schema from '../db/schema.js'
 export class AppModule {}
 "
 ,
-  "src/db/db.ts": 
+  "src/db.schema.ts": 
+"// Every table, for DrizzleModule and \`typeof schema\` in db.ts: \`miia g table <name>\` adds a line here
+export {}
+"
+,
+  "src/db.ts": 
 "import { drizzleDb } from '@miiajs/drizzle'
 import type { MySql2Database } from 'drizzle-orm/mysql2'
-import type * as schema from './schema.js'
+import type * as schema from './db.schema.js'
 
 // The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
 export const db = drizzleDb<MySql2Database<typeof schema>>()
-"
-,
-  "src/db/schema.ts": 
-"import { mysqlTable, serial, timestamp, varchar } from 'drizzle-orm/mysql-core'
-
-export const notes = mysqlTable('notes', {
-  id: serial('id').primaryKey(),
-  title: varchar('title', { length: 255 }).notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-})
 "
 ,
   "src/env.schema.ts": 
@@ -1729,6 +1956,75 @@ PORT=3000
 DATABASE_URL=mysql://root:root@localhost:3306/demo_app
 "
 ,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`npm run dev\` | Dev server with reload and type-checking |
+| \`npm run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`npm run check\` | Type-check |
+| \`npm run build\` | Build |
+| \`npm run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
+
+## Database
+
+The app connects to \`DATABASE_URL\` in \`.env\`, by default \`mysql://root:root@localhost:3306/demo_app\`.
+
+Start MySQL with a \`demo_app\` database, for example in Docker:
+
+\`\`\`bash
+docker run -d --name demo_app-mysql -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=demo_app -p 3306:3306 mysql:8.4
+\`\`\`
+
+Or create it in a MySQL you already run (\`CREATE DATABASE demo_app\`), or set \`DATABASE_URL\` to another database. Then start the app:
+
+\`\`\`bash
+npm run dev
+\`\`\`
+
+Add a table, then create it in the database:
+
+\`\`\`bash
+npx miia g table posts
+npm run db:generate
+npm run db:migrate
+\`\`\`
+
+\`miia g table\` writes \`src/posts/posts.table.ts\` and adds it to \`src/db.schema.ts\`, \`db:generate\` writes SQL migrations for that schema to \`drizzle/\`, \`db:migrate\` applies them. Run both again after changing a table.
+
+In a service next to the table, inject the typed handle from \`src/db.ts\`:
+
+\`\`\`ts
+import { Injectable, inject } from '@miiajs/core'
+import { db } from '../db.js'
+import { posts } from './posts.table.js'
+
+@Injectable()
+export class PostsService {
+  private readonly db = inject(db)
+
+  findAll() {
+    return this.db.select().from(posts)
+  }
+}
+\`\`\`
+
+## Next steps
+
+- \`npx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`npx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
   "drizzle.config.ts": 
 "import { defineConfig } from 'drizzle-kit'
 
@@ -1741,7 +2037,7 @@ try {
 
 export default defineConfig({
   dialect: 'mysql',
-  schema: './src/db/schema.ts',
+  schema: './src/db.schema.ts',
   out: './drizzle',
   dbCredentials: { url: process.env.DATABASE_URL! },
 })
@@ -1790,7 +2086,7 @@ import { envSchema, type Env } from '../env.schema.js'
 import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
 import { DrizzleModule } from '@miiajs/drizzle'
-import * as schema from '../db/schema.js'
+import * as schema from '../db.schema.js'
 
 @Module({
   imports: [
@@ -1810,23 +2106,18 @@ import * as schema from '../db/schema.js'
 export class AppModule {}
 "
 ,
-  "src/db/db.ts": 
+  "src/db.schema.ts": 
+"// Every table, for DrizzleModule and \`typeof schema\` in db.ts: \`miia g table <name>\` adds a line here
+export {}
+"
+,
+  "src/db.ts": 
 "import { drizzleDb } from '@miiajs/drizzle'
 import type { MySql2Database } from 'drizzle-orm/mysql2'
-import type * as schema from './schema.js'
+import type * as schema from './db.schema.js'
 
 // The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
 export const db = drizzleDb<MySql2Database<typeof schema>>()
-"
-,
-  "src/db/schema.ts": 
-"import { mysqlTable, serial, timestamp, varchar } from 'drizzle-orm/mysql-core'
-
-export const notes = mysqlTable('notes', {
-  id: serial('id').primaryKey(),
-  title: varchar('title', { length: 255 }).notNull(),
-  createdAt: timestamp('created_at').notNull().defaultNow(),
-})
 "
 ,
   "src/env.schema.ts": 
@@ -1867,6 +2158,67 @@ dist/
 data.db
 "
 ,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`bun run dev\` | Dev server with reload and type-checking |
+| \`bun run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`bun run check\` | Type-check |
+| \`bun run build\` | Build |
+| \`bun run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
+
+## Database
+
+The app opens the SQLite file named by \`DATABASE_URL\` in \`.env\`, by default \`data.db\` in the project folder, so there is no server to start:
+
+\`\`\`bash
+bun run dev
+\`\`\`
+
+Add a table, then create it in the database:
+
+\`\`\`bash
+bunx miia g table posts
+bun run db:generate
+bun run db:migrate
+\`\`\`
+
+\`miia g table\` writes \`src/posts/posts.table.ts\` and adds it to \`src/db.schema.ts\`, \`db:generate\` writes SQL migrations for that schema to \`drizzle/\`, \`db:migrate\` applies them (through \`src/db.migrate.ts\` on Bun). Run both again after changing a table.
+
+In a service next to the table, inject the typed handle from \`src/db.ts\`:
+
+\`\`\`ts
+import { Injectable, inject } from '@miiajs/core'
+import { db } from '../db.js'
+import { posts } from './posts.table.js'
+
+@Injectable()
+export class PostsService {
+  private readonly db = inject(db)
+
+  findAll() {
+    return this.db.select().from(posts)
+  }
+}
+\`\`\`
+
+## Next steps
+
+- \`bunx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`bunx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
   "drizzle.config.ts": 
 "import { defineConfig } from 'drizzle-kit'
 
@@ -1879,7 +2231,7 @@ try {
 
 export default defineConfig({
   dialect: 'sqlite',
-  schema: './src/db/schema.ts',
+  schema: './src/db.schema.ts',
   out: './drizzle',
   dbCredentials: { url: process.env.DATABASE_URL! },
 })
@@ -1912,7 +2264,7 @@ export default defineConfig({
     "check": "miia check",
     "test": "bun test",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "bun src/db/migrate.ts"
+    "db:migrate": "bun src/db.migrate.ts"
   }
 }
 "
@@ -1924,7 +2276,7 @@ import { envSchema, type Env } from '../env.schema.js'
 import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
 import { DrizzleModule } from '@miiajs/drizzle'
-import * as schema from '../db/schema.js'
+import * as schema from '../db.schema.js'
 
 @Module({
   imports: [
@@ -1944,16 +2296,7 @@ import * as schema from '../db/schema.js'
 export class AppModule {}
 "
 ,
-  "src/db/db.ts": 
-"import { drizzleDb } from '@miiajs/drizzle'
-import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
-import type * as schema from './schema.js'
-
-// The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
-export const db = drizzleDb<BunSQLiteDatabase<typeof schema>>()
-"
-,
-  "src/db/migrate.ts": 
+  "src/db.migrate.ts": 
 "import { Database } from 'bun:sqlite'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
@@ -1964,16 +2307,18 @@ migrate(drizzle({ client: sqlite }), { migrationsFolder: './drizzle' })
 sqlite.close()
 "
 ,
-  "src/db/schema.ts": 
-"import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+  "src/db.schema.ts": 
+"// Every table, for DrizzleModule and \`typeof schema\` in db.ts: \`miia g table <name>\` adds a line here
+export {}
+"
+,
+  "src/db.ts": 
+"import { drizzleDb } from '@miiajs/drizzle'
+import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
+import type * as schema from './db.schema.js'
 
-export const notes = sqliteTable('notes', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  title: text('title').notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .$defaultFn(() => new Date()),
-})
+// The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
+export const db = drizzleDb<BunSQLiteDatabase<typeof schema>>()
 "
 ,
   "src/env.schema.ts": 
@@ -2014,6 +2359,67 @@ dist/
 data.db
 "
 ,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`npm run dev\` | Dev server with reload and type-checking |
+| \`npm run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`npm run check\` | Type-check |
+| \`npm run build\` | Build |
+| \`npm run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
+
+## Database
+
+The app opens the SQLite file named by \`DATABASE_URL\` in \`.env\`, by default \`data.db\` in the project folder, so there is no server to start:
+
+\`\`\`bash
+npm run dev
+\`\`\`
+
+Add a table, then create it in the database:
+
+\`\`\`bash
+npx miia g table posts
+npm run db:generate
+npm run db:migrate
+\`\`\`
+
+\`miia g table\` writes \`src/posts/posts.table.ts\` and adds it to \`src/db.schema.ts\`, \`db:generate\` writes SQL migrations for that schema to \`drizzle/\`, \`db:migrate\` applies them. Run both again after changing a table.
+
+In a service next to the table, inject the typed handle from \`src/db.ts\`:
+
+\`\`\`ts
+import { Injectable, inject } from '@miiajs/core'
+import { db } from '../db.js'
+import { posts } from './posts.table.js'
+
+@Injectable()
+export class PostsService {
+  private readonly db = inject(db)
+
+  findAll() {
+    return this.db.select().from(posts)
+  }
+}
+\`\`\`
+
+## Next steps
+
+- \`npx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`npx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
   "drizzle.config.ts": 
 "import { defineConfig } from 'drizzle-kit'
 
@@ -2026,7 +2432,7 @@ try {
 
 export default defineConfig({
   dialect: 'sqlite',
-  schema: './src/db/schema.ts',
+  schema: './src/db.schema.ts',
   out: './drizzle',
   dbCredentials: { url: process.env.DATABASE_URL! },
 })
@@ -2076,7 +2482,7 @@ import { envSchema, type Env } from '../env.schema.js'
 import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
 import { DrizzleModule } from '@miiajs/drizzle'
-import * as schema from '../db/schema.js'
+import * as schema from '../db.schema.js'
 
 @Module({
   imports: [
@@ -2096,25 +2502,18 @@ import * as schema from '../db/schema.js'
 export class AppModule {}
 "
 ,
-  "src/db/db.ts": 
+  "src/db.schema.ts": 
+"// Every table, for DrizzleModule and \`typeof schema\` in db.ts: \`miia g table <name>\` adds a line here
+export {}
+"
+,
+  "src/db.ts": 
 "import { drizzleDb } from '@miiajs/drizzle'
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
-import type * as schema from './schema.js'
+import type * as schema from './db.schema.js'
 
 // The one typed handle: inject(db) everywhere, do not call drizzleDb<...>() again
 export const db = drizzleDb<BetterSQLite3Database<typeof schema>>()
-"
-,
-  "src/db/schema.ts": 
-"import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
-
-export const notes = sqliteTable('notes', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  title: text('title').notNull(),
-  createdAt: integer('created_at', { mode: 'timestamp' })
-    .notNull()
-    .$defaultFn(() => new Date()),
-})
 "
 ,
   "src/env.schema.ts": 
@@ -2145,6 +2544,44 @@ MONGODB_URL=mongodb://localhost:27017/demo_app
 "HOST=0.0.0.0
 PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
+"
+,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`bun run dev\` | Dev server with reload and type-checking |
+| \`bun run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`bun run check\` | Type-check |
+| \`bun run build\` | Build |
+| \`bun run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
+
+## Database
+
+The app connects to \`MONGODB_URL\` in \`.env\`, by default \`mongodb://localhost:27017/demo_app\`.
+
+Start MongoDB, for example in Docker:
+
+\`\`\`bash
+docker run -d --name demo_app-mongo -p 27017:27017 mongo:8
+\`\`\`
+
+Or use a MongoDB you already run. MongoDB creates the \`demo_app\` database on the first write, so there is nothing to migrate. Models: https://miiajs.com/docs/packages/papr
+
+## Next steps
+
+- \`bunx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`bunx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
 "
 ,
   "package.json": 
@@ -2229,6 +2666,44 @@ MONGODB_URL=mongodb://localhost:27017/demo_app
 "HOST=0.0.0.0
 PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
+"
+,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`npm run dev\` | Dev server with reload and type-checking |
+| \`npm run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`npm run check\` | Type-check |
+| \`npm run build\` | Build |
+| \`npm run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
+
+## Database
+
+The app connects to \`MONGODB_URL\` in \`.env\`, by default \`mongodb://localhost:27017/demo_app\`.
+
+Start MongoDB, for example in Docker:
+
+\`\`\`bash
+docker run -d --name demo_app-mongo -p 27017:27017 mongo:8
+\`\`\`
+
+Or use a MongoDB you already run. MongoDB creates the \`demo_app\` database on the first write, so there is nothing to migrate. Models: https://miiajs.com/docs/packages/papr
+
+## Next steps
+
+- \`npx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`npx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
 "
 ,
   "package.json": 
@@ -2318,6 +2793,44 @@ PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
 "
 ,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`bun run dev\` | Dev server with reload and type-checking |
+| \`bun run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`bun run check\` | Type-check |
+| \`bun run build\` | Build |
+| \`bun run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
+
+## Database
+
+The app connects to \`MONGODB_URL\` in \`.env\`, by default \`mongodb://localhost:27017/demo_app\`.
+
+Start MongoDB, for example in Docker:
+
+\`\`\`bash
+docker run -d --name demo_app-mongo -p 27017:27017 mongo:8
+\`\`\`
+
+Or use a MongoDB you already run. MongoDB creates the \`demo_app\` database on the first write, so there is nothing to migrate. Models: https://miiajs.com/docs/packages/mongoose
+
+## Next steps
+
+- \`bunx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`bunx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
   "package.json": 
 "{
   "name": "demo-app",
@@ -2401,6 +2914,44 @@ PORT=3000
 MONGODB_URL=mongodb://localhost:27017/demo_app
 "
 ,
+  "README.md": 
+"# demo-app
+
+A [MiiaJS](https://miiajs.com) app.
+
+## Scripts
+
+| Command | What it does |
+| --- | --- |
+| \`npm run dev\` | Dev server with reload and type-checking |
+| \`npm run test\` | Tests (\`src/**/*.test.ts\`) |
+| \`npm run check\` | Type-check |
+| \`npm run build\` | Build |
+| \`npm run start\` | Production server |
+
+## Configuration
+
+Environment variables are validated by \`src/env.schema.ts\` and read through \`ConfigService\`. \`.env.example\` lists every variable, with a value where it is safe to share; secrets such as \`JWT_SECRET\` stay empty there, and the app does not start until you set them. \`.env\` holds your local values (secrets generated when the project was created) and is not committed. \`NODE_ENV\` is set by the scripts: \`development\` for \`dev\`, \`production\` for \`start\`.
+
+## Database
+
+The app connects to \`MONGODB_URL\` in \`.env\`, by default \`mongodb://localhost:27017/demo_app\`.
+
+Start MongoDB, for example in Docker:
+
+\`\`\`bash
+docker run -d --name demo_app-mongo -p 27017:27017 mongo:8
+\`\`\`
+
+Or use a MongoDB you already run. MongoDB creates the \`demo_app\` database on the first write, so there is nothing to migrate. Models: https://miiajs.com/docs/packages/mongoose
+
+## Next steps
+
+- \`npx miia g resource posts\` - a CRUD module with route schemas and a test
+- \`npx miia add swagger\` - OpenAPI docs at \`/docs\`
+- Docs: https://miiajs.com/docs
+"
+,
   "package.json": 
 "{
   "name": "demo-app",
@@ -2473,32 +3024,831 @@ export type Env = z.infer<typeof envSchema>
 }
 `;
 
+exports[`add-ons jwt-auth with a database keeps users in drizzle-postgres 1`] = `
+{
+  "src/auth/auth.test.ts": 
+"import { describe, expect, it } from 'bun:test'
+import { JwtModule } from '@miiajs/jwt'
+import { TestApp } from '@miiajs/testing'
+import { UsersService } from '../users/users.service.js'
+import type { StoredUser, User } from '../users/users.types.js'
+import { AuthModule } from './auth.module.js'
+
+// UsersService over a Map: this test needs no database
+function fakeUsers() {
+  const users = new Map<string, StoredUser>()
+  const toUser = ({ id, email }: StoredUser): User => ({ id, email })
+  const findByEmailForAuth = async (email: string) => [...users.values()].find((user) => user.email === email)
+  return {
+    findByEmailForAuth,
+    findById: async (id: string) => {
+      const user = users.get(id)
+      return user && toUser(user)
+    },
+    findByEmail: async (email: string) => {
+      const user = await findByEmailForAuth(email)
+      return user && toUser(user)
+    },
+    create: async (data: { email: string; passwordHash: string }) => {
+      const now = new Date()
+      const user = { id: crypto.randomUUID(), ...data, createdAt: now, updatedAt: now }
+      users.set(user.id, user)
+      return toUser(user)
+    },
+  }
+}
+
+const createApp = () =>
+  TestApp.create(JwtModule.configure({ secret: 'test-secret-that-is-at-least-32-chars' }, { global: true }), AuthModule)
+    .override(UsersService, fakeUsers())
+    .compile()
+
+describe('auth', () => {
+  // One app for the whole flow: the fake keeps users in the app instance
+  it('registers, logs in and reads the current user', async () => {
+    const app = await createApp()
+    try {
+      const credentials = { email: 'ada@example.com', password: 'correct-horse' }
+
+      const registered = await app.request('POST', '/auth/register', { body: credentials })
+      expect(registered.status).toBe(201)
+      expect(typeof (await registered.json()).accessToken).toBe('string')
+
+      const again = await app.request('POST', '/auth/register', { body: credentials })
+      expect(again.status).toBe(409)
+
+      const login = await app.request('POST', '/auth/login', { body: credentials })
+      expect(login.status).toBe(200)
+      const { accessToken } = await login.json()
+
+      const wrong = await app.request('POST', '/auth/login', { body: { ...credentials, password: 'wrong-password' } })
+      expect(wrong.status).toBe(401)
+
+      const me = await app.request('GET', '/auth/me', { headers: { authorization: \`Bearer \${accessToken}\` } })
+      expect(me.status).toBe(200)
+      expect((await me.json()).email).toBe(credentials.email)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects /auth/me without a token', async () => {
+    const app = await createApp()
+    try {
+      const res = await app.request('GET', '/auth/me')
+      expect(res.status).toBe(401)
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "src/db.schema.ts": 
+"// Every table, for DrizzleModule and \`typeof schema\` in db.ts: \`miia g table <name>\` adds a line here
+export * from './users/users.table.js'
+"
+,
+  "src/users/users.module.ts": 
+"import { Module } from '@miiajs/core'
+import { UsersService } from './users.service.js'
+
+@Module({
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+"
+,
+  "src/users/users.service.ts": 
+"import { Injectable, inject } from '@miiajs/core'
+import { eq } from 'drizzle-orm'
+import { db } from '../db.js'
+import { users } from './users.table.js'
+import type { StoredUser, User } from './users.types.js'
+
+const publicColumns = { id: users.id, email: users.email }
+
+@Injectable()
+export class UsersService {
+  private readonly db = inject(db)
+
+  async findById(id: string): Promise<User | undefined> {
+    const [user] = await this.db.select(publicColumns).from(users).where(eq(users.id, id)).limit(1)
+    return user
+  }
+
+  async findByEmail(email: string): Promise<User | undefined> {
+    const [user] = await this.db.select(publicColumns).from(users).where(eq(users.email, email)).limit(1)
+    return user
+  }
+
+  async findByEmailForAuth(email: string): Promise<StoredUser | undefined> {
+    const [user] = await this.db.select().from(users).where(eq(users.email, email)).limit(1)
+    return user
+  }
+
+  // Insert, then select: MySQL has no RETURNING
+  async create(data: { email: string; passwordHash: string }): Promise<User> {
+    await this.db.insert(users).values(data)
+    const [user] = await this.db.select(publicColumns).from(users).where(eq(users.email, data.email)).limit(1)
+    return user as User
+  }
+}
+"
+,
+  "src/users/users.table.ts": 
+"import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+
+export const users = pgTable('users', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+})
+"
+,
+  "src/users/users.types.ts": 
+"import type { users } from './users.table.js'
+
+export type StoredUser = typeof users.$inferSelect
+export type User = Pick<StoredUser, 'id' | 'email'>
+"
+,
+}
+`;
+
+exports[`add-ons jwt-auth with a database keeps users in drizzle-mysql 1`] = `
+{
+  "src/auth/auth.test.ts": 
+"import { describe, expect, it } from 'bun:test'
+import { JwtModule } from '@miiajs/jwt'
+import { TestApp } from '@miiajs/testing'
+import { UsersService } from '../users/users.service.js'
+import type { StoredUser, User } from '../users/users.types.js'
+import { AuthModule } from './auth.module.js'
+
+// UsersService over a Map: this test needs no database
+function fakeUsers() {
+  const users = new Map<string, StoredUser>()
+  const toUser = ({ id, email }: StoredUser): User => ({ id, email })
+  const findByEmailForAuth = async (email: string) => [...users.values()].find((user) => user.email === email)
+  return {
+    findByEmailForAuth,
+    findById: async (id: string) => {
+      const user = users.get(id)
+      return user && toUser(user)
+    },
+    findByEmail: async (email: string) => {
+      const user = await findByEmailForAuth(email)
+      return user && toUser(user)
+    },
+    create: async (data: { email: string; passwordHash: string }) => {
+      const now = new Date()
+      const user = { id: crypto.randomUUID(), ...data, createdAt: now, updatedAt: now }
+      users.set(user.id, user)
+      return toUser(user)
+    },
+  }
+}
+
+const createApp = () =>
+  TestApp.create(JwtModule.configure({ secret: 'test-secret-that-is-at-least-32-chars' }, { global: true }), AuthModule)
+    .override(UsersService, fakeUsers())
+    .compile()
+
+describe('auth', () => {
+  // One app for the whole flow: the fake keeps users in the app instance
+  it('registers, logs in and reads the current user', async () => {
+    const app = await createApp()
+    try {
+      const credentials = { email: 'ada@example.com', password: 'correct-horse' }
+
+      const registered = await app.request('POST', '/auth/register', { body: credentials })
+      expect(registered.status).toBe(201)
+      expect(typeof (await registered.json()).accessToken).toBe('string')
+
+      const again = await app.request('POST', '/auth/register', { body: credentials })
+      expect(again.status).toBe(409)
+
+      const login = await app.request('POST', '/auth/login', { body: credentials })
+      expect(login.status).toBe(200)
+      const { accessToken } = await login.json()
+
+      const wrong = await app.request('POST', '/auth/login', { body: { ...credentials, password: 'wrong-password' } })
+      expect(wrong.status).toBe(401)
+
+      const me = await app.request('GET', '/auth/me', { headers: { authorization: \`Bearer \${accessToken}\` } })
+      expect(me.status).toBe(200)
+      expect((await me.json()).email).toBe(credentials.email)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects /auth/me without a token', async () => {
+    const app = await createApp()
+    try {
+      const res = await app.request('GET', '/auth/me')
+      expect(res.status).toBe(401)
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "src/db.schema.ts": 
+"// Every table, for DrizzleModule and \`typeof schema\` in db.ts: \`miia g table <name>\` adds a line here
+export * from './users/users.table.js'
+"
+,
+  "src/users/users.module.ts": 
+"import { Module } from '@miiajs/core'
+import { UsersService } from './users.service.js'
+
+@Module({
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+"
+,
+  "src/users/users.service.ts": 
+"import { Injectable, inject } from '@miiajs/core'
+import { eq } from 'drizzle-orm'
+import { db } from '../db.js'
+import { users } from './users.table.js'
+import type { StoredUser, User } from './users.types.js'
+
+const publicColumns = { id: users.id, email: users.email }
+
+@Injectable()
+export class UsersService {
+  private readonly db = inject(db)
+
+  async findById(id: string): Promise<User | undefined> {
+    const [user] = await this.db.select(publicColumns).from(users).where(eq(users.id, id)).limit(1)
+    return user
+  }
+
+  async findByEmail(email: string): Promise<User | undefined> {
+    const [user] = await this.db.select(publicColumns).from(users).where(eq(users.email, email)).limit(1)
+    return user
+  }
+
+  async findByEmailForAuth(email: string): Promise<StoredUser | undefined> {
+    const [user] = await this.db.select().from(users).where(eq(users.email, email)).limit(1)
+    return user
+  }
+
+  // Insert, then select: MySQL has no RETURNING
+  async create(data: { email: string; passwordHash: string }): Promise<User> {
+    await this.db.insert(users).values(data)
+    const [user] = await this.db.select(publicColumns).from(users).where(eq(users.email, data.email)).limit(1)
+    return user as User
+  }
+}
+"
+,
+  "src/users/users.table.ts": 
+"import { mysqlTable, timestamp, varchar } from 'drizzle-orm/mysql-core'
+
+export const users = mysqlTable('users', {
+  id: varchar('id', { length: 36 })
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  email: varchar('email', { length: 255 }).notNull().unique(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
+})
+"
+,
+  "src/users/users.types.ts": 
+"import type { users } from './users.table.js'
+
+export type StoredUser = typeof users.$inferSelect
+export type User = Pick<StoredUser, 'id' | 'email'>
+"
+,
+}
+`;
+
+exports[`add-ons jwt-auth with a database keeps users in drizzle-sqlite 1`] = `
+{
+  "src/auth/auth.test.ts": 
+"import { describe, expect, it } from 'bun:test'
+import { JwtModule } from '@miiajs/jwt'
+import { TestApp } from '@miiajs/testing'
+import { UsersService } from '../users/users.service.js'
+import type { StoredUser, User } from '../users/users.types.js'
+import { AuthModule } from './auth.module.js'
+
+// UsersService over a Map: this test needs no database
+function fakeUsers() {
+  const users = new Map<string, StoredUser>()
+  const toUser = ({ id, email }: StoredUser): User => ({ id, email })
+  const findByEmailForAuth = async (email: string) => [...users.values()].find((user) => user.email === email)
+  return {
+    findByEmailForAuth,
+    findById: async (id: string) => {
+      const user = users.get(id)
+      return user && toUser(user)
+    },
+    findByEmail: async (email: string) => {
+      const user = await findByEmailForAuth(email)
+      return user && toUser(user)
+    },
+    create: async (data: { email: string; passwordHash: string }) => {
+      const now = new Date()
+      const user = { id: crypto.randomUUID(), ...data, createdAt: now, updatedAt: now }
+      users.set(user.id, user)
+      return toUser(user)
+    },
+  }
+}
+
+const createApp = () =>
+  TestApp.create(JwtModule.configure({ secret: 'test-secret-that-is-at-least-32-chars' }, { global: true }), AuthModule)
+    .override(UsersService, fakeUsers())
+    .compile()
+
+describe('auth', () => {
+  // One app for the whole flow: the fake keeps users in the app instance
+  it('registers, logs in and reads the current user', async () => {
+    const app = await createApp()
+    try {
+      const credentials = { email: 'ada@example.com', password: 'correct-horse' }
+
+      const registered = await app.request('POST', '/auth/register', { body: credentials })
+      expect(registered.status).toBe(201)
+      expect(typeof (await registered.json()).accessToken).toBe('string')
+
+      const again = await app.request('POST', '/auth/register', { body: credentials })
+      expect(again.status).toBe(409)
+
+      const login = await app.request('POST', '/auth/login', { body: credentials })
+      expect(login.status).toBe(200)
+      const { accessToken } = await login.json()
+
+      const wrong = await app.request('POST', '/auth/login', { body: { ...credentials, password: 'wrong-password' } })
+      expect(wrong.status).toBe(401)
+
+      const me = await app.request('GET', '/auth/me', { headers: { authorization: \`Bearer \${accessToken}\` } })
+      expect(me.status).toBe(200)
+      expect((await me.json()).email).toBe(credentials.email)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects /auth/me without a token', async () => {
+    const app = await createApp()
+    try {
+      const res = await app.request('GET', '/auth/me')
+      expect(res.status).toBe(401)
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "src/db.schema.ts": 
+"// Every table, for DrizzleModule and \`typeof schema\` in db.ts: \`miia g table <name>\` adds a line here
+export * from './users/users.table.js'
+"
+,
+  "src/users/users.module.ts": 
+"import { Module } from '@miiajs/core'
+import { UsersService } from './users.service.js'
+
+@Module({
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+"
+,
+  "src/users/users.service.ts": 
+"import { Injectable, inject } from '@miiajs/core'
+import { eq } from 'drizzle-orm'
+import { db } from '../db.js'
+import { users } from './users.table.js'
+import type { StoredUser, User } from './users.types.js'
+
+const publicColumns = { id: users.id, email: users.email }
+
+@Injectable()
+export class UsersService {
+  private readonly db = inject(db)
+
+  async findById(id: string): Promise<User | undefined> {
+    const [user] = await this.db.select(publicColumns).from(users).where(eq(users.id, id)).limit(1)
+    return user
+  }
+
+  async findByEmail(email: string): Promise<User | undefined> {
+    const [user] = await this.db.select(publicColumns).from(users).where(eq(users.email, email)).limit(1)
+    return user
+  }
+
+  async findByEmailForAuth(email: string): Promise<StoredUser | undefined> {
+    const [user] = await this.db.select().from(users).where(eq(users.email, email)).limit(1)
+    return user
+  }
+
+  // Insert, then select: MySQL has no RETURNING
+  async create(data: { email: string; passwordHash: string }): Promise<User> {
+    await this.db.insert(users).values(data)
+    const [user] = await this.db.select(publicColumns).from(users).where(eq(users.email, data.email)).limit(1)
+    return user as User
+  }
+}
+"
+,
+  "src/users/users.table.ts": 
+"import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export const users = sqliteTable('users', {
+  id: text('id')
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  email: text('email').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date())
+    .$onUpdate(() => new Date()),
+})
+"
+,
+  "src/users/users.types.ts": 
+"import type { users } from './users.table.js'
+
+export type StoredUser = typeof users.$inferSelect
+export type User = Pick<StoredUser, 'id' | 'email'>
+"
+,
+}
+`;
+
+exports[`add-ons jwt-auth with a database keeps users in papr 1`] = `
+{
+  "src/auth/auth.test.ts": 
+"import { describe, expect, it } from 'bun:test'
+import { JwtModule } from '@miiajs/jwt'
+import { TestApp } from '@miiajs/testing'
+import { UsersModel } from '../users/users.model.js'
+import { UsersService } from '../users/users.service.js'
+import type { StoredUser, User } from '../users/users.types.js'
+import { AuthModule } from './auth.module.js'
+
+// UsersService over a Map: this test needs no database
+function fakeUsers() {
+  const users = new Map<string, StoredUser>()
+  const toUser = ({ id, email }: StoredUser): User => ({ id, email })
+  const findByEmailForAuth = async (email: string) => [...users.values()].find((user) => user.email === email)
+  return {
+    findByEmailForAuth,
+    findById: async (id: string) => {
+      const user = users.get(id)
+      return user && toUser(user)
+    },
+    findByEmail: async (email: string) => {
+      const user = await findByEmailForAuth(email)
+      return user && toUser(user)
+    },
+    create: async (data: { email: string; passwordHash: string }) => {
+      const user = { id: crypto.randomUUID(), ...data }
+      users.set(user.id, user)
+      return toUser(user)
+    },
+  }
+}
+
+const createApp = () =>
+  TestApp.create(JwtModule.configure({ secret: 'test-secret-that-is-at-least-32-chars' }, { global: true }), AuthModule)
+    .override(UsersModel, {})
+    .override(UsersService, fakeUsers())
+    .compile()
+
+describe('auth', () => {
+  // One app for the whole flow: the fake keeps users in the app instance
+  it('registers, logs in and reads the current user', async () => {
+    const app = await createApp()
+    try {
+      const credentials = { email: 'ada@example.com', password: 'correct-horse' }
+
+      const registered = await app.request('POST', '/auth/register', { body: credentials })
+      expect(registered.status).toBe(201)
+      expect(typeof (await registered.json()).accessToken).toBe('string')
+
+      const again = await app.request('POST', '/auth/register', { body: credentials })
+      expect(again.status).toBe(409)
+
+      const login = await app.request('POST', '/auth/login', { body: credentials })
+      expect(login.status).toBe(200)
+      const { accessToken } = await login.json()
+
+      const wrong = await app.request('POST', '/auth/login', { body: { ...credentials, password: 'wrong-password' } })
+      expect(wrong.status).toBe(401)
+
+      const me = await app.request('GET', '/auth/me', { headers: { authorization: \`Bearer \${accessToken}\` } })
+      expect(me.status).toBe(200)
+      expect((await me.json()).email).toBe(credentials.email)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects /auth/me without a token', async () => {
+    const app = await createApp()
+    try {
+      const res = await app.request('GET', '/auth/me')
+      expect(res.status).toBe(401)
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "src/users/users.model.ts": 
+"import { defineModel } from '@miiajs/papr'
+import { schema, types } from 'papr'
+
+const usersSchema = schema(
+  {
+    email: types.string({ required: true }),
+    passwordHash: types.string({ required: true }),
+  },
+  { timestamps: true },
+)
+
+export const UsersModel = defineModel('users', usersSchema)
+"
+,
+  "src/users/users.module.ts": 
+"import { Module } from '@miiajs/core'
+import { PaprModule } from '@miiajs/papr'
+import { UsersModel } from './users.model.js'
+import { UsersService } from './users.service.js'
+
+@Module({
+  imports: [PaprModule.register([UsersModel])],
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+"
+,
+  "src/users/users.service.ts": 
+"import { Injectable, inject } from '@miiajs/core'
+import { ObjectId } from 'mongodb'
+import { UsersModel } from './users.model.js'
+import type { StoredUser, User } from './users.types.js'
+
+@Injectable()
+export class UsersService {
+  private readonly users = inject(UsersModel)
+
+  // Papr creates no indexes
+  async onInit(): Promise<void> {
+    await this.users.collection.createIndex({ email: 1 }, { unique: true })
+  }
+
+  async findById(id: string): Promise<User | undefined> {
+    if (!ObjectId.isValid(id)) return undefined
+    const user = await this.users.findById(id)
+    return user ? toUser(user) : undefined
+  }
+
+  async findByEmail(email: string): Promise<User | undefined> {
+    const user = await this.users.findOne({ email })
+    return user ? toUser(user) : undefined
+  }
+
+  async findByEmailForAuth(email: string): Promise<StoredUser | undefined> {
+    const user = await this.users.findOne({ email })
+    return user ? { ...toUser(user), passwordHash: user.passwordHash } : undefined
+  }
+
+  async create(data: { email: string; passwordHash: string }): Promise<User> {
+    return toUser(await this.users.insertOne(data))
+  }
+}
+
+function toUser(doc: { _id: ObjectId; email: string }): User {
+  return { id: String(doc._id), email: doc.email }
+}
+"
+,
+  "src/users/users.types.ts": 
+"export interface User {
+  id: string
+  email: string
+}
+
+export interface StoredUser extends User {
+  passwordHash: string
+}
+"
+,
+}
+`;
+
+exports[`add-ons jwt-auth with a database keeps users in mongoose 1`] = `
+{
+  "src/auth/auth.test.ts": 
+"import { describe, expect, it } from 'bun:test'
+import { JwtModule } from '@miiajs/jwt'
+import { TestApp } from '@miiajs/testing'
+import { UsersModel } from '../users/users.model.js'
+import { UsersService } from '../users/users.service.js'
+import type { StoredUser, User } from '../users/users.types.js'
+import { AuthModule } from './auth.module.js'
+
+// UsersService over a Map: this test needs no database
+function fakeUsers() {
+  const users = new Map<string, StoredUser>()
+  const toUser = ({ id, email }: StoredUser): User => ({ id, email })
+  const findByEmailForAuth = async (email: string) => [...users.values()].find((user) => user.email === email)
+  return {
+    findByEmailForAuth,
+    findById: async (id: string) => {
+      const user = users.get(id)
+      return user && toUser(user)
+    },
+    findByEmail: async (email: string) => {
+      const user = await findByEmailForAuth(email)
+      return user && toUser(user)
+    },
+    create: async (data: { email: string; passwordHash: string }) => {
+      const user = { id: crypto.randomUUID(), ...data }
+      users.set(user.id, user)
+      return toUser(user)
+    },
+  }
+}
+
+const createApp = () =>
+  TestApp.create(JwtModule.configure({ secret: 'test-secret-that-is-at-least-32-chars' }, { global: true }), AuthModule)
+    .override(UsersModel, {})
+    .override(UsersService, fakeUsers())
+    .compile()
+
+describe('auth', () => {
+  // One app for the whole flow: the fake keeps users in the app instance
+  it('registers, logs in and reads the current user', async () => {
+    const app = await createApp()
+    try {
+      const credentials = { email: 'ada@example.com', password: 'correct-horse' }
+
+      const registered = await app.request('POST', '/auth/register', { body: credentials })
+      expect(registered.status).toBe(201)
+      expect(typeof (await registered.json()).accessToken).toBe('string')
+
+      const again = await app.request('POST', '/auth/register', { body: credentials })
+      expect(again.status).toBe(409)
+
+      const login = await app.request('POST', '/auth/login', { body: credentials })
+      expect(login.status).toBe(200)
+      const { accessToken } = await login.json()
+
+      const wrong = await app.request('POST', '/auth/login', { body: { ...credentials, password: 'wrong-password' } })
+      expect(wrong.status).toBe(401)
+
+      const me = await app.request('GET', '/auth/me', { headers: { authorization: \`Bearer \${accessToken}\` } })
+      expect(me.status).toBe(200)
+      expect((await me.json()).email).toBe(credentials.email)
+    } finally {
+      await app.close()
+    }
+  })
+
+  it('rejects /auth/me without a token', async () => {
+    const app = await createApp()
+    try {
+      const res = await app.request('GET', '/auth/me')
+      expect(res.status).toBe(401)
+    } finally {
+      await app.close()
+    }
+  })
+})
+"
+,
+  "src/users/users.model.ts": 
+"import { defineModel } from '@miiajs/mongoose'
+import { Schema } from 'mongoose'
+
+interface UserDocument {
+  email: string
+  passwordHash: string
+}
+
+export const UsersModel = defineModel<UserDocument>(
+  'User',
+  new Schema<UserDocument>(
+    {
+      email: { type: String, required: true, unique: true },
+      passwordHash: { type: String, required: true },
+    },
+    { timestamps: true },
+  ),
+)
+"
+,
+  "src/users/users.module.ts": 
+"import { Module } from '@miiajs/core'
+import { MongooseModule } from '@miiajs/mongoose'
+import { UsersModel } from './users.model.js'
+import { UsersService } from './users.service.js'
+
+@Module({
+  imports: [MongooseModule.register([UsersModel])],
+  providers: [UsersService],
+  exports: [UsersService],
+})
+export class UsersModule {}
+"
+,
+  "src/users/users.service.ts": 
+"import { Injectable, inject } from '@miiajs/core'
+import { isValidObjectId, type Types } from 'mongoose'
+import { UsersModel } from './users.model.js'
+import type { StoredUser, User } from './users.types.js'
+
+@Injectable()
+export class UsersService {
+  private readonly users = inject(UsersModel)
+
+  async findById(id: string): Promise<User | undefined> {
+    if (!isValidObjectId(id)) return undefined
+    const user = await this.users.findById(id)
+    return user ? toUser(user) : undefined
+  }
+
+  async findByEmail(email: string): Promise<User | undefined> {
+    const user = await this.users.findOne({ email })
+    return user ? toUser(user) : undefined
+  }
+
+  async findByEmailForAuth(email: string): Promise<StoredUser | undefined> {
+    const user = await this.users.findOne({ email })
+    return user ? { ...toUser(user), passwordHash: user.passwordHash } : undefined
+  }
+
+  async create(data: { email: string; passwordHash: string }): Promise<User> {
+    return toUser(await this.users.create(data))
+  }
+}
+
+function toUser(doc: { _id: Types.ObjectId; email: string }): User {
+  return { id: String(doc._id), email: doc.email }
+}
+"
+,
+  "src/users/users.types.ts": 
+"export interface User {
+  id: string
+  email: string
+}
+
+export interface StoredUser extends User {
+  passwordHash: string
+}
+"
+,
+}
+`;
+
 exports[`add-ons combine into one project 1`] = `
 "import { ConfigModule, ConfigService } from '@miiajs/config'
 import { Module } from '@miiajs/core'
 import { envSchema, type Env } from '../env.schema.js'
 import { AppController } from './app.controller.js'
 import { AppService } from './app.service.js'
+import { DrizzleModule } from '@miiajs/drizzle'
+import * as schema from '../db.schema.js'
 import { JwtModule } from '@miiajs/jwt'
+import { UsersModule } from '../users/users.module.js'
 import { AuthModule } from '../auth/auth.module.js'
 import { SwaggerModule } from '@miiajs/swagger'
 import { RateLimitModule } from '@miiajs/rate-limit'
-import { DrizzleModule } from '@miiajs/drizzle'
-import * as schema from '../db/schema.js'
 
 @Module({
   imports: [
     ConfigModule.configure({ schema: envSchema }, { global: true }),
-    JwtModule.configure(
-      (resolve) => ({
-        secret: resolve<ConfigService<Env>>(ConfigService).getOrThrow('JWT_SECRET'),
-        expiresIn: '1h',
-      }),
-      { global: true },
-    ),
-    AuthModule,
-    SwaggerModule.configure({ title: 'demo-app', version: '0.1.0' }),
-    RateLimitModule.configure({ limit: 100, window: '1m' }, { global: true }),
     DrizzleModule.configure(
       (resolve) => ({
         dialect: 'sqlite',
@@ -2507,6 +3857,17 @@ import * as schema from '../db/schema.js'
       }),
       { global: true },
     ),
+    JwtModule.configure(
+      (resolve) => ({
+        secret: resolve<ConfigService<Env>>(ConfigService).getOrThrow('JWT_SECRET'),
+        expiresIn: '1h',
+      }),
+      { global: true },
+    ),
+    UsersModule,
+    AuthModule,
+    SwaggerModule.configure({ title: 'demo-app', version: '0.1.0' }),
+    RateLimitModule.configure({ limit: 100, window: '1m' }, { global: true }),
   ],
   controllers: [AppController],
   providers: [AppService],
@@ -2540,9 +3901,9 @@ export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+  DATABASE_URL: z.string(),
   JWT_SECRET: z.string().min(32),
   CORS_ORIGIN: z.string().default('*'),
-  DATABASE_URL: z.string(),
 })
 
 export type Env = z.infer<typeof envSchema>

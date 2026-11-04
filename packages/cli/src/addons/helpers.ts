@@ -8,7 +8,7 @@ import {
   insertStatement,
   isListenCall,
 } from '../codemod/source.js'
-import { addEnvEntries, addLines } from '../codemod/text.js'
+import { addEnvEntries, addLines, addSection } from '../codemod/text.js'
 import type { ProjectTree } from '../codemod/tree.js'
 import { parse } from '../codemod/typescript.js'
 import type { AddonContext } from '../scaffold/addons.js'
@@ -25,6 +25,11 @@ export function hasDependency(tree: ProjectTree, name: string): boolean {
   if (!text) return false
   const pkg = JSON.parse(text) as PackageJson
   return pkg.dependencies?.[name] !== undefined || pkg.devDependencies?.[name] !== undefined
+}
+
+export function hasScript(tree: ProjectTree, name: string): boolean {
+  const text = tree.read('package.json')
+  return !!text && (JSON.parse(text) as PackageJson).scripts?.[name] !== undefined
 }
 
 /** Import specifier from the root module to a project file */
@@ -146,6 +151,14 @@ export function addEnv(
   else if (opts.value !== undefined) ctx.warn(`No .env file: set ${opts.key} in your environment`)
 }
 
+/** Adds a README.md section before `## Next steps`, else at the end; skipped without a README or with the heading */
+export function addReadmeSection(ctx: AddonContext, heading: string, body: string): void {
+  if (!ctx.tree.exists('README.md')) return
+  ctx.tree.update('README.md', (text) =>
+    addSection(text, `${heading}\n\n${body}`, { heading, before: '## Next steps' }),
+  )
+}
+
 export function ignoreFiles(ctx: AddonContext, lines: string[]): void {
   if (ctx.tree.exists('.gitignore')) ctx.tree.update('.gitignore', (text) => addLines(text, lines))
   else ctx.tree.create('.gitignore', `${lines.join('\n')}\n`)
@@ -175,6 +188,13 @@ export function configReader(ctx: AddonContext): { get: (key: string) => string;
         ? `resolve<ConfigService<Env>>(ConfigService).getOrThrow('${key}')`
         : `resolve(ConfigService).getOrThrow('${key}')`,
     imports,
+  }
+}
+
+/** A database joining a project whose jwt-auth keeps users in memory: that service is not rewritten */
+export function warnInMemoryUsers(ctx: AddonContext): void {
+  if (ctx.tree.read('src/users/users.service.ts')?.includes('In-memory store')) {
+    ctx.warn('src/users/users.service.ts keeps users in memory: move it to the database')
   }
 }
 

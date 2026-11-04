@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   addDevHint,
+  defaultPackageManager,
   execCommand,
   detectPackageManager,
   installArgs,
@@ -25,6 +26,14 @@ function project(files: string[] = []): string {
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+
+describe('defaultPackageManager', () => {
+  it('is npm on Node.js, else the runtime', () => {
+    expect(defaultPackageManager('node')).toBe('npm')
+    expect(defaultPackageManager('bun')).toBe('bun')
+    expect(defaultPackageManager('deno')).toBe('deno')
+  })
 })
 
 describe('packageManagerFromUserAgent', () => {

@@ -18,7 +18,7 @@ export class JwtAuth implements AuthProvider {
       throw new UnauthorizedException('Invalid token')
     })
 
-    const user = await this.usersService.findById(Number(payload.sub))
+    const user = await this.usersService.findById(payload.sub)
     if (!user) throw new UnauthorizedException('User not found')
     return user
   }

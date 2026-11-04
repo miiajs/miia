@@ -95,7 +95,7 @@ export class UserProfileService {
 
 exports[`miia g guard: files and the parent module 1`] = `
 {
-  "src/user-profile/user-profile.guard.ts": 
+  "src/common/guards/user-profile.guard.ts": 
 "import { type CanActivate, Injectable, type RequestContext } from '@miiajs/core'
 
 @Injectable()
@@ -111,7 +111,7 @@ export class UserProfileGuard implements CanActivate {
 
 exports[`miia g middleware: files and the parent module 1`] = `
 {
-  "src/user-profile/user-profile.middleware.ts": 
+  "src/common/middleware/user-profile.middleware.ts": 
 "import type { Middleware } from '@miiajs/core'
 
 export const userProfileMiddleware: Middleware = async (_ctx, next) => {
@@ -140,17 +140,41 @@ import { UserProfileModule } from '../user-profile/user-profile.module.js'
 export class AppModule {}
 "
 ,
+  "src/user-profile/schemas/create-user-profile.schema.ts": 
+"import { z } from 'zod'
+
+export const CreateUserProfileSchema = z.object({
+  name: z.string().min(1),
+})
+
+export type CreateUserProfileInput = z.infer<typeof CreateUserProfileSchema>
+"
+,
+  "src/user-profile/schemas/update-user-profile.schema.ts": 
+"import type { z } from 'zod'
+import { CreateUserProfileSchema } from './create-user-profile.schema.js'
+
+export const UpdateUserProfileSchema = CreateUserProfileSchema.partial()
+
+export type UpdateUserProfileInput = z.infer<typeof UpdateUserProfileSchema>
+"
+,
+  "src/user-profile/schemas/user-profile-id-params.schema.ts": 
+"import { z } from 'zod'
+
+export const UserProfileIdParamsSchema = z.object({
+  id: z.uuid(),
+})
+
+export type UserProfileIdParams = z.infer<typeof UserProfileIdParamsSchema>
+"
+,
   "src/user-profile/user-profile.controller.ts": 
 "import { Controller, Delete, Get, inject, Patch, Post, type RequestContext, Status } from '@miiajs/core'
-import {
-  type UserProfileIdParams,
-  UserProfileIdParamsSchema,
-  type CreateUserProfileInput,
-  CreateUserProfileSchema,
-  type UpdateUserProfileInput,
-  UpdateUserProfileSchema,
-} from './user-profile.schemas.js'
 import { UserProfileService } from './user-profile.service.js'
+import { type UserProfileIdParams, UserProfileIdParamsSchema } from './schemas/user-profile-id-params.schema.js'
+import { type CreateUserProfileInput, CreateUserProfileSchema } from './schemas/create-user-profile.schema.js'
+import { type UpdateUserProfileInput, UpdateUserProfileSchema } from './schemas/update-user-profile.schema.js'
 
 @Controller('/user-profile')
 export class UserProfileController {
@@ -201,41 +225,19 @@ import { UserProfileService } from './user-profile.service.js'
 export class UserProfileModule {}
 "
 ,
-  "src/user-profile/user-profile.schemas.ts": 
-"import { z } from 'zod'
-
-export const CreateUserProfileSchema = z.object({
-  name: z.string().min(1),
-})
-
-export const UpdateUserProfileSchema = CreateUserProfileSchema.partial()
-
-export const UserProfileIdParamsSchema = z.object({
-  id: z.coerce.number().int().positive(),
-})
-
-export type CreateUserProfileInput = z.infer<typeof CreateUserProfileSchema>
-export type UpdateUserProfileInput = z.infer<typeof UpdateUserProfileSchema>
-export type UserProfileIdParams = z.infer<typeof UserProfileIdParamsSchema>
-"
-,
   "src/user-profile/user-profile.service.ts": 
 "import { Injectable, NotFoundException } from '@miiajs/core'
-import type { CreateUserProfileInput, UpdateUserProfileInput } from './user-profile.schemas.js'
-
-export interface UserProfile {
-  id: number
-  name: string
-}
+import type { UserProfile } from './user-profile.types.js'
+import type { CreateUserProfileInput } from './schemas/create-user-profile.schema.js'
+import type { UpdateUserProfileInput } from './schemas/update-user-profile.schema.js'
 
 // In-memory store: replace it with your database
 @Injectable()
 export class UserProfileService {
-  private readonly items = new Map<number, UserProfile>()
-  private nextId = 1
+  private readonly items = new Map<string, UserProfile>()
 
   create(input: CreateUserProfileInput): UserProfile {
-    const item = { id: this.nextId++, ...input }
+    const item = { id: crypto.randomUUID(), ...input }
     this.items.set(item.id, item)
     return item
   }
@@ -244,19 +246,19 @@ export class UserProfileService {
     return [...this.items.values()]
   }
 
-  findOne(id: number): UserProfile {
+  findOne(id: string): UserProfile {
     const item = this.items.get(id)
     if (!item) throw new NotFoundException(\`UserProfile \${id} not found\`)
     return item
   }
 
-  update(id: number, input: UpdateUserProfileInput): UserProfile {
+  update(id: string, input: UpdateUserProfileInput): UserProfile {
     const item = { ...this.findOne(id), ...input }
     this.items.set(id, item)
     return item
   }
 
-  remove(id: number): void {
+  remove(id: string): void {
     this.findOne(id)
     this.items.delete(id)
   }
@@ -297,10 +299,11 @@ describe('UserProfileController', () => {
     }
   })
 
-  it('answers 404 for a missing item and 422 for an invalid body', async () => {
+  it('answers 404 for a missing item and 422 for an invalid id or body', async () => {
     const app = await createApp()
     try {
-      expect((await app.request('GET', '/user-profile/999')).status).toBe(404)
+      expect((await app.request('GET', \`/user-profile/\${crypto.randomUUID()}\`)).status).toBe(404)
+      expect((await app.request('GET', '/user-profile/999')).status).toBe(422)
       expect((await app.request('POST', '/user-profile', { body: { name: '' } })).status).toBe(422)
     } finally {
       await app.close()
@@ -309,5 +312,69 @@ describe('UserProfileController', () => {
 })
 "
 ,
+  "src/user-profile/user-profile.types.ts": 
+"export interface UserProfile {
+  id: string
+  name: string
 }
+"
+,
+}
+`;
+
+exports[`miia g table drizzle-postgres: the table, its line in the schema barrel and the next steps 1`] = `
+"import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+
+export const userProfile = pgTable('user_profile', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true })
+    .notNull()
+    .defaultNow()
+    .$onUpdate(() => new Date()),
+})
+
+export type UserProfile = typeof userProfile.$inferSelect
+export type NewUserProfile = typeof userProfile.$inferInsert
+"
+`;
+
+exports[`miia g table drizzle-mysql: the table, its line in the schema barrel and the next steps 1`] = `
+"import { mysqlTable, timestamp, varchar } from 'drizzle-orm/mysql-core'
+
+export const userProfile = mysqlTable('user_profile', {
+  id: varchar('id', { length: 36 })
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: varchar('name', { length: 255 }).notNull(),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow().onUpdateNow(),
+})
+
+export type UserProfile = typeof userProfile.$inferSelect
+export type NewUserProfile = typeof userProfile.$inferInsert
+"
+`;
+
+exports[`miia g table drizzle-sqlite: the table, its line in the schema barrel and the next steps 1`] = `
+"import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+
+export const userProfile = sqliteTable('user_profile', {
+  id: text('id')
+    .primaryKey()
+    .$defaultFn(() => crypto.randomUUID()),
+  name: text('name').notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp' })
+    .notNull()
+    .$defaultFn(() => new Date())
+    .$onUpdate(() => new Date()),
+})
+
+export type UserProfile = typeof userProfile.$inferSelect
+export type NewUserProfile = typeof userProfile.$inferInsert
+"
 `;

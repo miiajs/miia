@@ -2,6 +2,7 @@ import { Module } from '@miiajs/core'
 import { UsersModule } from '../users/users.module.js'
 import { AuthController } from './auth.controller.js'
 import { AuthService } from './auth.service.js'
+import { PasswordService } from './password.service.js'
 import { JwtAuth } from './providers/jwt-auth.provider.js'
 import { LocalAuth } from './providers/local-auth.provider.js'
 
@@ -10,7 +11,7 @@ import { LocalAuth } from './providers/local-auth.provider.js'
   global: true,
   imports: [UsersModule],
   controllers: [AuthController],
-  providers: [AuthService, LocalAuth, JwtAuth],
+  providers: [AuthService, PasswordService, LocalAuth, JwtAuth],
   exports: [JwtAuth],
 })
 export class AuthModule {}

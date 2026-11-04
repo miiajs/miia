@@ -1,5 +1,6 @@
 import type {
   ArrayLiteralExpression,
+  ExportDeclaration,
   Expression,
   ImportDeclaration,
   NamedImports,
@@ -185,8 +186,8 @@ function declaredNames(ts: TS, stmt: Statement): string[] {
   return []
 }
 
-function moduleName(ts: TS, decl: ImportDeclaration): string | undefined {
-  return ts.isStringLiteral(decl.moduleSpecifier) ? decl.moduleSpecifier.text : undefined
+function moduleName(ts: TS, decl: ImportDeclaration | ExportDeclaration): string | undefined {
+  return decl.moduleSpecifier && ts.isStringLiteral(decl.moduleSpecifier) ? decl.moduleSpecifier.text : undefined
 }
 
 const SOURCE_EXTENSION = /\.(?:[cm]?[jt]s|[jt]sx)$/
@@ -197,22 +198,28 @@ function sameSpecifier(a: string, b: string): boolean {
   return a.startsWith('.') && b.startsWith('.') && a.replace(SOURCE_EXTENSION, '') === b.replace(SOURCE_EXTENSION, '')
 }
 
-// A file that writes its relative imports without extensions gets a new one without the extension too
+function moduleDeclarations(ts: TS, sf: SourceFile): Array<ImportDeclaration | ExportDeclaration> {
+  return sf.statements.filter(
+    (stmt): stmt is ImportDeclaration | ExportDeclaration =>
+      ts.isImportDeclaration(stmt) || (ts.isExportDeclaration(stmt) && !!stmt.moduleSpecifier),
+  )
+}
+
+// A file that writes its relative specifiers without extensions gets a new one without the extension too
 function specifierInFileStyle(ts: TS, sf: SourceFile, from: string): string {
   if (!from.startsWith('.')) return from
-  const relative = sf.statements
-    .filter(ts.isImportDeclaration)
+  const relative = moduleDeclarations(ts, sf)
     .map((decl) => moduleName(ts, decl))
     .filter((name): name is string => !!name?.startsWith('.'))
   const extensionless = relative.length > 0 && relative.every((name) => !SOURCE_EXTENSION.test(name))
   return extensionless ? from.replace(SOURCE_EXTENSION, '') : from
 }
 
-// Quote and semicolon style of the file's first import
+// Quote and semicolon style of the file's first import or `export ... from`; a lone `export {};` gives the semicolon
 function quote(ts: TS, sf: SourceFile, value: string): string {
-  const first = sf.statements.find(ts.isImportDeclaration)
-  const q = first?.moduleSpecifier.getText(sf).startsWith('"') ? '"' : "'"
-  const semi = first?.getText(sf).endsWith(';') ? ';' : ''
+  const first = moduleDeclarations(ts, sf)[0]
+  const q = first?.moduleSpecifier?.getText(sf).startsWith('"') ? '"' : "'"
+  const semi = (first ?? sf.statements.find(ts.isExportDeclaration))?.getText(sf).endsWith(';') ? ';' : ''
   return `${q}${value}${q}${semi}`
 }
 
@@ -242,6 +249,37 @@ function insertImportLine(ts: TS, sf: SourceFile, text: string, line: string): s
   }
   if (text.length === 0) return line + eol
   return line + (/^\r?\n/.test(text) ? eol : eol + eol) + text
+}
+
+// --- export * --------------------------------------------------------------
+
+export function addExportStar(ts: TS, text: string, opts: { from: string }): EditResult {
+  const sf = parse(ts, text)
+  const stars = sf.statements.filter(
+    (stmt): stmt is ExportDeclaration => ts.isExportDeclaration(stmt) && !stmt.exportClause && !!stmt.moduleSpecifier,
+  )
+  const same = (decl: ExportDeclaration) => {
+    const name = moduleName(ts, decl)
+    return name !== undefined && sameSpecifier(name, opts.from)
+  }
+  if (stars.some(same)) return { text, status: 'exists' }
+
+  const line = `export * from ${quote(ts, sf, specifierInFileStyle(ts, sf, opts.from))}`
+  const empty = sf.statements.find(
+    (stmt) =>
+      ts.isExportDeclaration(stmt) &&
+      !stmt.moduleSpecifier &&
+      !!stmt.exportClause &&
+      ts.isNamedExports(stmt.exportClause) &&
+      stmt.exportClause.elements.length === 0,
+  )
+  if (empty) return { text: text.slice(0, empty.getStart(sf)) + line + text.slice(empty.end), status: 'added' }
+
+  const { eol } = detectStyle(text)
+  const anchor = stars.at(-1) ?? sf.statements.filter(ts.isImportDeclaration).at(-1)
+  if (anchor) return { text: insert(text, lineEnd(text, anchor.end), eol + line), status: 'added' }
+  if (text.length === 0) return { text: line + eol, status: 'added' }
+  return { text: text + (text.endsWith('\n') ? '' : eol) + line + eol, status: 'added' }
 }
 
 // --- @Module arrays --------------------------------------------------------
@@ -324,7 +362,7 @@ function findModuleConfig(ts: TS, sf: SourceFile, moduleClass?: string): ObjectL
   return null
 }
 
-function propertyName(ts: TS, p: ObjectLiteralElementLike): string | undefined {
+export function propertyName(ts: TS, p: ObjectLiteralElementLike): string | undefined {
   if (ts.isSpreadAssignment(p) || !p.name) return undefined
   return ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) || ts.isNoSubstitutionTemplateLiteral(p.name)
     ? p.name.text

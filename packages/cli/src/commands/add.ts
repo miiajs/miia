@@ -76,7 +76,7 @@ export default defineCommand({
     }
 
     const before = dependencySnapshot(tree)
-    const { applied, skipped, warnings } = addToProject(project, ids)
+    const { applied, skipped, warnings, next } = addToProject(project, ids)
     for (const addon of skipped) logger.info(`${addon.id} is already installed`)
     if (applied.length === 0) return
 
@@ -85,6 +85,7 @@ export default defineCommand({
       for (const line of tree.summary()) logger.info(`  ${line}`)
       printNewDependencies(before, dependencySnapshot(tree))
       for (const warning of new Set(warnings)) logger.warn(warning)
+      printNext(next)
       return
     }
 
@@ -98,8 +99,13 @@ export default defineCommand({
     }
     await formatFiles(written, cwd)
     logger.success(`\nAdded ${applied.map((a) => a.id).join(', ')}`)
+    printNext(next)
   }),
 })
+
+function printNext(steps: string[]): void {
+  if (steps.length > 0) logger.info(`\nNext:\n\n  ${steps.join('\n  ')}`)
+}
 
 async function isGitTreeDirty(cwd: string): Promise<boolean> {
   const result = await execa('git', ['status', '--porcelain'], { cwd, reject: false })

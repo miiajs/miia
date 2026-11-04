@@ -1,12 +1,17 @@
 import type { ModuleKey } from '../codemod/source.js'
 
-export type SchematicName = 'module' | 'controller' | 'service' | 'guard' | 'middleware' | 'resource'
+export type SchematicName = 'module' | 'controller' | 'service' | 'guard' | 'middleware' | 'resource' | 'table'
 
 export interface Schematic {
   name: SchematicName
   aliases: string[]
-  /** resource: always in its own <file>/ folder; the rest only without --flat and without a slash in the name */
+  /**
+   * resource: always in its own <file>/ folder; module, controller, service and table only without --flat and
+   * without a slash in the name; guard and middleware never (see commonDir)
+   */
   alwaysNested: boolean
+  /** Folder under src/ when neither the name nor --path names one */
+  commonDir?: string
   /** What goes into the parent module */
   register?: { key: Exclude<ModuleKey, 'exports'>; className: (name: string) => string; file: (file: string) => string }
   /** --export also lists the class in `exports` */
@@ -35,14 +40,15 @@ const schematics: Schematic[] = [
     register: { key: 'providers', className: (n) => `${n}Service`, file: (f) => `${f}.service.ts` },
     exportable: true,
   },
-  { name: 'guard', aliases: [], alwaysNested: false },
-  { name: 'middleware', aliases: [], alwaysNested: false },
+  { name: 'guard', aliases: [], alwaysNested: false, commonDir: 'common/guards' },
+  { name: 'middleware', aliases: [], alwaysNested: false, commonDir: 'common/middleware' },
   {
     name: 'resource',
     aliases: ['r'],
     alwaysNested: true,
     register: { key: 'imports', className: (n) => `${n}Module`, file: (f) => `${f}.module.ts` },
   },
+  { name: 'table', aliases: [], alwaysNested: false },
 ]
 
 export function resolveSchematic(nameOrAlias: string): Schematic | undefined {

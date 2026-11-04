@@ -82,7 +82,7 @@ export default defineCommand({
       cliVersion: cliVersion(),
       random: (bytes) => randomBytes(bytes).toString('hex'),
     }
-    const { warnings } = createProject(ctx, options)
+    const { warnings, next } = createProject(ctx, options)
     const shownDir = relative(process.cwd(), options.dir) || '.'
 
     if (options.dryRun) {
@@ -110,10 +110,11 @@ export default defineCommand({
     const steps = [
       shownDir === '.' ? null : `cd ${shownDir}`,
       options.install ? null : `${options.packageManager} install`,
+      ...next,
       runScriptCommand(options.packageManager, 'dev'),
     ].filter(Boolean)
-    const next = `Project "${options.name}" created. Next:\n\n  ${steps.join('\n  ')}`
-    if (interactive) p.outro(next)
-    else logger.success(`\n${next}`)
+    const message = `Project "${options.name}" created. Next:\n\n  ${steps.join('\n  ')}`
+    if (interactive) p.outro(message)
+    else logger.success(`\n${message}`)
   }),
 })

@@ -84,7 +84,7 @@ export function fillPlaceholders(text: string, values: Record<string, string>): 
   return text.replace(/\{\{([\w:-]+)\}\}/g, (match, key: string) => values[key] ?? match)
 }
 
-/** `__Name__` / `__name__` / `__file__` in file contents and paths. */
+/** `__Name__` / `__name__` / `__file__` / `__table__` in file contents and paths. */
 export function replaceIdentifiers(text: string, values: Record<string, string>): string {
   let result = text
   for (const [key, value] of Object.entries(values)) result = result.replaceAll(key, value)

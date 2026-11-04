@@ -18,7 +18,7 @@ The generated project has `@miiajs/cli` as a devDependency; its scripts call `mi
 | --- | --- |
 | `miia new [name]` | New project from the templates (`--runtime`, `--pm`, `--features`, `--db`, `-y`) |
 | `miia add <add-on...>` | Add jwt-auth, swagger, cors, serve-static, rate-limit, biome, drizzle-postgres, drizzle-mysql, drizzle-sqlite, papr or mongoose to a project |
-| `miia g <schematic> <name>` | Generate a module, controller, service, guard, middleware or CRUD resource |
+| `miia g <schematic> <name>` | Generate a module, controller, service, guard, middleware, CRUD resource or Drizzle table |
 | `miia dev` | Runtime watcher + `tsc --watch` |
 | `miia build` | Type-check (Bun, Deno) or compile to `dist/` (Node.js) |
 | `miia start` | Production start, forwarding signals and the exit code |

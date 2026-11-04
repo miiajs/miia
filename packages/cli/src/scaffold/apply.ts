@@ -33,7 +33,7 @@ export interface ApplyOptions {
   target?: string
   /** `{{key}}` values */
   placeholders?: Record<string, string>
-  /** `__Name__` / `__name__` / `__file__` values, in contents and file names */
+  /** `__Name__` / `__name__` / `__file__` / `__table__` values, in contents and file names */
   identifiers?: Record<string, string>
   /** Refuse any existing file, identical content included (generate) */
   strict?: boolean

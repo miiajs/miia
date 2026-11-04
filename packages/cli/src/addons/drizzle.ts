@@ -1,15 +1,18 @@
 import type { Addon } from '../scaffold/addons.js'
+import { databaseGuide } from './database-guide.js'
 import {
   addEnv,
+  addReadmeSection,
   configReader,
   databaseName,
   fromRootModule,
   hasDependency,
   ignoreFiles,
   registerModule,
+  warnInMemoryUsers,
 } from './helpers.js'
 
-type Dialect = 'postgres' | 'mysql' | 'sqlite'
+export type Dialect = 'postgres' | 'mysql' | 'sqlite'
 
 const LABELS: Record<Dialect, string> = { postgres: 'PostgreSQL', mysql: 'MySQL', sqlite: 'SQLite' }
 
@@ -48,12 +51,17 @@ export function drizzleAddon(dialect: Dialect): Addon {
         ].join('\n'),
         imports: [
           { from: '@miiajs/drizzle', names: ['DrizzleModule'] },
-          { from: fromRootModule(ctx, 'src/db/schema.ts'), namespace: 'schema' },
+          { from: fromRootModule(ctx, 'src/db.schema.ts'), namespace: 'schema' },
           ...config.imports,
         ],
       })
-      addEnv(ctx, { key: 'DATABASE_URL', schema: 'z.string()', example: URLS[dialect](databaseName(ctx.projectName)) })
+      const url = URLS[dialect](databaseName(ctx.projectName))
+      addEnv(ctx, { key: 'DATABASE_URL', schema: 'z.string()', example: url })
       if (dialect === 'sqlite') ignoreFiles(ctx, ['data.db'])
+      const guide = databaseGuide(ctx, dialect, url)
+      addReadmeSection(ctx, '## Database', guide.section)
+      for (const step of guide.steps) ctx.next(step)
+      warnInMemoryUsers(ctx)
     },
   }
 }

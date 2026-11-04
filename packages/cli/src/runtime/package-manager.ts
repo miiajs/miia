@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import type { Runtime } from './types.js'
 
 export type PackageManager = 'bun' | 'npm' | 'pnpm' | 'yarn' | 'deno'
 
@@ -34,6 +35,11 @@ export function detectPackageManager(cwd: string, opts: { stopAt?: string } = {}
     if (dir === opts.stopAt || parent === dir) return null
     dir = parent
   }
+}
+
+/** For a project without a lockfile: npm on Node.js, else the runtime */
+export function defaultPackageManager(runtime: Runtime): PackageManager {
+  return runtime === 'node' ? 'npm' : runtime
 }
 
 export function installArgs(pm: PackageManager): [string, string[]] {

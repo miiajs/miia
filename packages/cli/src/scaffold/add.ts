@@ -3,7 +3,7 @@ import type { PackageJson } from '../codemod/json.js'
 import { ProjectTree } from '../codemod/tree.js'
 import type { TS } from '../codemod/typescript.js'
 import { isRuntime, resolveRuntime } from '../runtime/detect.js'
-import { detectPackageManager, type PackageManager } from '../runtime/package-manager.js'
+import { defaultPackageManager, detectPackageManager, type PackageManager } from '../runtime/package-manager.js'
 import type { Runtime } from '../runtime/types.js'
 import { CliError } from '../utils/errors.js'
 import { type Addon, addonContext, addons, resolveAddons } from './addons.js'
@@ -32,7 +32,7 @@ export function openProject(
   }
 
   const runtime = projectRuntime(pkg, cwd)
-  const packageManager = detectPackageManager(cwd) ?? (runtime === 'node' ? 'npm' : runtime)
+  const packageManager = detectPackageManager(cwd) ?? defaultPackageManager(runtime)
 
   return {
     ctx: {
@@ -64,7 +64,7 @@ export function addToProject(
   project: Project,
   ids: string[],
   registry: readonly Addon[] = addons,
-): { applied: Addon[]; skipped: Addon[]; warnings: string[] } {
+): { applied: Addon[]; skipped: Addon[]; warnings: string[]; next: string[] } {
   const { ctx, layout } = project
   const selected = resolveAddons(ids, ctx.runtime, registry)
 
@@ -77,6 +77,7 @@ export function addToProject(
   }
 
   const warnings: string[] = []
+  const next: string[] = []
   const applied: Addon[] = []
   const skipped: Addon[] = []
   for (const addon of selected) {
@@ -84,10 +85,12 @@ export function addToProject(
       skipped.push(addon)
       continue
     }
-    addon.apply(addonContext(ctx, addon, { layout, selected, warnings, registry }))
+    addon.apply(
+      addonContext(ctx, addon, { layout, selected, warnings, next, registry, packageManager: project.packageManager }),
+    )
     applied.push(addon)
   }
-  return { applied, skipped, warnings }
+  return { applied, skipped, warnings, next }
 }
 
 export function dependencySnapshot(tree: ProjectTree): string {

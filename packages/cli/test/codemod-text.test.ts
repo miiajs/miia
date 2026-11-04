@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { importSpecifier } from '../src/codemod/paths.js'
-import { addEnvEntries, addLines } from '../src/codemod/text.js'
+import { addEnvEntries, addLines, addSection } from '../src/codemod/text.js'
 
 describe('addEnvEntries', () => {
   it('appends missing keys', () => {
@@ -36,6 +36,37 @@ describe('addLines', () => {
   it('skips present lines', () => {
     expect(addLines('node_modules/\r\n.env\r\n', ['.env', 'data.db'])).toBe('node_modules/\r\n.env\r\ndata.db\r\n')
     expect(addLines('dist/\n', ['dist/'])).toBe('dist/\n')
+  })
+})
+
+describe('addSection', () => {
+  const opts = { heading: '## Database', before: '## Next steps' }
+  const section = '## Database\n\nStart it.\n'
+
+  it('goes before the `before` heading', () => {
+    expect(addSection('# App\n\n## Scripts\n\nx\n\n## Next steps\n\n- y\n', section, opts)).toBe(
+      '# App\n\n## Scripts\n\nx\n\n## Database\n\nStart it.\n\n## Next steps\n\n- y\n',
+    )
+    expect(addSection('# App\nx\n## Next steps\n', section, opts)).toBe(
+      '# App\nx\n\n## Database\n\nStart it.\n\n## Next steps\n',
+    )
+  })
+
+  it('goes at the end without the `before` heading', () => {
+    expect(addSection('# App\n\nx\n\n', section, opts)).toBe('# App\n\nx\n\n## Database\n\nStart it.\n')
+    expect(addSection('# App', section, { heading: '## Database' })).toBe('# App\n\n## Database\n\nStart it.\n')
+    expect(addSection('', section, opts)).toBe('## Database\n\nStart it.\n')
+  })
+
+  it('leaves the text alone when the heading is there', () => {
+    const text = '# App\n\n## Database \n\nMine.\n\n## Next steps\n'
+    expect(addSection(text, section, opts)).toBe(text)
+  })
+
+  it('keeps CRLF', () => {
+    expect(addSection('# App\r\n\r\n## Next steps\r\n', section, opts)).toBe(
+      '# App\r\n\r\n## Database\r\n\r\nStart it.\r\n\r\n## Next steps\r\n',
+    )
   })
 })
 

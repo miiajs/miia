@@ -26,6 +26,13 @@ export function toKebabCase(input: string): string {
     .join('-')
 }
 
+/** HTTPServer -> http_server, user-profile -> user_profile */
+export function toSnakeCase(input: string): string {
+  return splitWords(input)
+    .map((word) => word.toLowerCase())
+    .join('_')
+}
+
 const SEGMENT = /^[a-zA-Z][a-zA-Z0-9_-]*$/
 
 /** 'admin/users' -> { dir: 'admin', name: 'users' }; every segment starts with a letter. */

@@ -49,6 +49,7 @@ describe('createProject', () => {
     it(`generates the base project for ${runtime}`, () => {
       const { files, result, ctx } = generate(runtime, pm)
       expect(result.warnings).toEqual([])
+      expect(result.next).toEqual([])
       expect(ctx.tree.changes().every((c) => c.kind === 'create')).toBe(true)
       expect(files).toMatchSnapshot()
 

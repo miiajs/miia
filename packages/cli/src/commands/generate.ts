@@ -13,7 +13,7 @@ export default defineCommand({
   args: {
     schematic: {
       type: 'positional',
-      description: 'Schematic: module (m), controller (c), service (s), resource (r), guard, middleware',
+      description: 'Schematic: module (m), controller (c), service (s), resource (r), guard, middleware, table',
       required: false,
     },
     name: {
@@ -27,7 +27,7 @@ export default defineCommand({
     },
     flat: {
       type: 'boolean',
-      description: 'Do not create a folder for the artifact',
+      description: 'Do not create a folder for the artifact (guard and middleware never get one)',
       default: false,
     },
     export: {

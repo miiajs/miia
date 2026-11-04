@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import ts from 'typescript'
 import {
+  addExportStar,
   addImport,
   addSchemaKey,
   addToModuleArray,
@@ -148,6 +149,110 @@ describe('addImport', () => {
     const text = 'import { A } from "./a.js";\r\n\r\nA;\r\n'
     expect(addImport(ts, text, { from: './b.js', names: ['B'] }).text).toBe(
       'import { A } from "./a.js";\r\nimport { B } from "./b.js";\r\n\r\nA;\r\n',
+    )
+  })
+})
+
+describe('addExportStar', () => {
+  const add = (text: string, from = './posts/posts.table.js') => addExportStar(ts, text, { from })
+
+  it('replaces an empty export {} and keeps the comment above it', () => {
+    expect(add(lines('// Every table', 'export {}'))).toEqual({
+      status: 'added',
+      text: lines('// Every table', "export * from './posts/posts.table.js'"),
+    })
+  })
+
+  it('goes after the last export *', () => {
+    const text = lines("export * from './a.js'", "export * from './b.js'", '', 'export const c = 1')
+    expect(add(text).text).toBe(
+      lines(
+        "export * from './a.js'",
+        "export * from './b.js'",
+        "export * from './posts/posts.table.js'",
+        '',
+        'export const c = 1',
+      ),
+    )
+  })
+
+  it('goes after the last import when there is no export *', () => {
+    const text = lines("import { a } from './a.js'", "import { b } from './b.js'", '', 'export const c = a + b')
+    expect(add(text).text).toBe(
+      lines(
+        "import { a } from './a.js'",
+        "import { b } from './b.js'",
+        "export * from './posts/posts.table.js'",
+        '',
+        'export const c = a + b',
+      ),
+    )
+  })
+
+  it('goes to the end of a file with neither', () => {
+    expect(add(lines('export const a = 1')).text).toBe(
+      lines('export const a = 1', "export * from './posts/posts.table.js'"),
+    )
+    expect(add('export const a = 1').text).toBe(lines('export const a = 1', "export * from './posts/posts.table.js'"))
+    expect(add(lines('// Every table')).text).toBe(lines('// Every table', "export * from './posts/posts.table.js'"))
+  })
+
+  it('writes the line into an empty file', () => {
+    expect(add('')).toEqual({ status: 'added', text: lines("export * from './posts/posts.table.js'") })
+  })
+
+  it('reports a module it exports already, with an extension or without', () => {
+    for (const text of [
+      lines("export * from './posts/posts.table.js'"),
+      lines("export * from './posts/posts.table'"),
+    ]) {
+      expect(add(text)).toEqual({ status: 'exists', text })
+    }
+    expect(add(lines("export * from './posts/posts.table.ts'")).status).toBe('exists')
+  })
+
+  it('does not count a named or a namespace export as export *', () => {
+    expect(add(lines("export { a } from './posts/posts.table.js'")).status).toBe('added')
+    expect(add(lines("export * as posts from './posts/posts.table.js'")).status).toBe('added')
+  })
+
+  it('keeps an export {} that has names', () => {
+    const text = lines('const a = 1', 'export { a }')
+    expect(add(text).text).toBe(`${text}export * from './posts/posts.table.js'\n`)
+  })
+
+  it('keeps CRLF', () => {
+    expect(add("export * from './a.js'\r\n").text).toBe(
+      "export * from './a.js'\r\nexport * from './posts/posts.table.js'\r\n",
+    )
+    expect(add('// Every table\r\nexport {}\r\n').text).toBe(
+      "// Every table\r\nexport * from './posts/posts.table.js'\r\n",
+    )
+    expect(add('export const a = 1\r\n').text).toBe("export const a = 1\r\nexport * from './posts/posts.table.js'\r\n")
+  })
+
+  it('follows double quotes and semicolons', () => {
+    expect(add(lines('export * from "./a.js";')).text).toBe(
+      lines('export * from "./a.js";', 'export * from "./posts/posts.table.js";'),
+    )
+    expect(add(lines('import { a } from "./a.js";', '', 'export const b = a;')).text).toBe(
+      lines('import { a } from "./a.js";', 'export * from "./posts/posts.table.js";', '', 'export const b = a;'),
+    )
+    expect(add(lines('export {};')).text).toBe(lines("export * from './posts/posts.table.js';"))
+  })
+
+  it('follows a file without extensions, in exports and imports', () => {
+    expect(add(lines("export * from './a'")).text).toBe(
+      lines("export * from './a'", "export * from './posts/posts.table'"),
+    )
+    expect(add(lines("import { a } from './a'", 'export { a }')).text).toBe(
+      lines("import { a } from './a'", "export * from './posts/posts.table'", 'export { a }'),
+    )
+  })
+
+  it('makes addImport read the style of export ... from too', () => {
+    expect(addImport(ts, lines('export * from "./a";'), { from: './b.js', names: ['b'] }).text).toBe(
+      lines('import { b } from "./b";', '', 'export * from "./a";'),
     )
   })
 })

@@ -1,13 +1,8 @@
 import { Controller, Delete, Get, inject, Patch, Post, type RequestContext, Status } from '@miiajs/core'
-import {
-  type __Name__IdParams,
-  __Name__IdParamsSchema,
-  type Create__Name__Input,
-  Create__Name__Schema,
-  type Update__Name__Input,
-  Update__Name__Schema,
-} from './__file__.schemas.js'
 import { __Name__Service } from './__file__.service.js'
+import { type __Name__IdParams, __Name__IdParamsSchema } from './schemas/__file__-id-params.schema.js'
+import { type Create__Name__Input, Create__Name__Schema } from './schemas/create-__file__.schema.js'
+import { type Update__Name__Input, Update__Name__Schema } from './schemas/update-__file__.schema.js'
 
 @Controller('/__file__')
 export class __Name__Controller {

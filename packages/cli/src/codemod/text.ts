@@ -32,3 +32,25 @@ export function addLines(text: string, lines: string[]): string {
     lines.filter((line) => !present.has(line.trim())),
   )
 }
+
+/**
+ * A Markdown section: inserted before the `before` line, else at the end. Nothing changes when the `heading`
+ * line is there already.
+ */
+export function addSection(text: string, section: string, opts: { heading: string; before?: string }): string {
+  const raw = text.split('\n')
+  const lines = raw.map((line) => line.replace(/\r$/, '').trim())
+  if (lines.includes(opts.heading)) return text
+  const eol = eolOf(text)
+  const body = section.replace(/\s+$/, '').split(/\r?\n/).join(eol) + eol
+
+  const at = opts.before === undefined ? -1 : lines.indexOf(opts.before)
+  if (at === -1) {
+    const head = text.replace(/\s+$/, '')
+    return head ? head + eol + eol + body : body
+  }
+  const offset = raw.slice(0, at).reduce((sum, line) => sum + line.length + 1, 0)
+  const head = text.slice(0, offset)
+  const gap = head === '' || /(^|\n)[ \t]*\r?\n$/.test(head) ? '' : eol
+  return head + gap + body + eol + text.slice(offset)
+}
