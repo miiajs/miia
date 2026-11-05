@@ -48,7 +48,7 @@ Expected: every `@miiajs/*` package and `create-miia` bumped to the same new ver
 bun run cli:e2e
 ```
 
-Builds and packs every package, generates projects with `miia new` outside the repo against those tarballs, installs them and runs `check`, the tests and the server with HTTP probes on Bun, Node.js and Deno. Needs `bun`, `node`, `deno` and network access; takes a few minutes. `--only <scenario,...>` runs a subset, `--keep` keeps the generated projects.
+Builds and packs every package, generates projects with `miia new` outside the repo against those tarballs, installs them and runs `check`, the tests and the server with HTTP probes on Bun, Node.js and Deno, and the generated app on workerd through wrangler. Needs `bun`, `node`, `deno` and network access; takes a few minutes. `--only <scenario,...>` runs a subset, `--keep` keeps the generated projects.
 
 ### 4. Build
 

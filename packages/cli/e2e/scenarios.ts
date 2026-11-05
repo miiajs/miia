@@ -22,6 +22,13 @@ export type Step =
   /** The start script on a free PORT, polled until GET / answers, then the probes */
   | { kind: 'start'; probes: Probe[] }
   | { kind: 'shell'; command: string }
+  /** Writes files and adds to package.json, before the project is installed */
+  | {
+      kind: 'customize'
+      files: Record<string, string>
+      scripts?: Record<string, string>
+      devDependencies?: Record<string, string>
+    }
 
 export interface Scenario {
   name: string
@@ -42,6 +49,10 @@ export const miia = (...args: string[]): Step => ({ kind: 'miia', args })
 export const install = (): Step => ({ kind: 'install' })
 export const start = (...probes: Probe[]): Step => ({ kind: 'start', probes })
 export const shell = (command: string): Step => ({ kind: 'shell', command })
+export const customize = (change: Omit<Extract<Step, { kind: 'customize' }>, 'kind'>): Step => ({
+  kind: 'customize',
+  ...change,
+})
 
 export function probe(
   name: string,
@@ -134,6 +145,28 @@ const generateAll: Step[] = [
 
 const basics = (runtime: Runtime): Step[] =>
   runtime === 'node' ? [run('check'), run('test'), run('build')] : [run('check'), run('test')]
+
+// The generated app on workerd: wrangler bundles it with esbuild, so a polyfill a bundler drops shows up here
+const onWorkers = customize({
+  files: {
+    'src/worker.ts': `import { Miia } from '@miiajs/core'
+import { AppModule } from './app/app.module.js'
+
+const app = new Miia({ shutdownHooks: false }).register(AppModule)
+
+export default { fetch: app.fetch }
+`,
+    'wrangler.toml': `name = "e2e"
+main = "src/worker.ts"
+compatibility_date = "2026-11-01"
+compatibility_flags = ["nodejs_compat"]
+`,
+  },
+  scripts: {
+    start: 'WRANGLER_SEND_METRICS=false wrangler dev --port $PORT --ip 127.0.0.1 --show-interactive-dev-session=false',
+  },
+  devDependencies: { wrangler: '^4.0.0' },
+})
 
 const FEATURES = 'jwt-auth,swagger,cors,serve-static,rate-limit,biome'
 const fullProbes = [greets, docs, staticIndex, register, me, preflight]
@@ -305,6 +338,13 @@ export const scenarios: Scenario[] = [
     installWith: 'bun',
     args: ['--features', 'jwt-auth', '--db', 'mongoose'],
     steps: [install(), ...basics('bun')],
+  },
+  {
+    name: 'workers',
+    runtime: 'bun',
+    pm: 'bun',
+    installWith: 'bun',
+    steps: [onWorkers, install(), start(greets)],
   },
   {
     name: 'create-bun',

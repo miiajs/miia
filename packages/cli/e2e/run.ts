@@ -1,6 +1,7 @@
 /**
  * Generates projects outside the repo against the packed packages and runs them for real:
- * install, check, tests, build, start and HTTP probes on Bun, Node.js and Deno.
+ * install, check, tests, build, start and HTTP probes on Bun, Node.js and Deno, and the generated
+ * app on workerd.
  *
  *   bun run cli:e2e [--only a,b] [--keep]
  *
@@ -160,6 +161,8 @@ function stepName(step: Step): string {
       return 'start'
     case 'shell':
       return step.command.split(' ').slice(0, 2).join(' ')
+    case 'customize':
+      return 'customize'
   }
 }
 
@@ -179,7 +182,18 @@ async function runStep(scenario: Scenario, step: Step, projectDir: string, log: 
       return exec(`${scenario.installWith} install`, { cwd: projectDir, log })
     case 'start':
       return startAndProbe(scenario, step.probes, projectDir, log)
+    case 'customize':
+      return customizeProject(step, projectDir)
   }
+}
+
+function customizeProject(step: Extract<Step, { kind: 'customize' }>, projectDir: string): void {
+  for (const [path, content] of Object.entries(step.files)) writeFileSync(join(projectDir, path), content)
+  const file = join(projectDir, 'package.json')
+  const pkg = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, Record<string, string> | undefined>
+  pkg.scripts = { ...pkg.scripts, ...step.scripts }
+  pkg.devDependencies = { ...pkg.devDependencies, ...step.devDependencies }
+  writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`)
 }
 
 async function startAndProbe(

@@ -386,7 +386,7 @@ jwt-auth keeps users in the project's database, in memory without one. `usersLay
 
 **Generated tests:** `bun:test` with only `describe`/`it`/`test`/`expect` and no hooks (`node:test` on Deno has none); `toNodeTestRunner` rewrites the import to `node:test` + the `expect` package for Node and Deno; each test creates its own `TestApp`. `template-versions.test.ts` checks every manifest against the peer ranges and required peers of the `@miiajs/*` packages and against the templates workspace. The repo's `bun test` skips `packages/cli/templates/**` (`bunfig.toml`, plus a second `--path-ignore-patterns` in the `test` script, since the flag replaces the bunfig list).
 
-**e2e:** `bun run cli:e2e [--only a,b] [--keep]` (`packages/cli/e2e/`): clean build, `bun pm pack` of every package, projects generated outside the repo with `@miiajs/*` pointed at the tarballs (plus `overrides`), install (Deno projects through npm), `check`/`test`/`build`, start with HTTP probes, `miia add` and `miia g` steps, on Bun, Node and Deno. Needs network; it is a release step in `RELEASING.md`.
+**e2e:** `bun run cli:e2e [--only a,b] [--keep]` (`packages/cli/e2e/`): clean build, `bun pm pack` of every package, projects generated outside the repo with `@miiajs/*` pointed at the tarballs (plus `overrides`), install (Deno projects through npm), `check`/`test`/`build`, start with HTTP probes, `miia add` and `miia g` steps, on Bun, Node and Deno; the `workers` scenario starts the generated app on workerd through wrangler. Needs network; it is a release step in `RELEASING.md`.
 
 ### Logger
 
@@ -395,7 +395,7 @@ jwt-auth keeps users in the project's database, in memory without one. `usersLay
 ## Code conventions
 
 - All imports use `.js` extension (ESM requirement with `verbatimModuleSyntax`)
-- `sideEffects: false` in all packages
+- `sideEffects: false` in all packages, except core, whose list names `./dist/polyfill.js`: a bundler drops a bare `import './polyfill.js'` from a package that says it has none, and then no decorator metadata can be read (`test/bundling.test.ts`, the `workers` scenario of `cli:e2e`)
 - Barrel files (`index.ts`) in each subdirectory
 - `Symbol.metadata` for all decorator metadata (polyfilled via `@miiajs/core`)
 - Tests in `packages/*/test/*.test.ts`, import from `bun:test` (uws-server and node-server `*.node.test.ts`: `node:test`)
