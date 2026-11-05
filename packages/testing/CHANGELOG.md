@@ -1,5 +1,34 @@
 # @miiajs/testing
 
+## 0.9.0
+
+### Minor Changes
+
+- [`8672380`](https://github.com/miiajs/miia/commit/8672380da7b04e42bda81f07e6dec2edbc846610) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - The module graph is processed once, on the first `init()`, `app.get()` or `fetch()`, so the order of `register()` calls no longer matters. Breaking:
+
+  - `register()` and `provide()` after the graph is processed throw; a graph that failed to process rethrows its first error on every later `init()` / `app.get()`
+  - `use()`, `useGuard()` and `addRoute()` after `init()` throw instead of being picked up by a lazy recompile on the next request
+  - a route registered twice (same method and path, param names ignored) throws instead of silently replacing the first
+  - `TestApp` collects every builder call and builds the app in `compile()`; builder calls after `compile()`, and `request()` / `resolve()` / `close()` before it, throw
+
+- [`8672380`](https://github.com/miiajs/miia/commit/8672380da7b04e42bda81f07e6dec2edbc846610) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - A configured module is identified by the pair (class, `name`), and a bare `imports: [XModule]` resolves to the module's configuration wherever it sits in the graph, regardless of order - before, a bare import reached first silently dropped the `configure()`. `TestApp.override()` builds an override descriptor (`overrideProvider()` / `overrideModule()`, exported from core) that goes through `register()` and replaces one entry, instead of racing `provide()` against the modules; `override(XModule, XModule.configure(test))` replaces a configured module. Breaking:
+
+  - two `configure()` calls of the same module without a `name` throw `[Miia] X is configured twice (A, B) - configure it once; a module that takes a name can be configured again under a different one` instead of the first one silently winning
+  - `TestApp.override()` of a token that no loaded module provides and that is not in the container throws on `compile()`; so does an override of a module the graph does not configure
+  - overriding a guard that is not declared in a loaded module's `providers` no longer works - declare the guard in `providers`
+
+- [`c0b1422`](https://github.com/miiajs/miia/commit/c0b1422b885574d3d604f5cfbe3c72e997967895) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - A DI token is a class (abstract ones included) or a `createToken()` object. Breaking:
+
+  - string tokens are gone from `inject()`, `injectOptional()`, `app.get()`, `ctx.resolve()`, `Resolver`, factory providers and `TestApp.override()` / `TestApp.resolve()` - replace `'API_KEY'` with `createToken<string>('API_KEY')`
+  - `@Injectable({ token })` is removed - register the class itself, or a `provider(token, ...)` for a token object
+  - `Container` and `runInContainerContext` are no longer exported from `@miiajs/core` - build an app with `new Miia().provide(...)` / `register(...)` and read providers with `app.get()`, or use `TestApp`
+
+- [`c0b1422`](https://github.com/miiajs/miia/commit/c0b1422b885574d3d604f5cfbe3c72e997967895) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Typed DI tokens. `createToken<T>(name, { hint? })` makes a token object whose type flows into `inject()`, `injectOptional()`, `app.get()`, `ctx.resolve()` and `Resolver`; an abstract class works as a token too. `provider(token, factory, { scope?, deps?, shared? })` builds a factory provider checked against the token's type. `hint` on `createToken()` or `@Injectable({ hint })` adds a line to "No provider" errors naming what provides the token, and a second line when another token with the same name and hint is registered - the token is defined twice on purpose (two `defineModel('User', ...)` calls, one per connection) or a package is installed twice: `register this one too if both are intended, otherwise deduplicate the package that defines it`. New exports: `createToken`, `provider`, types `Token`, `AbstractConstructor`, `AnyToken`. `TestApp.override()` and `TestApp.resolve()` are typed from the token: `override()` takes a partial mock of the token's type or a function returning one.
+
+### Patch Changes
+
+- [`b88e9cc`](https://github.com/miiajs/miia/commit/b88e9ccdb4662d7195c0ba7beff3fec17ba2436f) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - A `compile()` that throws destroys the app it built before rethrowing, so the global logger it silenced with `logger: false` comes back even though the test never reaches `close()`.
+
 ## 0.8.0
 
 ### Patch Changes

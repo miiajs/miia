@@ -1,5 +1,43 @@
 # @miiajs/swagger
 
+## 0.9.0
+
+### Minor Changes
+
+- [`f16fbc1`](https://github.com/miiajs/miia/commit/f16fbc1e2f12ee5bc5ae28857d61ccbb2199358b) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `configure()` takes `{ global: true }` in its second argument (`{ name?, global? }` for drizzle, papr, mongoose and messaging) and declares its `exports`, which decide what other modules see of it:
+
+  - `ConfigModule`, `JwtModule` and `SwaggerModule` export `ConfigService`, `JwtService` and `SwaggerService`; `RateLimitModule` exports the options its guards read
+  - `DrizzleModule`, `PaprModule` and `MongooseModule` export the db / connection token, papr and mongoose also the internals their `register()` models resolve; `MessagingModule` exports its bus
+  - papr and mongoose `register()` exports its models, and its module is named `PaprModule.register([users])` / `MongooseModule.register([User])` in errors and the start-up log
+
+  Breaking: messaging checks the `bus` of every `@On` against the `MessageBus` instances of the app instead of the container. A bus token overridden with a plain object no longer counts as a bus, so an `@On` that targets it fails at startup - replace the bus through its configuration, or override the token with a factory that builds a `MessageBus` (or a subclass) under the same name.
+
+- [`c0b1422`](https://github.com/miiajs/miia/commit/c0b1422b885574d3d604f5cfbe3c72e997967895) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Option tokens are typed `createToken()` objects and stay inside their packages. "No provider" errors name the module to import: `JwtService is provided by JwtModule.configure()`, likewise for `ConfigService` and `SwaggerService`, and for the JWT and Swagger options when the service is provided without its module. Breaking:
+
+  - `JWT_OPTIONS`, `RATE_LIMIT_OPTIONS` and `SWAGGER_OPTIONS` are no longer exported - configure the packages through `JwtModule.configure()`, `RateLimitModule.configure()` and `SwaggerModule.configure()`
+  - `ConfigService` is no longer registered under the string `'ConfigService'` - resolve it by the class
+
+### Patch Changes
+
+- [`ef974a2`](https://github.com/miiajs/miia/commit/ef974a2e961ad7ced0632ee21a144d4cc324ea27) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `DiscoveryService` returns only what carries a metadata key: new `getClassesWithMeta(key)` (`{ instance, ctor, metadata }` per instance whose class has metadata under `key`, type `DiscoveredClass`) next to `getMethodsWithMeta(key)`. Metadata is read from the class of each instance, so a handler class behind a factory provider is discovered; an instance under two tokens is listed once, and a lazy proxy is skipped. Swagger collects controllers through `getClassesWithMeta(RESOLVED_PREFIX)`. Breaking:
+
+  - `DiscoveryService.getSingletons()` is removed - use `getClassesWithMeta(key)`
+  - a factory-provided instance is discovered by its own class, and a plain-object mock (`TestApp.override(Handler, { ... })`) is not discovered at all: its `@On` methods are not subscribed and a mocked controller drops out of the swagger spec - override with a named subclass (`class FakeHandler extends Handler {}`) to keep it
+  - calling `getClassesWithMeta()` / `getMethodsWithMeta()` before every provider is constructed (a constructor, a field initializer, `app.get()` without `init()`) throws - call them from `onReady()` or `onInit()`
+  - messaging: consumer group names and default idempotency keys come from the class of the handler instance - a factory that returns a subclass for a class token renames the group, and retries parked under the old group are orphaned; the same `@On` class provided twice fails at startup
+
+- [`8672380`](https://github.com/miiajs/miia/commit/8672380da7b04e42bda81f07e6dec2edbc846610) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - The module graph is processed once, on the first `init()`, `app.get()` or `fetch()`, so the order of `register()` calls no longer matters. Breaking:
+
+  - `register()` and `provide()` after the graph is processed throw; a graph that failed to process rethrows its first error on every later `init()` / `app.get()`
+  - `use()`, `useGuard()` and `addRoute()` after `init()` throw instead of being picked up by a lazy recompile on the next request
+  - a route registered twice (same method and path, param names ignored) throws instead of silently replacing the first
+  - `TestApp` collects every builder call and builds the app in `compile()`; builder calls after `compile()`, and `request()` / `resolve()` / `close()` before it, throw
+
+- [`07bd7fd`](https://github.com/miiajs/miia/commit/07bd7fda677fab361dfb39771555b93ad07e8354) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `@ApiHeader`, `@ApiSecurity` and `@ApiExclude` on a subclass no longer write into the metadata of its parent class. A subclass reads the parent's map or set through the metadata prototype and used to add to it in place, so a header or security requirement declared on a subclass showed up on the parent's operations too, and `@ApiExclude()` on a subclass hid the parent's routes. The inherited value is now copied before the first write. The decorators built on the core metadata helpers (`@ApiParam`, `@ApiQuery`, `@ApiResponse`, `@ApiBody`, `@ApiOperation`) get the same fix from those helpers.
+
+- Updated dependencies [[`07bd7fd`](https://github.com/miiajs/miia/commit/07bd7fda677fab361dfb39771555b93ad07e8354), [`07bd7fd`](https://github.com/miiajs/miia/commit/07bd7fda677fab361dfb39771555b93ad07e8354), [`07bd7fd`](https://github.com/miiajs/miia/commit/07bd7fda677fab361dfb39771555b93ad07e8354), [`b88e9cc`](https://github.com/miiajs/miia/commit/b88e9ccdb4662d7195c0ba7beff3fec17ba2436f), [`7ff792b`](https://github.com/miiajs/miia/commit/7ff792bb0d238fba145de7fac5332f504a938838), [`07bd7fd`](https://github.com/miiajs/miia/commit/07bd7fda677fab361dfb39771555b93ad07e8354)]:
+  - @miiajs/serve-static@0.9.0
+
 ## 0.8.0
 
 ### Minor Changes

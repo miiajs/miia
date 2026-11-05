@@ -1,5 +1,22 @@
 # @miiajs/messaging-redis
 
+## 0.9.0
+
+### Minor Changes
+
+- [`305c3f5`](https://github.com/miiajs/miia/commit/305c3f511d28152064f79aada4d16a454314081d) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Events are contracts: `defineEvent(topic, schema?)` returns a frozen `{ topic, schema }`, and `MessageBus.publish(event, payload, meta?)` and `@On(event, options?)` take it. The handler's parameter is typed from the schema's output (`EventPayload<typeof E>`, `unknown` without a schema), and `publish()` takes the schema's input (`EventInput<typeof E>`) without running the schema. Each `@On` handler validates the payload before it runs and before an `@Idempotent` claim, and gets the parsed data, as does the idempotency `key()`. A payload that does not match, or a schema that throws, is dead-lettered at once without retry by both the in-memory and the Redis Streams transport (`meta.lastError` is `Payload validation failed for '<topic>': <path>: <message>`, `meta.attempt` is 1), or dropped when the DLQ is off. `dlqEvent(event)` is the schema-less contract of `<topic>.dlq` for dead-letter handlers. A schema describes the JSON form of the payload, which is what a Redis consumer gets: `z.coerce.date()`, not `z.date()`. New exports: `defineEvent`, `dlqEvent` and the types `EventContract`, `EventPayload`, `EventInput`, `OnOptions`. Breaking:
+
+  - `publish()` and `@On` no longer take a string topic: `bus.publish(OrderPlaced, order)` and `@On(OrderPlaced)` with `const OrderPlaced = defineEvent('order.placed', schema)` instead of `bus.publish('order.placed', order)` and `@On('order.placed')`; a string throws a `TypeError` that names the fix
+  - the handler's payload type comes from the event: a parameter of another type does not compile, and a handler of an event without a schema gets `unknown`
+  - `HandlerResult` has a third status, `{ status: 'reject', error }`, which is never retried and goes straight to the DLQ (or is dropped when `dlq` is off); a custom `MessageTransport` must handle it
+
+### Patch Changes
+
+- [`ef974a2`](https://github.com/miiajs/miia/commit/ef974a2e961ad7ced0632ee21a144d4cc324ea27) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Handlers drain in `onShutdown()`, before any provider's `onDestroy()`: the bus unsubscribes and the transports stop consuming and wait for in-flight handlers there, so a database your handlers write to closes after they finish, wherever its module sits. New optional `MessageTransport.onShutdown()`; the in-memory and Redis transports implement it, and their `onDestroy()` drains first when called alone. The Redis transport destroys every broadcast group it subscribed to in `onDestroy()`, including ones unsubscribed earlier, and rejects `subscribe()` once shutdown has started (`subscribe() after shutdown started`) - one still creating its group or connecting its lanes when `onShutdown()` starts closes its lanes and rejects too, so no consumer loop outlives the transport. Breaking: `MessageBus.onDestroy()` is renamed to `onShutdown()`.
+
+- Updated dependencies [[`ef974a2`](https://github.com/miiajs/miia/commit/ef974a2e961ad7ced0632ee21a144d4cc324ea27), [`f34144d`](https://github.com/miiajs/miia/commit/f34144d52e541f85bebfcd6860a0a4f0d0aede25), [`ef974a2`](https://github.com/miiajs/miia/commit/ef974a2e961ad7ced0632ee21a144d4cc324ea27), [`f16fbc1`](https://github.com/miiajs/miia/commit/f16fbc1e2f12ee5bc5ae28857d61ccbb2199358b), [`c0b1422`](https://github.com/miiajs/miia/commit/c0b1422b885574d3d604f5cfbe3c72e997967895), [`305c3f5`](https://github.com/miiajs/miia/commit/305c3f511d28152064f79aada4d16a454314081d), [`b23625a`](https://github.com/miiajs/miia/commit/b23625afb12ea63fdec779edb3cfa99a752a4a6f)]:
+  - @miiajs/messaging@0.9.0
+
 ## 0.8.0
 
 ### Minor Changes

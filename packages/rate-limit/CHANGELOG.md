@@ -1,5 +1,39 @@
 # @miiajs/rate-limit
 
+## 0.9.0
+
+### Minor Changes
+
+- [`f16fbc1`](https://github.com/miiajs/miia/commit/f16fbc1e2f12ee5bc5ae28857d61ccbb2199358b) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `configure()` takes `{ global: true }` in its second argument (`{ name?, global? }` for drizzle, papr, mongoose and messaging) and declares its `exports`, which decide what other modules see of it:
+
+  - `ConfigModule`, `JwtModule` and `SwaggerModule` export `ConfigService`, `JwtService` and `SwaggerService`; `RateLimitModule` exports the options its guards read
+  - `DrizzleModule`, `PaprModule` and `MongooseModule` export the db / connection token, papr and mongoose also the internals their `register()` models resolve; `MessagingModule` exports its bus
+  - papr and mongoose `register()` exports its models, and its module is named `PaprModule.register([users])` / `MongooseModule.register([User])` in errors and the start-up log
+
+  Breaking: messaging checks the `bus` of every `@On` against the `MessageBus` instances of the app instead of the container. A bus token overridden with a plain object no longer counts as a bus, so an `@On` that targets it fails at startup - replace the bus through its configuration, or override the token with a factory that builds a `MessageBus` (or a subclass) under the same name.
+
+- [`c0b1422`](https://github.com/miiajs/miia/commit/c0b1422b885574d3d604f5cfbe3c72e997967895) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Option tokens are typed `createToken()` objects and stay inside their packages. "No provider" errors name the module to import: `JwtService is provided by JwtModule.configure()`, likewise for `ConfigService` and `SwaggerService`, and for the JWT and Swagger options when the service is provided without its module. Breaking:
+
+  - `JWT_OPTIONS`, `RATE_LIMIT_OPTIONS` and `SWAGGER_OPTIONS` are no longer exported - configure the packages through `JwtModule.configure()`, `RateLimitModule.configure()` and `SwaggerModule.configure()`
+  - `ConfigService` is no longer registered under the string `'ConfigService'` - resolve it by the class
+
+### Patch Changes
+
+- [`cef184d`](https://github.com/miiajs/miia/commit/cef184d90c66cfd4a7332f28a8921d1dd13a4f9c) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Guards and `Resolver` are checked against module boundaries. A guard declared in a module's `providers` is a provider: a controller in another module uses it once that module exports it and the controller's module imports it, and one passed to `app.useGuard()` must be visible from the root. A guard no module declares - a class put straight into `@UseGuard()` or `app.useGuard()`, `AuthGuard(...)`, `@RateLimit()` - is built once, and what it injects is checked from the module of every controller that uses it, and from the root when it is global. The violations join the start-up report:
+
+  ```text
+  AuthGuard(JwtAuth) (guard of UsersController in UsersModule) injects JwtAuth (AuthModule):
+    - add JwtAuth to AuthModule `exports`
+    - add AuthModule to UsersModule `imports`
+  ```
+
+  `inject(Resolver)` returns a resolver bound to the module of the provider that injects it (a factory's `resolve(Resolver)` too, with the host of a `configure()` result); `app.get(Resolver)`, `TestApp.resolve(Resolver)`, `app.provide()` providers and guards no module declares get the one bound to the root. An override of `Resolver` stays one fake for every module. The auth and rate-limit guard classes are named for these messages: `AuthGuard(JwtAuth, ApiKeyAuth)`, `RateLimitGuard`, `RateLimitGuard({...})` and `@RateLimit({...})` - the policy is never printed. Breaking:
+
+  - `Resolver.has()` is `false` for a token the module of the resolver cannot see, and `resolve()` / `resolveOptional()` of one is a boundary violation - in the start-up report during startup, thrown at once after it (`Resolver of PluginsModule resolved ReportsService (ReportsModule), which PluginsModule cannot see:`); `resolveOptional()` returns `null` only for a token nothing registers
+  - `Resolver` throws for a request-scoped token even while `ctx.resolve()` builds a request-scoped provider - inject it there instead
+  - a guard no module declares fails startup when a module whose controllers use it, or the root for a global one, cannot see what it injects - typically an auth provider: make the module that declares it `global` and export it
+  - a guard from the `providers` of one module used by a controller of another fails startup unless it is exported and imported, and so does a guard in `app.useGuard()` that only a module's `providers` declare, until a module passed to `app.register()` exports it
+
 ## 0.8.0
 
 ### Patch Changes

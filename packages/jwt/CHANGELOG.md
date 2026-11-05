@@ -1,5 +1,28 @@
 # @miiajs/jwt
 
+## 0.9.0
+
+### Minor Changes
+
+- [`f16fbc1`](https://github.com/miiajs/miia/commit/f16fbc1e2f12ee5bc5ae28857d61ccbb2199358b) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `configure()` takes `{ global: true }` in its second argument (`{ name?, global? }` for drizzle, papr, mongoose and messaging) and declares its `exports`, which decide what other modules see of it:
+
+  - `ConfigModule`, `JwtModule` and `SwaggerModule` export `ConfigService`, `JwtService` and `SwaggerService`; `RateLimitModule` exports the options its guards read
+  - `DrizzleModule`, `PaprModule` and `MongooseModule` export the db / connection token, papr and mongoose also the internals their `register()` models resolve; `MessagingModule` exports its bus
+  - papr and mongoose `register()` exports its models, and its module is named `PaprModule.register([users])` / `MongooseModule.register([User])` in errors and the start-up log
+
+  Breaking: messaging checks the `bus` of every `@On` against the `MessageBus` instances of the app instead of the container. A bus token overridden with a plain object no longer counts as a bus, so an `@On` that targets it fails at startup - replace the bus through its configuration, or override the token with a factory that builds a `MessageBus` (or a subclass) under the same name.
+
+- [`c0b1422`](https://github.com/miiajs/miia/commit/c0b1422b885574d3d604f5cfbe3c72e997967895) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Option tokens are typed `createToken()` objects and stay inside their packages. "No provider" errors name the module to import: `JwtService is provided by JwtModule.configure()`, likewise for `ConfigService` and `SwaggerService`, and for the JWT and Swagger options when the service is provided without its module. Breaking:
+
+  - `JWT_OPTIONS`, `RATE_LIMIT_OPTIONS` and `SWAGGER_OPTIONS` are no longer exported - configure the packages through `JwtModule.configure()`, `RateLimitModule.configure()` and `SwaggerModule.configure()`
+  - `ConfigService` is no longer registered under the string `'ConfigService'` - resolve it by the class
+
+### Patch Changes
+
+- [`40b7bd0`](https://github.com/miiajs/miia/commit/40b7bd0c44dd2b4553890ee30879c7cda3f8da04) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - A numeric `expiresIn` or `notBefore` is a number of seconds from signing, as the options table says (`expiresIn: 3600` is an hour). It used to reach `jose` as an absolute timestamp, so `expiresIn: 3600` signed tokens that had expired in 1970 and every `verify()` rejected them. Time span strings (`'1h'`, `'30s'`) are unchanged.
+
+- [`40b7bd0`](https://github.com/miiajs/miia/commit/40b7bd0c44dd2b4553890ee30879c7cda3f8da04) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - A key passed to `sign()` or `verify()` wins over the key of the module, as "per-call options override module defaults" promises. A module configured with `secret` used to sign with that secret even when the call passed a `privateKey`, and fail on the RS256/HMAC mismatch. The algorithm of a per-call key is the call's `algorithm` (`algorithms` for `verify()`), else the module's when it fits the kind of key (`HS*` for a secret, any other for a key pair), else `HS256` for a secret and `RS256` for a key.
+
 ## 0.8.0
 
 ### Patch Changes

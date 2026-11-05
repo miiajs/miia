@@ -1,5 +1,21 @@
 # @miiajs/serve-static
 
+## 0.9.0
+
+### Patch Changes
+
+- [`07bd7fd`](https://github.com/miiajs/miia/commit/07bd7fda677fab361dfb39771555b93ad07e8354) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - A 404 from the static handler reads like the router's own: `Cannot GET /static/missing.txt`. It used to carry the absolute request URL, including whatever `Host` header the client sent, and always said `GET`, also for `HEAD`.
+
+- [`07bd7fd`](https://github.com/miiajs/miia/commit/07bd7fda677fab361dfb39771555b93ad07e8354) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Files whose names need percent-encoding in a URL are served. The router hands the wildcard over still encoded, so `GET /static/hello%20world.txt` looked for a file literally named `hello%20world.txt` and answered 404; the same for any non-ASCII name. The path is now decoded before the dotfile and traversal checks, which run on the decoded form. Malformed percent-encoding or an encoded NUL answers 400.
+
+- [`07bd7fd`](https://github.com/miiajs/miia/commit/07bd7fda677fab361dfb39771555b93ad07e8354) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `etag: false` turns conditional GET off, as documented. It used to stop sending `ETag` and `Last-Modified` but still answered 304 to a client's `If-None-Match` or `If-Modified-Since`; those headers are now ignored and the file is sent.
+
+- [`b88e9cc`](https://github.com/miiajs/miia/commit/b88e9ccdb4662d7195c0ba7beff3fec17ba2436f) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - A request whose `Host` header makes no URL is served instead of answered with a 500. Bun hands such a request (`Host: x/y`) over with a relative `req.url`, and node-server in `mode: 'optimized'` keeps a `Host` like `x:99999` in it; `new URL(req.url)` threw on both when the handler built a 404 or a trailing-slash redirect. The path is now read from the url either way, and the redirect for such a request carries a path-only `Location` (`/static/docs/?v=1`).
+
+- [`7ff792b`](https://github.com/miiajs/miia/commit/7ff792bb0d238fba145de7fac5332f504a938838) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - The path check that keeps a request inside `root` wants a separator after it, so a sibling directory whose name starts with the root's (`public2` next to `public`) is turned away before any filesystem call, as the docs say. Only the `realpath()` check stood behind it, and that one looks at where a path leads: with `dotfiles: true`, a `..` path into such a sibling was served when a symlink there led back into the root.
+
+- [`07bd7fd`](https://github.com/miiajs/miia/commit/07bd7fda677fab361dfb39771555b93ad07e8354) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - The `index` file is served for subdirectories too, as "index file for directory requests" says: `GET /static/docs/` answers `docs/index.html`, and `GET /static/docs` redirects (301) to the slashed URL first, as the mount root does. Only the mount root had it - a subdirectory answered 404. A directory without an index file behaves as before (SPA fallback, else 404), and `index: false` turns both off.
+
 ## 0.8.0
 
 ### Patch Changes

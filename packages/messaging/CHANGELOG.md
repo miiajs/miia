@@ -1,5 +1,44 @@
 # @miiajs/messaging
 
+## 0.9.0
+
+### Minor Changes
+
+- [`ef974a2`](https://github.com/miiajs/miia/commit/ef974a2e961ad7ced0632ee21a144d4cc324ea27) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `DiscoveryService` returns only what carries a metadata key: new `getClassesWithMeta(key)` (`{ instance, ctor, metadata }` per instance whose class has metadata under `key`, type `DiscoveredClass`) next to `getMethodsWithMeta(key)`. Metadata is read from the class of each instance, so a handler class behind a factory provider is discovered; an instance under two tokens is listed once, and a lazy proxy is skipped. Swagger collects controllers through `getClassesWithMeta(RESOLVED_PREFIX)`. Breaking:
+
+  - `DiscoveryService.getSingletons()` is removed - use `getClassesWithMeta(key)`
+  - a factory-provided instance is discovered by its own class, and a plain-object mock (`TestApp.override(Handler, { ... })`) is not discovered at all: its `@On` methods are not subscribed and a mocked controller drops out of the swagger spec - override with a named subclass (`class FakeHandler extends Handler {}`) to keep it
+  - calling `getClassesWithMeta()` / `getMethodsWithMeta()` before every provider is constructed (a constructor, a field initializer, `app.get()` without `init()`) throws - call them from `onReady()` or `onInit()`
+  - messaging: consumer group names and default idempotency keys come from the class of the handler instance - a factory that returns a subclass for a class token renames the group, and retries parked under the old group are orphaned; the same `@On` class provided twice fails at startup
+
+- [`ef974a2`](https://github.com/miiajs/miia/commit/ef974a2e961ad7ced0632ee21a144d4cc324ea27) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Handlers drain in `onShutdown()`, before any provider's `onDestroy()`: the bus unsubscribes and the transports stop consuming and wait for in-flight handlers there, so a database your handlers write to closes after they finish, wherever its module sits. New optional `MessageTransport.onShutdown()`; the in-memory and Redis transports implement it, and their `onDestroy()` drains first when called alone. The Redis transport destroys every broadcast group it subscribed to in `onDestroy()`, including ones unsubscribed earlier, and rejects `subscribe()` once shutdown has started (`subscribe() after shutdown started`) - one still creating its group or connecting its lanes when `onShutdown()` starts closes its lanes and rejects too, so no consumer loop outlives the transport. Breaking: `MessageBus.onDestroy()` is renamed to `onShutdown()`.
+
+- [`f16fbc1`](https://github.com/miiajs/miia/commit/f16fbc1e2f12ee5bc5ae28857d61ccbb2199358b) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `configure()` takes `{ global: true }` in its second argument (`{ name?, global? }` for drizzle, papr, mongoose and messaging) and declares its `exports`, which decide what other modules see of it:
+
+  - `ConfigModule`, `JwtModule` and `SwaggerModule` export `ConfigService`, `JwtService` and `SwaggerService`; `RateLimitModule` exports the options its guards read
+  - `DrizzleModule`, `PaprModule` and `MongooseModule` export the db / connection token, papr and mongoose also the internals their `register()` models resolve; `MessagingModule` exports its bus
+  - papr and mongoose `register()` exports its models, and its module is named `PaprModule.register([users])` / `MongooseModule.register([User])` in errors and the start-up log
+
+  Breaking: messaging checks the `bus` of every `@On` against the `MessageBus` instances of the app instead of the container. A bus token overridden with a plain object no longer counts as a bus, so an `@On` that targets it fails at startup - replace the bus through its configuration, or override the token with a factory that builds a `MessageBus` (or a subclass) under the same name.
+
+- [`c0b1422`](https://github.com/miiajs/miia/commit/c0b1422b885574d3d604f5cfbe3c72e997967895) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - A named bus is injected through the typed token `messageBus(name)`, and a named `MessagingModule.configure()` is the same module class with a `name`. "No provider" errors name the call that provides a bus: `MessageBus(kafka) is provided by MessagingModule.configure(opts, { name: 'kafka' })`. Configuring one bus name twice now throws `configured twice`, and a named bus can be replaced in tests with `TestApp.override(MessagingModule, MessagingModule.configure(test, { name: 'kafka' }))`. Breaking:
+
+  - `MESSAGE_TRANSPORT`, `IDEMPOTENCY_STORE`, `getMessageBusToken()`, `getMessageTransportToken()` and `getIdempotencyStoreToken()` are no longer exported; the transport and idempotency store tokens are internal
+  - a named bus is `inject(messageBus('kafka'))` instead of `inject<MessageBus>(getMessageBusToken('kafka') as string)`; the default bus stays `inject(MessageBus)`
+  - the bus name moved into an options object: `MessagingModule.configure(opts, { name: 'kafka' })` instead of `MessagingModule.configure(opts, 'kafka')`, and a named `configure()` returns `{ module: MessagingModule, name }` instead of a new anonymous module class per call
+
+- [`305c3f5`](https://github.com/miiajs/miia/commit/305c3f511d28152064f79aada4d16a454314081d) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Events are contracts: `defineEvent(topic, schema?)` returns a frozen `{ topic, schema }`, and `MessageBus.publish(event, payload, meta?)` and `@On(event, options?)` take it. The handler's parameter is typed from the schema's output (`EventPayload<typeof E>`, `unknown` without a schema), and `publish()` takes the schema's input (`EventInput<typeof E>`) without running the schema. Each `@On` handler validates the payload before it runs and before an `@Idempotent` claim, and gets the parsed data, as does the idempotency `key()`. A payload that does not match, or a schema that throws, is dead-lettered at once without retry by both the in-memory and the Redis Streams transport (`meta.lastError` is `Payload validation failed for '<topic>': <path>: <message>`, `meta.attempt` is 1), or dropped when the DLQ is off. `dlqEvent(event)` is the schema-less contract of `<topic>.dlq` for dead-letter handlers. A schema describes the JSON form of the payload, which is what a Redis consumer gets: `z.coerce.date()`, not `z.date()`. New exports: `defineEvent`, `dlqEvent` and the types `EventContract`, `EventPayload`, `EventInput`, `OnOptions`. Breaking:
+
+  - `publish()` and `@On` no longer take a string topic: `bus.publish(OrderPlaced, order)` and `@On(OrderPlaced)` with `const OrderPlaced = defineEvent('order.placed', schema)` instead of `bus.publish('order.placed', order)` and `@On('order.placed')`; a string throws a `TypeError` that names the fix
+  - the handler's payload type comes from the event: a parameter of another type does not compile, and a handler of an event without a schema gets `unknown`
+  - `HandlerResult` has a third status, `{ status: 'reject', error }`, which is never retried and goes straight to the DLQ (or is dropped when `dlq` is off); a custom `MessageTransport` must handle it
+
+### Patch Changes
+
+- [`f34144d`](https://github.com/miiajs/miia/commit/f34144d52e541f85bebfcd6860a0a4f0d0aede25) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - The options factory of `MessagingModule.configure((resolve) => ...)` runs once per app instead of once per provider, so it builds one transport and one idempotency store instead of three of each. `@On(topic, { bus: '' })` subscribes to the default bus instead of passing the startup check and never subscribing.
+
+- [`b23625a`](https://github.com/miiajs/miia/commit/b23625afb12ea63fdec779edb3cfa99a752a4a6f) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `@Idempotent` takes the payload type from its `key` function, so `key: (p: Payment) => p.id` compiles without casting the payload from `unknown`.
+
 ## 0.8.0
 
 ### Minor Changes

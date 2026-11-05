@@ -1,6 +1,6 @@
 {
   "name": "create-miia",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "author": "Ruslan Matiushev",
   "license": "MIT",
   "description": "Create a MiiaJS app: bun create miia / npm create miia",
@@ -37,7 +37,7 @@
     "deno": ">=2.4.0"
   },
   "dependencies": {
-    "@miiajs/cli": "^0.8.0",
+    "@miiajs/cli": "^0.9.0",
     "typescript": "^6.0.2"
   },
   "scripts": {

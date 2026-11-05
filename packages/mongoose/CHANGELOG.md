@@ -1,5 +1,35 @@
 # @miiajs/mongoose
 
+## 0.9.0
+
+### Minor Changes
+
+- [`f16fbc1`](https://github.com/miiajs/miia/commit/f16fbc1e2f12ee5bc5ae28857d61ccbb2199358b) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `configure()` takes `{ global: true }` in its second argument (`{ name?, global? }` for drizzle, papr, mongoose and messaging) and declares its `exports`, which decide what other modules see of it:
+
+  - `ConfigModule`, `JwtModule` and `SwaggerModule` export `ConfigService`, `JwtService` and `SwaggerService`; `RateLimitModule` exports the options its guards read
+  - `DrizzleModule`, `PaprModule` and `MongooseModule` export the db / connection token, papr and mongoose also the internals their `register()` models resolve; `MessagingModule` exports its bus
+  - papr and mongoose `register()` exports its models, and its module is named `PaprModule.register([users])` / `MongooseModule.register([User])` in errors and the start-up log
+
+  Breaking: messaging checks the `bus` of every `@On` against the `MessageBus` instances of the app instead of the container. A bus token overridden with a plain object no longer counts as a bus, so an `@On` that targets it fails at startup - replace the bus through its configuration, or override the token with a factory that builds a `MessageBus` (or a subclass) under the same name.
+
+- [`9e6b1ae`](https://github.com/miiajs/miia/commit/9e6b1aedef64d997314a636f31c93d075fdc5c65) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Shared providers. `provider(token, factory, { shared: key })` lets several modules declare the same token, each with a provider marked by the same key, and get one instance: the first declaration builds it, every declaring module owns it and may export it, and what its factory injects is checked against module boundaries from each of them, whatever the order of `imports`. Its `inject(Resolver)` / `resolve(Resolver)` gets one resolver over all of them: `has()` is `true` only for a token every one of them sees, and `resolve()` reports a violation from each one that cannot see it. A different key throws `[Miia] X is shared by A (k1) and B (k2) - a shared provider must be declared the same way in every module; use a separate token for each variant`; an unmarked declaration next to a marked one is still `provided by both`. papr and mongoose `register()` mark their models with the connection (`the default connection`, `connection 'analytics'` - the unnamed connection and one named `'default'` are two connections), so several feature modules can `register([User])` and share one model instead of failing with `provided by both` - each of them must see `PaprModule` / `MongooseModule` itself. Breaking:
+
+  - the same model token registered on two connections (`register([User])` and `register([User], { name: 'analytics' })`) throws at startup (`... (the default connection) and ... (connection 'analytics')`) instead of logging a `console.warn` - the warning was process-wide, the check is now per app; use a separate `defineModel(...)` per connection
+
+- [`c0b1422`](https://github.com/miiajs/miia/commit/c0b1422b885574d3d604f5cfbe3c72e997967895) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - DB tokens are typed `createToken()` objects, and a named connection is the same module class with a `name`. "No provider" errors name the call that provides a token: `drizzleDb(analytics) is provided by DrizzleModule.configure(opts, { name: 'analytics' })`, likewise for `paprDb()`, `mongooseConnection()` and model tokens, which name their `register()` call (`PaprModule.register([users])`, `MongooseModule.register([User])`). Configuring one name twice now throws `configured twice`, and a named connection can be replaced in tests with `TestApp.override(DrizzleModule, DrizzleModule.configure(test, { name: 'analytics' }))`. Breaking:
+
+  - `drizzleDb()`, `paprDb()`, `mongooseConnection()` and `defineModel()` return frozen `Token` objects instead of classes; `DrizzleDbToken`, `PaprDbToken`, `MongooseConnectionToken` and `ModelToken` changed shape accordingly. A model token is not a class: `new User(data)` and `doc instanceof User` throw a `TypeError` - use the injected model (`new this.users(data)`, `doc instanceof this.users`)
+  - the connection name moved into an options object: `configure(opts, { name: 'analytics' })` and `register(models, { name: 'analytics' })` instead of `configure(opts, 'analytics')` and `register(models, 'analytics')`
+  - a named `configure()` returns `{ module: XModule, name }` instead of a new anonymous module class per call
+
+### Patch Changes
+
+- [`b23625a`](https://github.com/miiajs/miia/commit/b23625afb12ea63fdec779edb3cfa99a752a4a6f) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - The "Model ... not initialized" error names the model in the `register()` call it suggests: `PaprModule.register([users])` and `MongooseModule.register([User])`, instead of the token names `PaprModule.register([PaprModel(users)])` and `MongooseModule.register([MongooseModel(User)])`.
+
+- [`ef974a2`](https://github.com/miiajs/miia/commit/ef974a2e961ad7ced0632ee21a144d4cc324ea27) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - A provider that injects the db / connection now gets `onInit()` after the connection opens and `onDestroy()` before it closes, whatever the module order: `drizzleDb()`, `paprDb()` and `mongooseConnection()` declare `deps` on the service that owns the connection.
+
+- [`8672380`](https://github.com/miiajs/miia/commit/8672380da7b04e42bda81f07e6dec2edbc846610) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - New `createLazyProxy()` export in core. Lazy connection and model proxies no longer resolve when lifecycle hooks are probed - module order no longer breaks `init()`. The proxies are also no longer resolved ahead of time by `init()`, so a failing lookup surfaces on first use (in practice only in hand-built containers: `configure()` registers the `drizzleDb()` / `paprDb()` / `mongooseConnection()` tokens itself).
+
 ## 0.8.0
 
 ### Patch Changes

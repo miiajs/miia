@@ -1,5 +1,34 @@
 # @miiajs/config
 
+## 0.9.0
+
+### Minor Changes
+
+- [`9e6b1ae`](https://github.com/miiajs/miia/commit/9e6b1aedef64d997314a636f31c93d075fdc5c65) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Config values are a snapshot taken at startup and frozen. Without a schema `ConfigService` reads a frozen copy of `env`; with a schema the parsed result is copied and its plain objects and arrays are frozen, so `config.get('ORIGINS').push(...)` no longer changes the value every other caller sees. `Map`, `Set`, `Date` and class instances a `transform` returns are kept as they are, and the passed `env` and `process.env` are never frozen. The options factory of `ConfigModule.configure((resolve) => ...)` still runs once. `ConfigService` keeps the values in a private `#config` field instead of a TypeScript-only `private config`. Breaking:
+
+  - without a schema `ConfigService` no longer reads the live `process.env` - a change to `process.env` (or to the passed `env`) after startup is not seen; set it before `init()`, pass `env`, or override `ConfigModule` in tests
+  - values from a schema are frozen - writing to an object or array value throws `TypeError` in ESM; copy it before handing it to an API that mutates its input
+  - on Deno a config without a schema reads the whole environment at startup, so it needs `--allow-env` without a list of names
+
+- [`9e6b1ae`](https://github.com/miiajs/miia/commit/9e6b1aedef64d997314a636f31c93d075fdc5c65) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Feature configs. `defineConfig(name, schema)` returns a typed token (type `ConfigToken<T>`) for the variables a feature module owns, and `ConfigModule.register(token)` provides it in that module: `inject(paymentsConfig)` gets the schema's output, validated at startup and frozen like the root values. The schema reads the same env as the root `ConfigModule.configure()` (its `env`, or `process.env`), and `process.env` in an app without one. Several modules may register the same token and share one instance, validated once. A validation error names the config: `[Miia] Config validation failed for 'payments':`. In tests the token is replaced like any provider: `TestApp.override(paymentsConfig, { STRIPE_KEY: 'test' })`. The module that imports `register()` must see the root config - make it global or import `ConfigModule` there - or startup fails with a module boundary violation.
+
+- [`f16fbc1`](https://github.com/miiajs/miia/commit/f16fbc1e2f12ee5bc5ae28857d61ccbb2199358b) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `configure()` takes `{ global: true }` in its second argument (`{ name?, global? }` for drizzle, papr, mongoose and messaging) and declares its `exports`, which decide what other modules see of it:
+
+  - `ConfigModule`, `JwtModule` and `SwaggerModule` export `ConfigService`, `JwtService` and `SwaggerService`; `RateLimitModule` exports the options its guards read
+  - `DrizzleModule`, `PaprModule` and `MongooseModule` export the db / connection token, papr and mongoose also the internals their `register()` models resolve; `MessagingModule` exports its bus
+  - papr and mongoose `register()` exports its models, and its module is named `PaprModule.register([users])` / `MongooseModule.register([User])` in errors and the start-up log
+
+  Breaking: messaging checks the `bus` of every `@On` against the `MessageBus` instances of the app instead of the container. A bus token overridden with a plain object no longer counts as a bus, so an `@On` that targets it fails at startup - replace the bus through its configuration, or override the token with a factory that builds a `MessageBus` (or a subclass) under the same name.
+
+- [`c0b1422`](https://github.com/miiajs/miia/commit/c0b1422b885574d3d604f5cfbe3c72e997967895) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - Option tokens are typed `createToken()` objects and stay inside their packages. "No provider" errors name the module to import: `JwtService is provided by JwtModule.configure()`, likewise for `ConfigService` and `SwaggerService`, and for the JWT and Swagger options when the service is provided without its module. Breaking:
+
+  - `JWT_OPTIONS`, `RATE_LIMIT_OPTIONS` and `SWAGGER_OPTIONS` are no longer exported - configure the packages through `JwtModule.configure()`, `RateLimitModule.configure()` and `SwaggerModule.configure()`
+  - `ConfigService` is no longer registered under the string `'ConfigService'` - resolve it by the class
+
+### Patch Changes
+
+- [`b23625a`](https://github.com/miiajs/miia/commit/b23625afb12ea63fdec779edb3cfa99a752a4a6f) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `ConfigService.getOrThrow(key)` returns `Exclude<T[K], undefined>`: it throws on `undefined`, so the type no longer carries it, and `const url: string = config.getOrThrow('DATABASE_URL')` compiles for an optional key. `null` stays in the type, as it is returned.
+
 ## 0.8.0
 
 ### Patch Changes

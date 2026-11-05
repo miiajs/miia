@@ -1,5 +1,17 @@
 # @miiajs/multipart
 
+## 0.9.0
+
+### Minor Changes
+
+- [`b23625a`](https://github.com/miiajs/miia/commit/b23625afb12ea63fdec779edb3cfa99a752a4a6f) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `@Multipart({ allowedTypes })` checks its list when the class is defined. An empty list or an entry that is not a type and a subtype (`'png'`, `'image/'`, `' / '`) cannot match a file, so every upload used to end in a 415 at request time.
+
+  Breaking: such a list now throws a `TypeError` when the class is defined. To take no files at all, set `maxFiles: 0`.
+
+### Patch Changes
+
+- [`b23625a`](https://github.com/miiajs/miia/commit/b23625afb12ea63fdec779edb3cfa99a752a4a6f) Thanks [@RuslanMatiushev](https://github.com/RuslanMatiushev)! - `@Multipart` on an override in a subclass controller replaces the one the handler inherited, as the controller docs say. Before, both ran: the parent's set up the parts with the parent's options and the override's reused them, so stricter `allowedTypes` or limits on the override did not apply. The override's `@Multipart` takes the parent's place among the handler's middleware, and the parent class is left as it was.
+
 ## 0.8.0
 
 ### Minor Changes
