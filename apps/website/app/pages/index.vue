@@ -189,11 +189,11 @@ async function copyInstall() {
             <span class="text-plasma">modern foundation</span>
           </h2>
           <p class="mt-6 text-muted leading-relaxed max-w-lg mx-auto lg:mx-0">
-            {{ page.sections[0]?.description }}
+            {{ page?.sections[0]?.description }}
           </p>
           <ul class="mt-8 space-y-4 max-w-md mx-auto lg:mx-0 lg:max-w-none">
             <li
-              v-for="f in page.sections[0]?.features"
+              v-for="f in page?.sections[0]?.features"
               :key="f.title"
               class="flex gap-4 text-left"
             >
@@ -227,11 +227,11 @@ async function copyInstall() {
             <span class="text-plasma">every platform</span>
           </h2>
           <p class="mt-6 text-muted leading-relaxed max-w-lg mx-auto lg:mx-0">
-            {{ page.sections[1]?.description }}
+            {{ page?.sections[1]?.description }}
           </p>
           <ul class="mt-8 space-y-4 max-w-md mx-auto lg:mx-0 lg:max-w-none">
             <li
-              v-for="f in page.sections[1]?.features"
+              v-for="f in page?.sections[1]?.features"
               :key="f.title"
               class="flex gap-4 text-left"
             >
@@ -261,13 +261,13 @@ async function copyInstall() {
           <span class="text-plasma">Nothing you don't.</span>
         </h2>
         <p class="mx-auto mt-6 max-w-2xl text-muted leading-relaxed">
-          {{ page.features.description }}
+          {{ page?.features.description }}
         </p>
       </div>
 
       <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <div
-          v-for="(item, i) in page.features.items"
+          v-for="(item, i) in page?.features.items"
           :key="item.title"
           class="group relative overflow-hidden rounded-2xl glass p-6 transition hover:-translate-y-0.5"
         >
@@ -353,7 +353,7 @@ async function copyInstall() {
             <span class="text-plasma">MiiaJS?</span>
           </h2>
           <p class="relative mx-auto mt-6 max-w-lg text-muted leading-relaxed">
-            {{ page.cta.description }}
+            {{ page?.cta.description }}
           </p>
 
           <div class="relative mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">

@@ -3,7 +3,7 @@
 export default defineNuxtConfig({
   modules: [
     '@nuxt/eslint',
-    '@nuxt/image',
+    '@nuxt/fonts',
     '@nuxt/ui',
     '@nuxt/content',
     '@nuxtjs/seo'
@@ -67,6 +67,12 @@ export default defineNuxtConfig({
 
   css: ['~/assets/css/main.css'],
 
+  content: {
+    experimental: {
+      sqliteConnector: 'native'
+    }
+  },
+
   mdc: {
     highlight: {
       noApiRoute: false
@@ -85,6 +91,7 @@ export default defineNuxtConfig({
       routes: [
         '/',
         '/robots.txt',
+        '/sitemap.xml',
         '/blog/rss.xml'
       ],
       crawlLinks: true,
@@ -103,6 +110,18 @@ export default defineNuxtConfig({
 
   sitemap: {
     xsl: false
+  },
+
+  aiReady: false,
+
+  skewProtection: false,
+
+  // The OG image template gets its fonts from @nuxt/fonts, global families only
+  fonts: {
+    families: [
+      { name: 'Inter', global: true },
+      { name: 'Space Grotesk', global: true }
+    ]
   },
 
   eslint: {
