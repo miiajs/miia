@@ -1,8 +1,8 @@
 export default defineAppConfig({
   ui: {
     colors: {
-      primary: 'plasma',
-      neutral: 'zinc'
+      primary: 'brand',
+      neutral: 'stone'
     },
     button: {
       slots: {

@@ -5,7 +5,7 @@ definePageMeta({
 
 const route = useRoute()
 
-const { data: page } = await useAsyncData(route.path, () => queryCollection('docs').path(route.path).first())
+const { data: page } = await useDocsPage(route.path)
 if (!page.value) {
   throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 }
@@ -25,8 +25,6 @@ useSeoMeta({
   description,
   ogDescription: description
 })
-
-
 </script>
 
 <template>
@@ -62,7 +60,10 @@ useSeoMeta({
       v-if="page?.body?.toc?.links?.length"
       #right
     >
-      <UContentToc :links="page.body.toc.links" />
+      <UContentToc
+        :links="page.body.toc.links"
+        :ui="{ root: 'hidden lg:flex' }"
+      />
     </template>
   </UPage>
 </template>

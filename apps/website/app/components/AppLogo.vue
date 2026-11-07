@@ -1,65 +1,63 @@
 <script setup lang="ts">
-/**
- * Miia "Portal" wordmark.
- * Mark is a rounded gradient square holding the two `i`s of Miia
- * rendered as parallel beams with glowing dots - the brand's signature.
- */
-defineProps<{
-  /** Hide wordmark and show only the mark */
-  markOnly?: boolean
+// Without `size` the logo follows the font size of its parent: the mark is 1.62em, the wordmark 1em
+const props = defineProps<{
+  size?: number
 }>()
 
-// SSR-safe unique id, prevents hydration mismatch
-const gradientId = `miia-grad-${useId()}`
+const style = computed(() => props.size ? { fontSize: `${Math.round(props.size * 0.62)}px` } : undefined)
 </script>
 
 <template>
-  <span class="inline-flex items-center gap-2.5 font-display font-bold tracking-tight">
-    <!-- Mark -->
+  <span
+    class="inline-flex items-center gap-[0.48em] text-highlighted"
+    :style="style"
+  >
     <svg
       viewBox="0 0 32 32"
       aria-hidden="true"
-      class="h-7 w-7 shrink-0 drop-shadow-[0_0_18px_color-mix(in_oklab,var(--color-plasma-500)_45%,transparent)]"
+      class="size-[1.62em] shrink-0"
     >
-      <defs>
-        <linearGradient :id="gradientId" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-          <stop offset="0" stop-color="#ff4d6d" />
-          <stop offset="0.55" stop-color="#7c3aed" />
-          <stop offset="1" stop-color="#22d3ee" />
-        </linearGradient>
-      </defs>
-
-      <!-- Portal frame -->
       <rect
-        x="0.75" y="0.75" width="30.5" height="30.5" rx="8"
-        :fill="`url(#${gradientId})`"
+        x="1.5"
+        y="1.5"
+        width="29"
+        height="29"
+        rx="7"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
       />
-      <!-- Inner dark well so beams read crisply -->
-      <rect
-        x="3" y="3" width="26" height="26" rx="6"
-        fill="rgba(10,10,18,0.92)"
-      />
-
-      <!-- Left beam -->
-      <circle cx="12" cy="9" r="2" fill="white" />
-      <rect x="10.5" y="12.5" width="3" height="13.5" rx="1.5" fill="white" />
-
-      <!-- Right beam -->
-      <circle cx="20" cy="9" r="2" fill="white" />
-      <rect x="18.5" y="12.5" width="3" height="13.5" rx="1.5" fill="white" />
-
-      <!-- Connecting top ridge (subtle portal arc) -->
-      <path
-        d="M9.5 6.8 C 13 4.6, 19 4.6, 22.5 6.8"
-        stroke="white" stroke-width="1" stroke-linecap="round"
-        fill="none" opacity="0.35"
-      />
+      <g transform="translate(16 16) scale(0.8) translate(-16 -16)">
+        <rect
+          x="10"
+          y="13"
+          width="3.6"
+          height="13"
+          rx="1.8"
+          fill="currentColor"
+        />
+        <circle
+          cx="11.8"
+          cy="8.4"
+          r="2.3"
+          style="fill: var(--ui-primary)"
+        />
+        <rect
+          x="18.4"
+          y="13"
+          width="3.6"
+          height="13"
+          rx="1.8"
+          fill="currentColor"
+        />
+        <circle
+          cx="20.2"
+          cy="8.4"
+          r="2.3"
+          style="fill: var(--ui-primary)"
+        />
+      </g>
     </svg>
-
-    <!-- Wordmark -->
-    <span v-if="!markOnly" class="text-xl leading-none">
-      <span>m</span><span class="text-plasma">ii</span><span>a</span>
-      <span class="ml-0.5 text-[0.6em] font-medium opacity-60 tracking-widest uppercase">/js</span>
-    </span>
+    <span class="font-semibold leading-none tracking-[-0.01em]">miia<span class="font-normal text-dimmed">/js</span></span>
   </span>
 </template>

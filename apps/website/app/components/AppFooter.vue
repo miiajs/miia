@@ -1,144 +1,126 @@
 <script setup lang="ts">
+defineProps<{
+  compact?: boolean
+}>()
+
+const { miiaVersion } = useRuntimeConfig().public
 const year = new Date().getFullYear()
 
-const { data: versionData } = await useFetch<{ version: string }>(
-  'https://registry.npmjs.org/@miiajs/core/latest',
-  {
-    key: 'miia-npm-version',
-    server: false,
-    default: () => ({ version: '' }),
-    transform: (r: { version: string }) => ({ version: r.version })
-  }
-)
-const version = computed(() => versionData.value?.version ?? '')
+const github = { label: 'GitHub', to: 'https://github.com/miiajs/miia', target: '_blank' }
+const x = { label: 'X', to: 'https://x.com/miiaframework', target: '_blank' }
+const linkedin = { label: 'LinkedIn', to: 'https://www.linkedin.com/company/miiajs/', target: '_blank' }
+const social = [github, x, linkedin]
 
-const columns: { label: string, children: { label: string, to: string, target?: string }[] }[] = [
+const columns: { label: string, links: { label: string, to: string, target?: string }[] }[] = [
   {
-    label: 'Documentation',
-    children: [
+    label: 'documentation',
+    links: [
       { label: 'Getting Started', to: '/docs/getting-started' },
-      { label: 'Core Concepts',   to: '/docs/core-concepts' },
-      { label: 'Benchmarks',      to: '/benchmarks' },
-      { label: 'Roadmap',         to: '/docs/roadmap' }
+      { label: 'Core Concepts', to: '/docs/core-concepts' },
+      { label: 'Packages', to: '/docs/packages' },
+      { label: 'Roadmap', to: '/docs/roadmap' }
     ]
   },
   {
-    label: 'Community',
-    children: [
-      { label: 'GitHub',      to: 'https://github.com/miiajs/miia',               target: '_blank' },
-      { label: 'Issues',      to: 'https://github.com/miiajs/miia/issues',        target: '_blank' }
-    ]
-  },
-  {
-    label: 'Resources',
-    children: [
+    label: 'project',
+    links: [
+      { label: 'Benchmarks', to: '/benchmarks' },
       { label: 'Blog', to: '/blog' },
-      { label: 'RSS', to: '/blog/rss.xml', target: '_blank' },
       { label: 'MIT License', to: 'https://github.com/miiajs/miia/blob/main/LICENSE', target: '_blank' }
-      // TODO: re-enable once GitHub Releases are published
-      // { label: 'Changelog', to: 'https://github.com/miiajs/miia/releases', target: '_blank' }
+    ]
+  },
+  {
+    label: 'community',
+    links: [
+      github,
+      { label: 'Issues', to: 'https://github.com/miiajs/miia/issues', target: '_blank' },
+      x,
+      linkedin
     ]
   }
 ]
 </script>
 
 <template>
-  <footer class="relative mt-24 border-t border-[color:var(--ui-border)] overflow-hidden">
-    <!-- Gradient hairline -->
-    <div
-      class="absolute inset-x-0 top-0 h-px"
-      style="background: linear-gradient(90deg, transparent 0%, color-mix(in oklab, var(--color-plasma-500) 55%, transparent) 25%, color-mix(in oklab, var(--color-violet-accent) 55%, transparent) 50%, color-mix(in oklab, var(--color-cyan-accent) 55%, transparent) 75%, transparent 100%);"
-    />
-
-    <!-- Ambient glow -->
-    <div
-      class="pointer-events-none absolute left-1/2 top-0 h-80 w-[80%] -translate-x-1/2 blur-3xl opacity-60"
-      style="background: radial-gradient(ellipse at center, rgba(124,58,237,0.18), transparent 70%);"
-    />
-
-    <div class="relative mx-auto max-w-7xl px-4 sm:px-6 py-16">
-      <!-- Top: logo + columns -->
-      <div class="grid gap-10 md:grid-cols-4">
-        <div class="md:col-span-1">
-          <AppLogo />
-          <p class="mt-4 text-sm text-muted leading-relaxed max-w-xs">
-            The decorator-driven HTTP framework for TypeScript. Lightweight,
-            standards-first, runtime-agnostic.
-          </p>
-
-          <div class="mt-5 flex items-center gap-1.5">
-            <UButton
-              to="https://github.com/miiajs/miia"
-              target="_blank"
-              icon="i-simple-icons-github"
-              aria-label="MiiaJS on GitHub"
-              color="neutral"
-              variant="ghost"
-            />
-            <UButton
-              to="https://x.com/miiaframework"
-              target="_blank"
-              icon="i-simple-icons-x"
-              aria-label="MiiaJS on X"
-              color="neutral"
-              variant="ghost"
-            />
-            <UButton
-              to="https://www.linkedin.com/company/miiajs/"
-              target="_blank"
-              icon="i-simple-icons-linkedin"
-              aria-label="MiiaJS on LinkedIn"
-              color="neutral"
-              variant="ghost"
-            />
-          </div>
-        </div>
-
-        <div
-          v-for="col in columns"
-          :key="col.label"
-          class="md:col-span-1"
-        >
-          <h3 class="font-display text-sm font-semibold text-default">{{ col.label }}</h3>
-          <ul class="mt-4 space-y-2.5">
-            <li v-for="link in col.children" :key="link.label">
-              <NuxtLink
-                :to="link.to"
-                :target="link.target"
-                class="text-sm text-muted hover:text-[color:var(--color-plasma-500)] transition"
-              >
-                {{ link.label }}
-              </NuxtLink>
-            </li>
-          </ul>
-        </div>
-      </div>
-
-      <!-- Gigantic wordmark watermark -->
-      <div class="relative mt-20 select-none overflow-hidden">
-        <div
-          class="font-display font-bold leading-none text-[clamp(5rem,20vw,16rem)] tracking-tighter text-plasma opacity-[0.12] whitespace-nowrap text-center"
-        >
-          MIIA/JS
-        </div>
-      </div>
-
-      <!-- Bottom bar -->
-      <div class="relative mt-8 flex flex-col sm:flex-row items-center justify-between gap-3 pt-6 border-t border-[color:var(--ui-border)]">
-        <p class="text-xs text-dimmed">
-          &copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS. MIT License.
-        </p>
+  <footer
+    v-if="compact"
+    class="border-t border-default bg-accented"
+  >
+    <div class="mx-auto flex max-w-[1360px] flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-[22px] font-mono text-[13px] text-muted sm:px-6 lg:px-8">
+      <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS · MIT License</span>
+      <div class="flex flex-wrap gap-x-5 gap-y-1">
         <NuxtLink
-          v-if="version"
+          v-for="link in social"
+          :key="link.label"
+          :to="link.to"
+          :target="link.target"
+          class="py-1.5 text-toned hover:text-highlighted"
+        >
+          {{ link.label }}
+        </NuxtLink>
+        <NuxtLink
           to="https://github.com/miiajs/miia/tags"
           target="_blank"
-          class="inline-flex items-center gap-1.5 rounded-full border border-[color:var(--ui-border)] px-2.5 py-1 text-xs text-dimmed font-mono hover:text-[color:var(--color-plasma-500)] hover:border-[color:color-mix(in_oklab,var(--color-plasma-500)_40%,transparent)] transition"
+          class="py-1.5 hover:text-highlighted"
         >
-          <span
-            class="size-1.5 rounded-full"
-            style="background: var(--color-plasma-500); box-shadow: 0 0 8px color-mix(in oklab, var(--color-plasma-500) 60%, transparent);"
-          />
-          version {{ version }}
+          v{{ miiaVersion }}
+        </NuxtLink>
+      </div>
+    </div>
+  </footer>
+
+  <footer
+    v-else
+    class="border-t border-default bg-accented"
+  >
+    <div class="mx-auto flex max-w-[1200px] flex-col gap-7 px-4 pt-10 pb-7 sm:px-6 lg:gap-10 lg:pt-14 lg:pb-8">
+      <div class="flex flex-col gap-7 lg:flex-row lg:flex-wrap lg:justify-between lg:gap-x-14 lg:gap-y-10">
+        <div class="flex flex-col gap-3 lg:max-w-[340px] lg:flex-[1_1_280px] lg:gap-3.5">
+          <NuxtLink
+            to="/"
+            aria-label="MiiaJS home"
+            class="flex min-h-11 items-center self-start text-[19px] lg:text-xl"
+          >
+            <AppLogo />
+          </NuxtLink>
+          <p class="text-[15px] leading-relaxed text-toned">
+            Structured TypeScript APIs on Web Standards. Open source, MIT licensed.
+          </p>
+        </div>
+
+        <nav
+          aria-label="Footer"
+          class="grid grid-cols-2 gap-x-4 gap-y-6 lg:flex lg:flex-[2_1_520px] lg:flex-wrap lg:gap-x-14 lg:gap-y-8"
+        >
+          <div
+            v-for="column in columns"
+            :key="column.label"
+            class="flex flex-col lg:flex-[1_1_140px] lg:gap-1"
+          >
+            <p class="mb-1 font-mono text-xs text-muted lg:mb-2">
+              {{ column.label }}
+            </p>
+            <NuxtLink
+              v-for="link in column.links"
+              :key="link.label"
+              :to="link.to"
+              :target="link.target"
+              class="py-2.5 text-[15px] text-highlighted hover:text-toned lg:py-1.5"
+            >
+              {{ link.label }}
+            </NuxtLink>
+          </div>
+        </nav>
+      </div>
+
+      <div class="flex flex-wrap justify-between gap-3 border-t border-default pt-4 font-mono text-xs text-muted lg:pt-5 lg:text-[13px]">
+        <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS</span>
+        <NuxtLink
+          to="https://github.com/miiajs/miia/tags"
+          target="_blank"
+          class="hover:text-highlighted"
+        >
+          v{{ miiaVersion }}
         </NuxtLink>
       </div>
     </div>

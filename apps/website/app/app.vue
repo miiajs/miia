@@ -1,18 +1,7 @@
 <script setup lang="ts">
 const colorMode = useColorMode()
 
-const color = computed(() => colorMode.value === 'dark' ? '#0a0a12' : '#ffffff')
-
-// Plasma-gradient progress bar for the top loader
-const loaderGradient
-  = 'repeating-linear-gradient('
-    + '90deg, '
-    + '#ff4d6d 0%, '
-    + '#ff4d6d 20%, '
-    + '#c04bff 50%, '
-    + '#7c3aed 70%, '
-    + '#22d3ee 100%'
-    + ')'
+const color = computed(() => colorMode.value === 'dark' ? BRAND_COLORS.paperDark : BRAND_COLORS.paper)
 
 useHead({
   meta: [
@@ -34,27 +23,12 @@ useSeoMeta({
   ogImageHeight: 630,
   ogImageType: 'image/png'
 })
-
-const { data: navigation } = await useAsyncData('navigation', () => queryCollectionNavigation('docs', ['status']), {
-  transform: data => data.find(item => item.path === '/docs')?.children || []
-})
-const { data: files } = useLazyAsyncData('search', () => queryCollectionSearchSections('docs'), {
-  server: false
-})
-
-const links = [{
-  label: 'Docs',
-  icon: 'i-lucide-book',
-  to: '/docs/getting-started'
-}]
-
-provide('navigation', navigation)
 </script>
 
 <template>
   <UApp>
     <NuxtLoadingIndicator
-      :color="loaderGradient"
+      color="var(--ui-primary)"
       :height="3"
       :throttle="150"
     />
@@ -63,14 +37,6 @@ provide('navigation', navigation)
       <NuxtPage />
     </NuxtLayout>
 
-    <ClientOnly>
-      <LazyUContentSearch
-        :files="files"
-        shortcut="meta_k"
-        :navigation="navigation"
-        :links="links"
-        :fuse="{ resultLimit: 42 }"
-      />
-    </ClientOnly>
+    <AppSearch />
   </UApp>
 </template>

@@ -1,4 +1,5 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
+import corePkg from '../../packages/core/package.json' with { type: 'json' }
 
 export default defineNuxtConfig({
   modules: [
@@ -9,26 +10,8 @@ export default defineNuxtConfig({
     '@nuxtjs/seo'
   ],
 
-  site: {
-    url: 'https://miiajs.com',
-    name: 'MiiaJS',
-    description: 'Decorator-driven HTTP framework for TypeScript. Build structured APIs with DI, middleware, and Web Standards - deploy to Bun, Deno, Node.js, or any edge platform.',
-    defaultLocale: 'en'
-  },
-
   devtools: {
     enabled: true
-  },
-
-  vite: {
-    // Lightning CSS (Tailwind v4) uses cssTarget for autoprefix decisions.
-    // Vite defaults include safari14 which forces `-webkit-backdrop-filter`
-    // and drops the unprefixed `backdrop-filter` from prod - Firefox then
-    // renders no blur (it doesn't recognize the -webkit- prefix). Bump to
-    // browsers that support both forms so both declarations survive.
-    build: {
-      cssTarget: ['chrome110', 'edge110', 'firefox115', 'safari16']
-    }
   },
 
   app: {
@@ -42,13 +25,6 @@ export default defineNuxtConfig({
         { rel: 'icon', type: 'image/png', sizes: '512x512', href: '/favicon-512.png' },
         { rel: 'apple-touch-icon', sizes: '180x180', href: '/apple-touch-icon.png' },
         { rel: 'shortcut icon', href: '/favicon.ico' },
-        // Fonts: non-blocking preconnect + stylesheet
-        { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
-        { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
-        {
-          rel: 'stylesheet',
-          href: 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap'
-        },
         // Blog feed autodiscovery
         { rel: 'alternate', type: 'application/rss+xml', title: 'MiiaJS Blog', href: '/blog/rss.xml' }
       ],
@@ -56,8 +32,8 @@ export default defineNuxtConfig({
         ? [
             {
               // Public Cloudflare Web Analytics beacon token - safe to commit
-              src: 'https://static.cloudflareinsights.com/beacon.min.js',
-              defer: true,
+              'src': 'https://static.cloudflareinsights.com/beacon.min.js',
+              'defer': true,
               'data-cf-beacon': '{"token": "21ec522796be4410b761746f0eb3e107"}'
             }
           ]
@@ -66,6 +42,13 @@ export default defineNuxtConfig({
   },
 
   css: ['~/assets/css/main.css'],
+
+  site: {
+    url: 'https://miiajs.com',
+    name: 'MiiaJS',
+    description: 'Decorator-driven HTTP framework for TypeScript. Build structured APIs with DI, middleware, and Web Standards - deploy to Bun, Deno, Node.js, or any edge platform.',
+    defaultLocale: 'en'
+  },
 
   content: {
     experimental: {
@@ -76,6 +59,12 @@ export default defineNuxtConfig({
   mdc: {
     highlight: {
       noApiRoute: false
+    }
+  },
+
+  runtimeConfig: {
+    public: {
+      miiaVersion: corePkg.version
     }
   },
 
@@ -108,21 +97,18 @@ export default defineNuxtConfig({
     }
   },
 
-  sitemap: {
-    xsl: false
+  vite: {
+    // Lightning CSS (Tailwind v4) uses cssTarget for autoprefix decisions.
+    // Vite defaults include safari14 which forces `-webkit-backdrop-filter`
+    // and drops the unprefixed `backdrop-filter` from prod - Firefox then
+    // renders no blur (it doesn't recognize the -webkit- prefix). Bump to
+    // browsers that support both forms so both declarations survive.
+    build: {
+      cssTarget: ['chrome110', 'edge110', 'firefox115', 'safari16']
+    }
   },
 
   aiReady: false,
-
-  skewProtection: false,
-
-  // The OG image template gets its fonts from @nuxt/fonts, global families only
-  fonts: {
-    families: [
-      { name: 'Inter', global: true },
-      { name: 'Space Grotesk', global: true }
-    ]
-  },
 
   eslint: {
     config: {
@@ -131,5 +117,21 @@ export default defineNuxtConfig({
         braceStyle: '1tbs'
       }
     }
-  }
+  },
+
+  // The OG image template gets its fonts from @nuxt/fonts, global families only; it names Inter and Space Grotesk until it moves to Plex
+  fonts: {
+    families: [
+      { name: 'IBM Plex Sans', weights: [400, 500, 600] },
+      { name: 'IBM Plex Mono', weights: [400, 500] },
+      { name: 'Inter', global: true },
+      { name: 'Space Grotesk', global: true }
+    ]
+  },
+
+  sitemap: {
+    xsl: false
+  },
+
+  skewProtection: false
 })
