@@ -25,3 +25,6 @@ logs
 
 # VSC
 .history
+
+# Blog drafts stay in the local checkout
+content/2.blog/*.draft.md

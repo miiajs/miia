@@ -48,7 +48,9 @@ export default defineNuxtConfig({
         {
           rel: 'stylesheet',
           href: 'https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap'
-        }
+        },
+        // Blog feed autodiscovery
+        { rel: 'alternate', type: 'application/rss+xml', title: 'MiiaJS Blog', href: '/blog/rss.xml' }
       ],
       script: process.env.NODE_ENV === 'production'
         ? [
@@ -82,7 +84,8 @@ export default defineNuxtConfig({
     prerender: {
       routes: [
         '/',
-        '/robots.txt'
+        '/robots.txt',
+        '/blog/rss.xml'
       ],
       crawlLinks: true,
       ignore: [

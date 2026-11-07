@@ -5,6 +5,9 @@ const sizeEnum = z.enum(['xs', 'sm', 'md', 'lg', 'xl'])
 const orientationEnum = z.enum(['vertical', 'horizontal'])
 const variantEnum = z.enum(['solid', 'outline', 'subtle', 'soft', 'ghost', 'link'])
 
+// Blog drafts (*.draft.md) exist only in `nuxt dev`: the prerendered SQL dump holds every matched file
+const isDev = process.env.NODE_ENV === 'development'
+
 const createBaseSchema = () => z.object({
   title: z.string().nonempty(),
   description: z.string().nonempty()
@@ -60,6 +63,20 @@ export const collections = {
         title: z.string().optional(),
         description: z.string().optional()
       }).optional()
+    })
+  }),
+  blog: defineCollection({
+    source: {
+      include: '2.blog/*.md',
+      exclude: isDev ? [] : ['2.blog/*.draft.md']
+    },
+    type: 'page',
+    schema: z.object({
+      title: z.string().nonempty(),
+      description: z.string().nonempty(),
+      date: z.date(),
+      author: z.string().nonempty(),
+      tags: z.array(z.string()).default([])
     })
   })
 }

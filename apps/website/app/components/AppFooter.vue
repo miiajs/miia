@@ -32,6 +32,8 @@ const columns: { label: string, children: { label: string, to: string, target?: 
   {
     label: 'Resources',
     children: [
+      { label: 'Blog', to: '/blog' },
+      { label: 'RSS', to: '/blog/rss.xml', target: '_blank' },
       { label: 'MIT License', to: 'https://github.com/miiajs/miia/blob/main/LICENSE', target: '_blank' }
       // TODO: re-enable once GitHub Releases are published
       // { label: 'Changelog', to: 'https://github.com/miiajs/miia/releases', target: '_blank' }

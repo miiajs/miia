@@ -30,30 +30,38 @@ The site is a workspace of the monorepo (`apps/*`); install from the repository 
 apps/website/
 ├── content/
 │   ├── 0.index.yml                 # `index` collection: landing page copy (sections, features, cta, seo)
-│   └── 1.docs/                     # `docs` collection, renders under /docs/*
-│       ├── 1.getting-started/
-│       ├── 2.core-concepts/
-│       ├── 3.packages/
-│       └── 4.roadmap/
+│   ├── 1.docs/                     # `docs` collection, renders under /docs/*
+│   │   ├── 1.getting-started/
+│   │   ├── 2.core-concepts/
+│   │   ├── 3.packages/
+│   │   └── 4.roadmap/
+│   └── 2.blog/                     # `blog` collection, renders under /blog/*; `<slug>.draft.md` is a draft
 ├── content.config.ts               # Nuxt Content collection schemas (Zod)
 ├── nuxt.config.ts                  # modules, site meta, prerender, redirects
 ├── public/                         # favicons, og-image
+├── server/
+│   └── routes/blog/rss.xml.ts      # RSS 2.0 feed of the blog
 └── app/
     ├── app.vue                     # root, builds navigation + search data, provides navigation
     ├── app.config.ts
     ├── error.vue
     ├── assets/css/main.css         # Tailwind 4 theme, plasma/violet/cyan accents
     ├── layouts/
-    │   ├── default.vue             # landing and benchmarks shell
+    │   ├── default.vue             # landing, benchmarks and blog shell
     │   └── docs.vue                # doc shell: header, sidebar nav, footer
     ├── pages/
     │   ├── index.vue               # landing page (reads content/0.index.yml)
     │   ├── benchmarks.vue          # benchmarks page
-    │   └── docs/[...slug].vue      # renders one doc page via <ContentRenderer>
+    │   ├── docs/[...slug].vue      # renders one doc page via <ContentRenderer>
+    │   └── blog/
+    │       ├── index.vue           # post list
+    │       └── [slug].vue          # one post
     ├── data/benchmarks/            # benchmark datasets per machine (m1.ts, server.ts)
     ├── components/                 # AppHeader, AppFooter, AppLogo, CodeCard, HeroBackground, StarsBg
+    │   └── OgImage/MiiaPost.takumi.vue  # OG image template of a blog post
     └── utils/
-        └── status.ts               # statusColor() helper (auto-imported)
+        ├── status.ts               # statusColor() helper (auto-imported)
+        └── blog.ts                 # formatPostDate(), isDraftPost() (auto-imported)
 ```
 
 The numbers on the landing page (hero badge, stats strip) and the benchmarks page are measured by hand in the [`miiajs/benchmarks`](https://github.com/miiajs/benchmarks) repo; do not edit them without a new run.
@@ -229,6 +237,54 @@ bun run typecheck     # vue-tsc
    ```
 6. `bun run dev` and visually verify: header badge, sidebar badge, correct section in the index.
 
+## Blog
+
+Posts live in `content/2.blog/<slug>.md` (the `blog` collection) and render at `/blog/<slug>`; `/blog` lists them, newest first. The header and the footer (`Resources`) link to `/blog`.
+
+Frontmatter:
+
+```yaml
+---
+title: 'MiiaJS 0.9: module boundaries, typed tokens and a rebuilt CLI'
+description: One or two sentences. Also the text of the list card, the RSS item and the OG image.
+date: 2026-11-05        # publication day
+author: Ruslan Matiushev
+tags: [release]         # optional, defaults to []
+---
+```
+
+- `date` is `z.date()` in the schema, but queries return it as a `YYYY-MM-DD` string. Format it with `formatPostDate()` (`app/utils/blog.ts`, UTC). `UBlogPost` formats its `date` prop in the local time zone, which can show the day before, so the list renders the date through the `#date` slot.
+- There is no `image` field: every post gets a generated OG image (below).
+- The list page selects only the fields it shows (`.select(...)`), otherwise `/blog/_payload.json` carries the body of every post.
+
+### Drafts
+
+A draft is a file named `<slug>.draft.md`. Nuxt Content strips `.draft` from the path, so the URL is the same `/blog/<slug>`; the record's `stem` keeps it (`2.blog/<slug>.draft`), and `isDraftPost()` reads it for the `Draft` badge.
+
+Drafts exist only in `nuxt dev`: `content.config.ts` excludes `2.blog/*.draft.md` from the collection source unless `NODE_ENV` is `development`, which only `nuxt dev` sets. Do not replace this with a `draft: true` field and a query filter. Nuxt Content prerenders `/__nuxt_content/blog/sql_dump.txt` with every file the collection matches, so a filtered draft would still be public in that file. With the exclude, a draft is absent from the dump, the payloads, the RSS feed and the sitemap.
+
+To publish, rename `<slug>.draft.md` to `<slug>.md`.
+
+### OG images
+
+`blog/[slug].vue` calls `defineOgImage('MiiaPost', { title, description, date }, { width: 1200, height: 630 })`. The template is `app/components/OgImage/MiiaPost.takumi.vue`, rendered by Takumi: `@takumi-rs/core` is a site dependency and the `.takumi.vue` suffix picks the renderer. nuxt-og-image 6.5 accepts only the 1.x line of `@takumi-rs/core`.
+
+- The template name must not clash with nuxt-og-image's community templates (`BlogPost` is one of them).
+- Pass `width` and `height`: the module defaults to 1200x600, and its tags replace the 1200x630 ones from `app/app.vue`.
+- Keep `style` attributes static: nuxt-og-image reads them at build time to pick the fonts and weights it loads (Space Grotesk and Inter here).
+- The build prerenders the image to `/_og/s/<hash>.png`. Pages without `defineOgImage` (docs, landing, `/blog`) keep the static `/og-image.png`.
+
+### RSS
+
+`server/routes/blog/rss.xml.ts` writes an RSS 2.0 feed (`atom:link` to itself, `dc:creator` for the author, a `category` per tag) from `queryCollection(event, 'blog')`, with the base URL from `getSiteConfig(event).url`. The prerender crawler does not follow `.xml` links, so `/blog/rss.xml` is listed in `nitro.prerender.routes`. `app.head` in `nuxt.config.ts` has the autodiscovery `<link rel="alternate">`; links to the feed use `target: '_blank'` so the click does not go through the client router.
+
+### Checklist: a new post
+
+1. Create `content/2.blog/<slug>.draft.md` with the frontmatter above. `##` is the top heading inside a post, as in docs.
+2. `bun run dev`: check `/blog` (with the `Draft` badge), `/blog/<slug>` and the image at the page's `og:image` URL.
+3. Set `date` to the publication day and rename the file to `<slug>.md`.
+4. `bun run build`, then check `.output/public/blog/<slug>/index.html`, `blog/rss.xml` and `sitemap.xml`.
+
 ## Key files (quick reference)
 
 | File | Purpose |
@@ -236,8 +292,13 @@ bun run typecheck     # vue-tsc
 | `app/app.vue` | Root; builds navigation from `queryCollectionNavigation('docs', ['status'])`, provides it via `provide('navigation')`. Mount search. |
 | `app/layouts/docs.vue` | Doc shell; `inject`s navigation, runs `expandActiveBranch` (which also maps `status → badge`), renders sidebar. |
 | `app/pages/docs/[...slug].vue` | Renders one doc page; `UPageHeader` with status badge slot + `ContentRenderer`. |
-| `content.config.ts` | Zod schemas for `index` and `docs` collections. |
+| `content.config.ts` | Zod schemas for `index`, `docs` and `blog` collections; excludes blog drafts outside `nuxt dev`. |
 | `app/utils/status.ts` | `statusColor()` helper, auto-imported. |
+| `app/pages/blog/index.vue` | Post list (`UBlogPosts`), `Draft` badge in dev. |
+| `app/pages/blog/[slug].vue` | One post: article SEO tags, schema.org `Article`, `defineOgImage('MiiaPost', ...)`. |
+| `app/components/OgImage/MiiaPost.takumi.vue` | OG image template of a post (Takumi). |
+| `app/utils/blog.ts` | `formatPostDate()`, `isDraftPost()`, auto-imported. |
+| `server/routes/blog/rss.xml.ts` | RSS feed of the blog, prerendered to `/blog/rss.xml`. |
 | `nuxt.config.ts` | Modules, SEO defaults, prerender routes. |
 
 ## Documentation follow-ups

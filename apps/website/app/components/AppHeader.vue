@@ -5,6 +5,7 @@ const open = ref(false)
 const items = computed(() => [
   { label: 'Home',       to: '/',                  active: route.path === '/' },
   { label: 'Docs',       to: '/docs',              active: route.path.startsWith('/docs') && !route.path.startsWith('/docs/roadmap') },
+  { label: 'Blog', to: '/blog', active: route.path.startsWith('/blog') },
   { label: 'Roadmap',    to: '/docs/roadmap',      active: route.path.startsWith('/docs/roadmap') },
   { label: 'Benchmarks', to: '/benchmarks',        active: route.path === '/benchmarks' }
 ])
