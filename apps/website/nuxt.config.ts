@@ -1,5 +1,6 @@
 // https://nuxt.com/docs/api/configuration/nuxt-config
 import corePkg from '../../packages/core/package.json' with { type: 'json' }
+import { miiaDark, miiaLight } from './shiki-themes'
 
 export default defineNuxtConfig({
   modules: [
@@ -51,6 +52,15 @@ export default defineNuxtConfig({
   },
 
   content: {
+    build: {
+      markdown: {
+        // Content passes this to @nuxtjs/mdc too, so <MDC> renders with the same themes.
+        // `light` replaces the third theme Nuxt UI sets by default
+        highlight: {
+          theme: { default: miiaLight, light: miiaLight, dark: miiaDark }
+        }
+      }
+    },
     experimental: {
       sqliteConnector: 'native'
     }

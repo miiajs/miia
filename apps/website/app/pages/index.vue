@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { config as benchEnv, data as benchData } from '~/data/benchmarks/m1'
+
 const { data: page } = await useAsyncData('index', () => queryCollection('index').first())
 
 const title = page.value?.seo?.title || page.value?.title
@@ -11,6 +13,11 @@ useSeoMeta({
   description,
   ogDescription: description
 })
+
+const heroTitle = computed(() => page.value?.hero.title.split('\n') ?? [])
+
+const installCommand = 'bun create miia my-app'
+const { copied, copy } = useCopy()
 
 const codeDecorators = `@Controller('/users')
 export class UserController {
@@ -41,344 +48,281 @@ await app.listen(3000, serve)
 await app.init()
 export default { fetch: app.fetch }`
 
-const runtimes = [
-  { name: 'Bun',        icon: 'i-simple-icons-bun' },
-  { name: 'Deno',       icon: 'i-simple-icons-deno' },
-  { name: 'Node.js',    icon: 'i-simple-icons-nodedotjs' },
-  { name: 'Cloudflare', icon: 'i-simple-icons-cloudflare' },
-  { name: 'Vercel',     icon: 'i-simple-icons-vercel' }
-]
+const codeTerminal = `# Bun
+bun create miia my-app
+# Node.js
+npm create miia my-app
+# Deno
+deno run -A npm:create-miia my-app`
 
-const installCommand = 'bun create miia my-app'
-const copied = ref(false)
-let copyResetTimer: ReturnType<typeof setTimeout> | null = null
+// The realistic POST test of the benchmarks page, Bun rows only
+const benchRoute = 'POST /api/workspaces/:ws/projects/:proj/tasks'
+const benchRun = `Bun ${benchEnv.versions.bun} on an ${benchEnv.label}, ${benchEnv.date}.`
+const benchRows = (() => {
+  const rows = benchData.apiPost
+    .filter(row => row.framework.endsWith(' (Bun)'))
+    .sort((a, b) => b.reqSec - a.reqSec)
+  const top = rows[0]?.reqSec ?? 1
+  return rows.map(row => ({
+    name: row.framework.slice(0, -' (Bun)'.length).replace('+', ' + '),
+    reqSec: row.reqSec.toLocaleString('en-US'),
+    latency: row.latency,
+    width: `${(row.reqSec / top * 100).toFixed(1)}%`,
+    highlight: row.highlight ?? false
+  }))
+})()
 
-async function copyInstall() {
-  try {
-    await navigator.clipboard.writeText(installCommand)
-    copied.value = true
-    if (copyResetTimer) clearTimeout(copyResetTimer)
-    copyResetTimer = setTimeout(() => {
-      copied.value = false
-    }, 1800)
-  } catch {
-    // clipboard unavailable - graceful no-op
-  }
-}
+const container = 'mx-auto flex max-w-[1200px] flex-col gap-4 px-4 sm:px-6 lg:flex-row lg:flex-wrap lg:gap-x-14 lg:gap-y-10'
+const eyebrow = 'font-mono text-xs text-muted lg:text-[13px]'
+const heading = 'text-[26px] leading-[1.18] font-semibold tracking-[-0.02em] lg:text-[length:clamp(28px,3vw,36px)] lg:leading-[1.15]'
+const lead = 'max-w-[460px] text-base leading-[1.6] text-toned lg:text-[17px]'
+const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px] font-medium text-primary underline-offset-4 hover:underline lg:min-h-8'
+const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
 </script>
 
 <template>
   <div v-if="page">
-    <!-- ========================= HERO ========================= -->
-    <section class="relative overflow-hidden">
-      <HeroBackground />
+    <section class="mx-auto flex max-w-[1200px] flex-col gap-7 px-4 pt-10 pb-12 sm:px-6 lg:flex-row lg:flex-wrap lg:items-center lg:gap-14 lg:pt-[88px] lg:pb-20">
+      <div class="flex min-w-0 flex-col gap-5 lg:flex-[1_1_480px] lg:gap-[26px]">
+        <h1 class="text-[36px] leading-[1.08] font-semibold tracking-[-0.025em] lg:text-[length:clamp(40px,4.6vw,62px)] lg:leading-[1.04]">
+          {{ heroTitle[0] }}<br><span class="text-dimmed">{{ heroTitle[1] }}</span>
+        </h1>
+        <p class="max-w-[520px] text-[17px] leading-[1.6] text-toned lg:text-lg">
+          {{ page.hero.description }}
+        </p>
+        <div class="flex flex-col gap-2.5 lg:flex-row lg:flex-wrap lg:gap-3">
+          <UButton
+            v-for="link in page.hero.links"
+            :key="link.to"
+            v-bind="link"
+            :class="[button, 'font-semibold']"
+          />
+          <div class="flex min-h-12 items-center gap-2.5 rounded-sm border border-accented bg-elevated ps-3.5 pe-0.5 font-mono text-sm lg:pe-1">
+            <span
+              class="text-dimmed"
+              aria-hidden="true"
+            >$</span>
+            <span class="flex-1">{{ installCommand }}</span>
+            <UButton
+              color="neutral"
+              variant="ghost"
+              :icon="copied ? 'i-lucide-check' : 'i-lucide-copy'"
+              :aria-label="copied ? 'Copied' : 'Copy install command'"
+              class="size-11 justify-center rounded-[4px] text-toned lg:size-10"
+              :ui="{ leadingIcon: 'size-4' }"
+              @click="copy(installCommand)"
+            />
+          </div>
+        </div>
+      </div>
+      <CodePanel
+        file="users.controller.ts"
+        lang="ts"
+        :code="codeDecorators"
+        class="min-w-0 lg:flex-[1_1_520px]"
+      />
+    </section>
 
-      <div class="relative mx-auto max-w-6xl px-4 pt-20 pb-28 sm:pt-28 sm:pb-36 text-center">
-        <!-- Eyebrow badge -->
-        <div class="mb-8 flex justify-center">
+    <section class="border-t border-default">
+      <div :class="[container, 'py-12 lg:items-start lg:py-20']">
+        <div class="flex min-w-0 flex-col gap-4 lg:flex-[1_1_400px] lg:gap-[18px]">
+          <p :class="eyebrow">
+            architecture
+          </p>
+          <h2 :class="heading">
+            {{ page.architecture.title }}
+          </h2>
+          <p :class="lead">
+            {{ page.architecture.description }}
+          </p>
           <NuxtLink
-            to="/benchmarks"
-            class="group inline-flex items-center gap-2 rounded-full glass px-3 py-1.5 text-xs sm:text-sm text-muted transition hover:text-default"
+            :to="page.architecture.link.to"
+            :class="textLink"
           >
-            <span class="relative flex h-2 w-2">
-              <span class="absolute inset-0 rounded-full gradient-plasma animate-beam" />
-              <span class="relative inline-flex h-full w-full rounded-full gradient-plasma" />
-            </span>
-            <!-- Mobile: compact both-metrics pill -->
-            <span class="sm:hidden">
-              <span class="font-semibold text-default">9% vs Hono</span>
-              <span class="opacity-40 mx-1">·</span>
-              <span class="font-semibold text-default">33% vs NestJS</span>
-            </span>
-            <!-- Desktop: full claim with 'Up to' eyebrow and runtime annotation -->
-            <span class="hidden sm:inline">Up to</span>
-            <span class="hidden sm:inline font-semibold text-default">9% faster than Hono</span>
-            <span class="hidden sm:inline opacity-40">·</span>
-            <span class="hidden sm:inline font-semibold text-default">33% vs NestJS</span>
-            <span class="hidden sm:inline opacity-60 text-xs font-mono">(on Bun)</span>
-            <UIcon name="i-lucide-arrow-right" class="size-3.5 transition group-hover:translate-x-0.5" />
+            {{ page.architecture.link.label }}
+            <UIcon
+              name="i-lucide-arrow-right"
+              class="size-3.5"
+            />
           </NuxtLink>
         </div>
-
-        <!-- Huge display title -->
-        <h1 class="font-display font-bold leading-[0.95] tracking-tight text-[clamp(2.75rem,9vw,7.5rem)]">
-          <span class="block">The</span>
-          <span class="block text-plasma">decorator-driven</span>
-          <span class="block">HTTP framework</span>
-        </h1>
-
-        <p class="mx-auto mt-8 max-w-2xl text-base sm:text-lg text-muted leading-relaxed">
-          Build structured, type-safe APIs with decorators, dependency injection,
-          and Koa-style middleware - powered by Web Standards. Deploy to Bun,
-          Deno, Node.js, or any serverless / edge platform.
-        </p>
-
-        <!-- CTAs -->
-        <div class="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
-          <UButton
-            to="/docs/getting-started"
-            size="xl"
-            color="primary"
-            trailing-icon="i-lucide-arrow-right"
-            class="font-display !rounded-full !px-7 glow-plasma"
+        <div class="flex min-w-0 flex-col lg:flex-[1_1_560px]">
+          <div
+            v-for="feature in page.architecture.features"
+            :key="feature.title"
+            class="flex flex-col gap-1.5 border-t border-default py-[18px] last:border-b lg:flex-row lg:flex-wrap lg:gap-x-8 lg:gap-y-2 lg:py-[22px]"
           >
-            Start building
-          </UButton>
-          <UButton
-            to="https://github.com/miiajs/miia"
-            target="_blank"
-            size="xl"
-            color="neutral"
-            variant="outline"
-            icon="i-simple-icons-github"
-            class="font-display !rounded-full !px-7 !border-[color:var(--ui-border-accented)]"
-          >
-            Star on GitHub
-          </UButton>
+            <h3 class="text-base font-semibold lg:flex-[0_0_220px] lg:text-[17px]">
+              {{ feature.title }}
+            </h3>
+            <p class="text-[15px] leading-[1.6] text-toned lg:flex-[1_1_280px]">
+              {{ feature.description }}
+            </p>
+          </div>
         </div>
+      </div>
+    </section>
 
-        <!-- Install snippet -->
-        <div class="mt-10 flex justify-center">
-          <button
-            type="button"
-            :aria-label="copied ? 'Copied to clipboard' : 'Copy install command'"
-            class="group inline-flex items-center gap-3 rounded-full glass px-4 py-2 text-sm font-mono text-muted hover:text-default transition"
-            @click="copyInstall"
-          >
-            <UIcon name="i-lucide-terminal" class="size-4 text-[color:var(--color-plasma-500)]" />
-            <span><span class="opacity-50">$</span> bun create <span class="text-default">miia my-app</span></span>
-            <UIcon
-              :name="copied ? 'i-lucide-check' : 'i-lucide-copy'"
-              :class="[
-                'size-3.5 transition',
-                copied ? 'text-[color:var(--color-plasma-500)] opacity-100' : 'opacity-40 group-hover:opacity-100'
-              ]"
-            />
-            <span v-if="copied" class="text-xs text-[color:var(--color-plasma-500)] -ml-1">Copied</span>
-          </button>
-        </div>
-
-        <!-- Runtime strip -->
-        <div class="mt-16">
-          <p class="text-xs font-medium uppercase tracking-[0.25em] text-dimmed mb-5">
-            Runs everywhere JavaScript runs
+    <section class="border-t border-default">
+      <div :class="[container, 'gap-5 py-12 lg:items-center lg:py-20']">
+        <div class="flex min-w-0 flex-col gap-4 lg:flex-[1_1_400px] lg:gap-[18px]">
+          <p :class="eyebrow">
+            runtimes
           </p>
-          <div class="flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
-            <div
-              v-for="rt in runtimes"
-              :key="rt.name"
-              class="flex items-center gap-2 text-muted"
-            >
-              <UIcon :name="rt.icon" class="size-5" />
-              <span class="text-sm">{{ rt.name }}</span>
+          <h2 :class="heading">
+            {{ page.runtimes.title }}
+          </h2>
+          <p :class="lead">
+            {{ page.runtimes.description }}
+          </p>
+          <p class="font-mono text-xs leading-[1.6] text-muted lg:text-[13px]">
+            tested on {{ page.runtimes.tested.join(' · ') }}
+          </p>
+        </div>
+        <CodePanel
+          file="main.ts"
+          lang="ts"
+          :code="codeRuntime"
+          class="min-w-0 lg:flex-[1_1_520px]"
+        />
+      </div>
+    </section>
+
+    <section class="border-t border-default">
+      <div class="mx-auto flex max-w-[1200px] flex-col gap-4 px-4 py-12 sm:px-6 lg:gap-9 lg:py-20">
+        <div class="contents lg:flex lg:flex-wrap lg:items-end lg:justify-between lg:gap-x-12 lg:gap-y-4">
+          <div class="flex max-w-[640px] flex-col gap-4 lg:gap-[18px]">
+            <p :class="eyebrow">
+              packages
+            </p>
+            <h2 :class="heading">
+              {{ page.packages.title }}
+            </h2>
+            <p :class="lead">
+              {{ page.packages.description }}
+            </p>
+          </div>
+          <NuxtLink
+            :to="page.packages.link.to"
+            :class="[textLink, 'order-last lg:order-none lg:self-end']"
+          >
+            {{ page.packages.link.label }}
+            <UIcon
+              name="i-lucide-arrow-right"
+              class="size-3.5"
+            />
+          </NuxtLink>
+        </div>
+        <div class="grid border border-default bg-elevated sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] sm:border-r-0 sm:border-b-0">
+          <div
+            v-for="item in page.packages.items"
+            :key="item.title"
+            class="flex flex-col gap-1.5 border-default p-4 not-first:border-t sm:gap-2.5 sm:border-r sm:border-b sm:p-[22px] sm:not-first:border-t-0"
+          >
+            <h3 class="text-[15.5px] font-semibold sm:text-base">
+              {{ item.title }}
+            </h3>
+            <p class="text-sm leading-[1.55] text-toned sm:text-[14.5px]">
+              {{ item.description }}
+            </p>
+            <p class="font-mono text-xs text-muted sm:mt-auto sm:pt-1.5 sm:text-[12.5px]">
+              {{ item.packages }}
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="border-t border-default">
+      <div :class="[container, 'py-12 lg:items-center lg:py-20']">
+        <div class="contents lg:flex lg:min-w-0 lg:flex-[1_1_380px] lg:flex-col lg:gap-[18px]">
+          <p :class="eyebrow">
+            performance
+          </p>
+          <h2 :class="heading">
+            {{ page.performance.title }}
+          </h2>
+          <p :class="lead">
+            {{ page.performance.description }} {{ benchRun }}
+          </p>
+          <NuxtLink
+            :to="page.performance.link.to"
+            :class="[textLink, 'order-last lg:order-none']"
+          >
+            {{ page.performance.link.label }}
+            <UIcon
+              name="i-lucide-arrow-right"
+              class="size-3.5"
+            />
+          </NuxtLink>
+        </div>
+        <figure class="mt-1 min-w-0 overflow-x-auto rounded-[8px] border border-default bg-elevated font-mono lg:mt-0 lg:flex-[1_1_560px]">
+          <div class="sm:min-w-[500px]">
+            <div class="grid gap-4 border-b border-muted px-3.5 py-2.5 text-[11.5px] leading-[1.5] text-muted sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:px-[18px] sm:py-3 sm:text-xs">
+              <span class="sm:col-span-2">{{ benchRoute }}</span>
+              <span class="hidden text-right sm:block">req/s</span>
+              <span class="hidden text-right sm:block">latency</span>
+            </div>
+            <div>
+              <div
+                v-for="row in benchRows"
+                :key="row.name"
+                class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-muted px-3.5 py-3 text-[13px] not-first:border-t sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:gap-4 sm:px-[18px] sm:text-[13.5px]"
+                :class="row.highlight ? 'text-highlighted' : 'text-toned'"
+              >
+                <span
+                  class="col-start-1 row-start-1"
+                  :class="row.highlight && 'font-medium'"
+                >{{ row.name }}</span>
+                <span class="col-start-2 row-start-1 text-right sm:contents">
+                  <span
+                    class="sm:col-start-3 sm:row-start-1"
+                    :class="row.highlight && 'font-medium'"
+                  >{{ row.reqSec }}<span class="text-muted sm:hidden"> req/s</span></span>
+                  <span class="text-muted sm:col-start-4 sm:row-start-1 sm:text-right"><span class="sm:hidden"> · </span>{{ row.latency }}</span>
+                </span>
+                <div class="col-span-2 row-start-2 h-2 rounded-[2px] bg-(--ui-border-muted) sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:h-2.5">
+                  <div
+                    class="h-full rounded-[2px]"
+                    :class="row.highlight ? 'bg-primary' : 'bg-(--ui-text-dimmed)/30 dark:bg-(--ui-text-dimmed)/40'"
+                    :style="{ width: row.width }"
+                  />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        </figure>
       </div>
     </section>
 
-    <!-- ========================= SPLIT: DECORATORS ========================= -->
-    <section class="relative mx-auto max-w-6xl px-4 py-24 sm:py-32">
-      <div class="grid lg:grid-cols-2 gap-12 items-center">
-        <div class="text-center lg:text-left">
-          <p class="font-mono text-xs uppercase tracking-[0.25em] text-[color:var(--color-plasma-500)] mb-4">
-            01 · Developer experience
+    <section class="border-t border-default">
+      <div :class="[container, 'pt-12 pb-14 lg:items-center lg:pt-20 lg:pb-24']">
+        <div class="contents lg:flex lg:min-w-0 lg:flex-[1_1_400px] lg:flex-col lg:gap-[18px]">
+          <p :class="eyebrow">
+            get started
           </p>
-          <h2 class="font-display font-bold text-4xl sm:text-5xl leading-[1.05] tracking-tight">
-            Familiar patterns,<br />
-            <span class="text-plasma">modern foundation</span>
+          <h2 :class="heading">
+            {{ page.start.title }}
           </h2>
-          <p class="mt-6 text-muted leading-relaxed max-w-lg mx-auto lg:mx-0">
-            {{ page?.sections[0]?.description }}
+          <p :class="lead">
+            {{ page.start.description }}
           </p>
-          <ul class="mt-8 space-y-4 max-w-md mx-auto lg:mx-0 lg:max-w-none">
-            <li
-              v-for="f in page?.sections[0]?.features"
-              :key="f.title"
-              class="flex gap-4 text-left"
-            >
-              <span class="shrink-0 inline-flex h-10 w-10 items-center justify-center rounded-xl gradient-plasma-soft ring-1 ring-[color:color-mix(in_oklab,var(--color-plasma-500)_40%,transparent)]">
-                <UIcon :name="f.icon" class="size-5 text-[color:var(--color-plasma-500)]" />
-              </span>
-              <div>
-                <h3 class="font-display font-semibold text-default">{{ f.title }}</h3>
-                <p class="mt-1 text-sm text-muted leading-relaxed">{{ f.description }}</p>
-              </div>
-            </li>
-          </ul>
-        </div>
-
-        <CodeCard file="users.controller.ts" :code="codeDecorators" />
-      </div>
-    </section>
-
-    <!-- ========================= SPLIT: RUNTIMES ========================= -->
-    <section class="relative mx-auto max-w-6xl px-4 py-24 sm:py-32">
-      <div class="grid lg:grid-cols-2 gap-12 items-center">
-        <!-- Source order: text first, code second.
-             On mobile this stacks text-on-top / code-below, matching section 01.
-             On desktop the grid places text-left / code-right naturally, no order flip needed. -->
-        <div class="text-center lg:text-left">
-          <p class="font-mono text-xs uppercase tracking-[0.25em] text-[color:var(--color-violet-accent)] mb-4">
-            02 · Portability
-          </p>
-          <h2 class="font-display font-bold text-4xl sm:text-5xl leading-[1.05] tracking-tight">
-            One handler,<br />
-            <span class="text-plasma">every platform</span>
-          </h2>
-          <p class="mt-6 text-muted leading-relaxed max-w-lg mx-auto lg:mx-0">
-            {{ page?.sections[1]?.description }}
-          </p>
-          <ul class="mt-8 space-y-4 max-w-md mx-auto lg:mx-0 lg:max-w-none">
-            <li
-              v-for="f in page?.sections[1]?.features"
-              :key="f.title"
-              class="flex gap-4 text-left"
-            >
-              <span class="shrink-0 inline-flex h-10 w-10 items-center justify-center rounded-xl gradient-plasma-soft ring-1 ring-[color:color-mix(in_oklab,var(--color-violet-accent)_40%,transparent)]">
-                <UIcon :name="f.icon" class="size-5 text-[color:var(--color-violet-accent)]" />
-              </span>
-              <div>
-                <h3 class="font-display font-semibold text-default">{{ f.title }}</h3>
-                <p class="mt-1 text-sm text-muted leading-relaxed">{{ f.description }}</p>
-              </div>
-            </li>
-          </ul>
-        </div>
-
-        <CodeCard file="main.ts" :code="codeRuntime" />
-      </div>
-    </section>
-
-    <!-- ========================= BENTO FEATURES ========================= -->
-    <section class="relative mx-auto max-w-6xl px-4 py-24 sm:py-32">
-      <div class="text-center mb-16">
-        <p class="font-mono text-xs uppercase tracking-[0.25em] text-[color:var(--color-cyan-accent)] mb-4">
-          03 · Batteries included
-        </p>
-        <h2 class="font-display font-bold text-4xl sm:text-5xl lg:text-6xl leading-[1.05] tracking-tight">
-          Everything you need.<br />
-          <span class="text-plasma">Nothing you don't.</span>
-        </h2>
-        <p class="mx-auto mt-6 max-w-2xl text-muted leading-relaxed">
-          {{ page?.features.description }}
-        </p>
-      </div>
-
-      <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div
-          v-for="(item, i) in page?.features.items"
-          :key="item.title"
-          class="group relative overflow-hidden rounded-2xl glass p-6 transition hover:-translate-y-0.5"
-        >
-          <!-- animated corner glow -->
-          <div
-            class="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full opacity-0 group-hover:opacity-100 transition"
-            :style="{
-              background: i % 3 === 0
-                ? 'radial-gradient(circle, rgba(255,77,109,0.30), transparent 70%)'
-                : i % 3 === 1
-                  ? 'radial-gradient(circle, rgba(124,58,237,0.30), transparent 70%)'
-                  : 'radial-gradient(circle, rgba(34,211,238,0.30), transparent 70%)'
-            }"
-          />
-
-          <span
-            class="relative inline-flex h-11 w-11 items-center justify-center rounded-xl gradient-plasma-soft ring-1"
-            :style="{
-              '--tw-ring-color': i % 3 === 0
-                ? 'color-mix(in oklab, var(--color-plasma-500) 40%, transparent)'
-                : i % 3 === 1
-                  ? 'color-mix(in oklab, var(--color-violet-accent) 40%, transparent)'
-                  : 'color-mix(in oklab, var(--color-cyan-accent) 40%, transparent)'
-            }"
-          >
-            <UIcon
-              :name="item.icon"
-              class="size-5"
-              :style="{
-                color: i % 3 === 0
-                  ? 'var(--color-plasma-500)'
-                  : i % 3 === 1
-                    ? 'var(--color-violet-accent)'
-                    : 'var(--color-cyan-accent)'
-              }"
+          <div class="order-last flex flex-col gap-2.5 pt-1 lg:order-none lg:flex-row lg:flex-wrap lg:gap-3 lg:pt-1.5">
+            <UButton
+              v-for="link in page.start.links"
+              :key="link.to"
+              v-bind="link"
+              :class="[button, link.variant === 'outline' ? 'bg-transparent ring-inverted' : 'font-semibold']"
+              :ui="{ trailingIcon: 'size-3.5' }"
             />
-          </span>
-
-          <h3 class="relative mt-5 font-display font-semibold text-lg text-default">
-            {{ item.title }}
-          </h3>
-          <p class="relative mt-2 text-sm text-muted leading-relaxed">
-            {{ item.description }}
-          </p>
-        </div>
-      </div>
-    </section>
-
-    <!-- ========================= STATS STRIP ========================= -->
-    <section class="relative mx-auto max-w-6xl px-4 py-16">
-      <div class="rounded-3xl glass p-8 sm:p-12 overflow-hidden relative">
-        <div class="absolute inset-0 bg-grid opacity-40" />
-        <div class="absolute -left-20 -top-20 h-72 w-72 rounded-full blur-3xl"
-             style="background: radial-gradient(circle, rgba(255,77,109,0.25), transparent 70%);" />
-        <div class="absolute -right-20 -bottom-20 h-72 w-72 rounded-full blur-3xl"
-             style="background: radial-gradient(circle, rgba(34,211,238,0.25), transparent 70%);" />
-
-        <div class="relative grid sm:grid-cols-3 gap-8 text-center">
-          <div>
-            <div class="font-display font-bold text-5xl sm:text-6xl text-plasma">9%</div>
-            <p class="mt-2 text-sm text-muted">faster than Hono<br />on Bun (realistic API)</p>
-          </div>
-          <div class="sm:border-x sm:border-[color:var(--ui-border)] sm:px-6">
-            <div class="font-display font-bold text-5xl sm:text-6xl text-plasma">33%</div>
-            <p class="mt-2 text-sm text-muted">faster than<br />NestJS + Fastify on Bun</p>
-          </div>
-          <div>
-            <div class="font-display font-bold text-5xl sm:text-6xl text-plasma">0</div>
-            <p class="mt-2 text-sm text-muted">reflect-metadata,<br />experimental flags, lock-in</p>
           </div>
         </div>
-      </div>
-    </section>
-
-    <!-- ========================= CTA ========================= -->
-    <section class="relative mx-auto max-w-6xl px-4 py-24 sm:py-32">
-      <div class="relative overflow-hidden rounded-[2rem] p-px gradient-plasma">
-        <div class="relative rounded-[calc(2rem-1px)] bg-[color:var(--ui-bg)] px-6 sm:px-12 py-20 text-center overflow-hidden">
-          <LazyStarsBg />
-
-          <h2 class="relative font-display font-bold text-4xl sm:text-6xl leading-[1.05] tracking-tight">
-            Ready to build with<br />
-            <span class="text-plasma">MiiaJS?</span>
-          </h2>
-          <p class="relative mx-auto mt-6 max-w-lg text-muted leading-relaxed">
-            {{ page?.cta.description }}
-          </p>
-
-          <div class="relative mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
-            <UButton
-              to="/docs/getting-started"
-              size="xl"
-              color="primary"
-              trailing-icon="i-lucide-arrow-right"
-              class="font-display !rounded-full !px-7 glow-plasma"
-            >
-              Get started
-            </UButton>
-            <UButton
-              to="https://github.com/miiajs/miia"
-              target="_blank"
-              size="xl"
-              color="neutral"
-              variant="outline"
-              icon="i-simple-icons-github"
-              class="font-display !rounded-full !px-7 !border-[color:var(--ui-border-accented)]"
-            >
-              View source
-            </UButton>
-          </div>
-        </div>
+        <CodePanel
+          file="terminal"
+          lang="bash"
+          :code="codeTerminal"
+          class="mt-1 min-w-0 lg:mt-0 lg:flex-[1_1_520px]"
+        />
       </div>
     </section>
   </div>

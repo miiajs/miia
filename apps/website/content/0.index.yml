@@ -1,84 +1,89 @@
-title: 'The [decorator-driven]{.text-primary} HTTP framework for TypeScript'
-description: 'Build structured, type-safe APIs with decorators, dependency injection, and middleware - powered by Web Standards. Deploy to Bun, Deno, Node.js, or any serverless/edge platform.'
+title: MiiaJS
+description: Controllers, modules, dependency injection and guards on native TC39 decorators and the Web Request/Response API.
 seo:
   title: MiiaJS - Decorator-Driven HTTP Framework for TypeScript
   description: Build structured, type-safe HTTP APIs with native decorators, dependency injection, and Koa-style middleware. Deploy to Bun, Deno, Node.js, or any serverless/edge platform.
 navigation: false
 hero:
+  # The second line is drawn in the dimmed color
+  title: |-
+    Structured TypeScript APIs.
+    Any runtime.
+  description: Controllers, modules, dependency injection and guards on native TC39 decorators and the Web Request/Response API.
   links:
-    - label: Get started
-      icon: i-lucide-arrow-right
-      trailing: true
+    - label: Read the docs
       to: /docs/getting-started
-      size: xl
-    - label: View on GitHub
-      icon: i-simple-icons-github
-      size: xl
       color: neutral
-      variant: subtle
-      to: https://github.com/miiajs/miia
-      target: _blank
-sections:
-  - title: Familiar patterns, modern foundation
-    description: 'The architecture you know from Angular and NestJS - controllers, modules, DI, and Koa-style middleware - rebuilt from scratch on native decorators and Web Standards.'
-    id: features
-    orientation: horizontal
-    features:
-      - title: Decorators That Just Work
-        description: '@Controller, @Get, @Injectable, @Module - the modern decorator standard. No reflect-metadata, no experimental flags, no setup.'
-        icon: i-lucide-at-sign
-      - title: Web Standards First
-        description: 'Request in, Response out. ctx.req is the standard Request, a handler can return a standard Response, and no Express or Fastify sits underneath.'
-        icon: i-lucide-globe
-      - title: Koa-Style Middleware
-        description: A single middleware concept replaces interceptors, pipes, and filters. Easier to learn, easier to compose.
-        icon: i-lucide-layers
-  - title: One fetch handler, every platform
-    description: 'Inspired by Hono''s multi-runtime philosophy. Write your API once and deploy it to any JavaScript runtime, serverless platform, or edge network.'
-    orientation: horizontal
-    reverse: true
-    id: runtimes
-    features:
-      - title: True Portability
-        description: 'Bun, Deno, Node.js, Cloudflare Workers - same code, different entry point.'
-        icon: i-lucide-rocket
-      - title: Modern JavaScript Only
-        description: Pure ESM, latest ECMAScript target. Clean imports, fast startup, works with modern tooling out of the box.
-        icon: i-lucide-package
-      - title: Serverless Ready
-        description: 'Use app.fetch as your handler on Cloudflare Workers or any platform that hands you a Request. Init once on cold start, then every request goes straight to the router.'
-        icon: i-lucide-cloud
-features:
-  title: Batteries included, bloat excluded
-  description: Every tool you need to ship production APIs. Nothing you need to rip out later.
+architecture:
+  title: Familiar patterns, modern foundation.
+  description: 'The architecture you know from Angular and NestJS - controllers, modules, DI and Koa-style middleware - rebuilt from scratch on native decorators and Web Standards.'
+  link:
+    label: Coming from NestJS
+    to: /docs/getting-started/coming-from-nest
+  features:
+    - title: Decorators that just work
+      description: '@Controller, @Get, @Injectable, @Module - the TC39 decorator standard. No reflect-metadata, no experimental flags, no setup.'
+    - title: Web Standards first
+      description: 'Request in, Response out. ctx.req is the standard Request, a handler can return a standard Response, and no Express or Fastify sits underneath.'
+    - title: Koa-style middleware
+      description: One middleware concept replaces interceptors, pipes and filters. Easier to learn, easier to compose.
+runtimes:
+  title: Runs wherever Request and Response do.
+  description: MiiaJS is built on Web Standards. Your app is a fetch handler, so the entry point is the only line that changes from one runtime to another.
+  tested:
+    - Bun
+    - Deno
+    - Node.js
+    - Cloudflare Workers
+packages:
+  title: What an API needs, as separate packages.
+  description: The core stays small. Install only what you use.
+  link:
+    label: All packages
+    to: /docs/packages
   items:
-    - title: Simple Dependency Injection
-      description: Per-app container with inject() - no global singletons, no hidden magic. Singleton, transient, and request scopes built in.
-      icon: i-lucide-boxes
-    - title: Auth & Guards
-      description: Auth primitives - AuthProvider, AuthGuard, token extractors - plus recipes for JWT, local and OAuth2 login. Protect routes at any level, skip specific guards when needed.
-      icon: i-lucide-lock-keyhole
-    - title: Schema Validation
-      description: Validate request body, query, and params with any ZodLike schema. Type-safe from request to handler, errors handled automatically.
-      icon: i-lucide-shield-check
-    - title: Database Ready
-      description: Official integrations for PostgreSQL, MySQL, and SQLite via Drizzle ORM, and MongoDB via Papr and Mongoose.
-      icon: i-lucide-database
-    - title: Swagger / OpenAPI
-      description: OpenAPI 3.1 spec auto-generated from your decorators. Swagger UI included and ready to serve.
-      icon: i-lucide-file-json
-    - title: Developer CLI
-      description: Dev server, production builds, type-checking, and project scaffolding - one tool for the full workflow.
-      icon: i-lucide-terminal
-cta:
-  title: 'Ready to build with [MiiaJS]{.text-primary}?'
-  description: Start building in minutes. Open source, MIT licensed.
+    - title: Dependency injection
+      description: 'A container per app with inject(). Singleton, transient and request scopes; module boundaries checked at startup.'
+      packages: '@miiajs/core'
+    - title: Validation
+      description: 'Body, query and params schemas on the route decorator. Any Zod-like schema; failures become a 422.'
+      packages: '@miiajs/core'
+    - title: Auth
+      description: AuthProvider, AuthGuard and token extractors, plus a JWT sign and verify service.
+      packages: '@miiajs/auth · @miiajs/jwt'
+    - title: Databases
+      description: 'Drizzle for PostgreSQL, MySQL and SQLite; Mongoose and Papr for MongoDB.'
+      packages: '@miiajs/drizzle · mongoose · papr'
+    - title: OpenAPI
+      description: An OpenAPI 3.1 spec generated from your routes and schemas, with Swagger UI.
+      packages: '@miiajs/swagger'
+    - title: Messaging
+      description: A decorator-driven event bus with typed event contracts, retry and DLQ, and a Redis Streams transport.
+      packages: '@miiajs/messaging · messaging-redis'
+    - title: Rate limiting
+      description: Fixed-window limits as a guard, per-route decorators or perimeter middleware, with pluggable stores.
+      packages: '@miiajs/rate-limit'
+    - title: CLI and testing
+      description: 'Scaffolding, generators, dev server and builds; a TestApp harness for integration tests.'
+      packages: '@miiajs/cli · @miiajs/testing'
+performance:
+  title: Measured with the full stack on.
+  # The page appends the runtime, the machine and the date of the run from app/data/benchmarks
+  description: 'The heaviest test in the suite: CORS, JWT, JSON body, path and query params, custom headers, UUID and a 201 status.'
+  link:
+    label: All results, Node.js and Deno included
+    to: /benchmarks
+start:
+  title: Start a project.
+  description: The CLI scaffolds an app with a module, a controller and a test, on the runtime you pick. Then add a database, auth or a CRUD resource with one command.
   links:
-    - label: Get started
-      to: /docs/getting-started
-      trailingIcon: i-lucide-arrow-right
-    - label: View on GitHub
+    - label: Quick Start
+      to: /docs/getting-started/quick-start
+      color: neutral
+    - label: GitHub
       to: https://github.com/miiajs/miia
       target: _blank
-      variant: subtle
-      icon: i-simple-icons-github
+      icon: i-lucide-arrow-up-right
+      trailing: true
+      color: neutral
+      variant: outline

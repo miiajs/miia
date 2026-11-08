@@ -6,7 +6,8 @@ export const config: EnvConfig = {
   description: 'Apple M1 Pro, 32 GB RAM, macOS 26.6.1',
   icon: 'i-lucide-laptop',
   date: 'August 21, 2026',
-  specs: ['10 cores (8P + 2E)', '32 GB RAM', 'macOS 26.6.1', 'Bun 1.4.0, Deno 2.7.12, Node.js 24.19.0'],
+  versions: { bun: '1.4.0', deno: '2.7.12', node: '24.19.0' },
+  specs: ['10 cores (8P + 2E)', '32 GB RAM', 'macOS 26.6.1']
 }
 
 export const data: BenchDataset = {
@@ -23,7 +24,7 @@ export const data: BenchDataset = {
     { framework: 'Hono (Node)', reqSec: 69634, latency: '1.06ms' },
     { framework: 'MiiaJS (Node)', reqSec: 68407, latency: '1.06ms', highlight: true },
     { framework: 'NestJS+Fastify (Bun)', reqSec: 67404, latency: '1.09ms' },
-    { framework: 'NestJS+Fastify (Node)', reqSec: 63583, latency: '1.07ms' },
+    { framework: 'NestJS+Fastify (Node)', reqSec: 63583, latency: '1.07ms' }
   ],
   syntheticPost: [
     { framework: 'Elysia (Bun)', reqSec: 86553, latency: '0.52ms' },
@@ -38,7 +39,7 @@ export const data: BenchDataset = {
     { framework: 'MiiaJS (Node)', reqSec: 47903, latency: '1.68ms', highlight: true },
     { framework: 'NestJS+Fastify (Bun)', reqSec: 43339, latency: '2.03ms' },
     { framework: 'Fastify (Node)', reqSec: 43233, latency: '2.12ms' },
-    { framework: 'NestJS+Fastify (Node)', reqSec: 38455, latency: '2.17ms' },
+    { framework: 'NestJS+Fastify (Node)', reqSec: 38455, latency: '2.17ms' }
   ],
   apiGet: [
     { framework: 'MiiaJS (Bun)', reqSec: 43231, latency: '1.85ms', highlight: true },
@@ -53,7 +54,7 @@ export const data: BenchDataset = {
     { framework: 'MiiaJS (Node)', reqSec: 25483, latency: '3.42ms', highlight: true },
     { framework: 'NestJS+Fastify (Node)', reqSec: 25387, latency: '3.44ms' },
     { framework: 'Hono uWS (Node)', reqSec: 20830, latency: '4.30ms' },
-    { framework: 'Hono (Node)', reqSec: 19861, latency: '4.53ms' },
+    { framework: 'Hono (Node)', reqSec: 19861, latency: '4.53ms' }
   ],
   apiPost: [
     { framework: 'MiiaJS (Bun)', reqSec: 38117, latency: '2.22ms', highlight: true },
@@ -68,6 +69,6 @@ export const data: BenchDataset = {
     { framework: 'Fastify (Node)', reqSec: 22973, latency: '3.88ms' },
     { framework: 'NestJS+Fastify (Node)', reqSec: 21746, latency: '4.12ms' },
     { framework: 'Hono uWS (Node)', reqSec: 19721, latency: '4.56ms' },
-    { framework: 'Hono (Node)', reqSec: 18423, latency: '4.95ms' },
-  ],
+    { framework: 'Hono (Node)', reqSec: 18423, latency: '4.95ms' }
+  ]
 }

@@ -18,5 +18,6 @@ export interface EnvConfig {
   description: string
   icon: string
   date: string
+  versions: { bun: string, deno: string, node: string }
   specs: string[]
 }

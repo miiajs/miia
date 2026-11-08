@@ -1,8 +1,6 @@
 import { defineCollection, z } from '@nuxt/content'
 
 const colorEnum = z.enum(['primary', 'secondary', 'neutral', 'error', 'warning', 'success', 'info'])
-const sizeEnum = z.enum(['xs', 'sm', 'md', 'lg', 'xl'])
-const orientationEnum = z.enum(['vertical', 'horizontal'])
 const variantEnum = z.enum(['solid', 'outline', 'subtle', 'soft', 'ghost', 'link'])
 
 // Blog drafts (*.draft.md) exist only in `nuxt dev`: the prerendered SQL dump holds every matched file
@@ -13,15 +11,10 @@ const createBaseSchema = () => z.object({
   description: z.string().nonempty()
 })
 
-const createFeatureItemSchema = () => createBaseSchema().extend({
-  icon: z.string().nonempty().editor({ input: 'icon' })
-})
-
 const createLinkSchema = () => z.object({
   label: z.string().nonempty(),
   to: z.string().nonempty(),
   icon: z.string().optional().editor({ input: 'icon' }),
-  size: sizeEnum.optional(),
   trailing: z.boolean().optional(),
   target: z.string().optional(),
   color: colorEnum.optional(),
@@ -33,21 +26,26 @@ export const collections = {
     source: '0.index.yml',
     type: 'page',
     schema: z.object({
-      hero: z.object({
+      hero: createBaseSchema().extend({
         links: z.array(createLinkSchema())
       }),
-      sections: z.array(
-        createBaseSchema().extend({
-          id: z.string().nonempty(),
-          orientation: orientationEnum.optional(),
-          reverse: z.boolean().optional(),
-          features: z.array(createFeatureItemSchema())
-        })
-      ),
-      features: createBaseSchema().extend({
-        items: z.array(createFeatureItemSchema())
+      architecture: createBaseSchema().extend({
+        link: createLinkSchema(),
+        features: z.array(createBaseSchema()).length(3)
       }),
-      cta: createBaseSchema().extend({
+      runtimes: createBaseSchema().extend({
+        tested: z.array(z.string().nonempty())
+      }),
+      packages: createBaseSchema().extend({
+        link: createLinkSchema(),
+        items: z.array(createBaseSchema().extend({
+          packages: z.string().nonempty()
+        }))
+      }),
+      performance: createBaseSchema().extend({
+        link: createLinkSchema()
+      }),
+      start: createBaseSchema().extend({
         links: z.array(createLinkSchema())
       })
     })
