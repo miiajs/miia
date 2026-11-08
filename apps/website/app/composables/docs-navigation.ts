@@ -2,6 +2,7 @@ import type { ContentNavigationItem } from '@nuxt/content'
 
 type NavItem = ContentNavigationItem & {
   defaultOpen?: boolean
+  exact?: boolean
   status?: string
 }
 
@@ -17,10 +18,13 @@ function expandActiveBranch(items: NavItem[] | undefined, path: string): NavItem
       delete next.defaultOpen
     }
     if (next.status === 'experimental') {
-      next.badge = { label: 'experimental', color: 'neutral', variant: 'outline' }
+      next.badge = EXPERIMENTAL_BADGE
     }
     if (next.children?.length) {
       next.children = expandActiveBranch(next.children as NavItem[], path)
+    } else {
+      // Exact matching also sets aria-current on the link of the current page
+      next.exact = true
     }
     return next
   })

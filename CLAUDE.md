@@ -284,7 +284,7 @@ Also exported: token extractors `fromHeader(header = 'authorization', scheme = '
 
 **JWT** is a separate package, `@miiajs/jwt`: `JwtModule.configure()` with `secret` or `privateKey`/`publicKey`, `JwtService.sign()` / `verify()` via `jose`. A JWT provider is a few lines of app code (`fromHeader()` + `verify()`), not something the package ships.
 
-**Local** (username/password) and **OAuth2** are recipes in the docs (`2.auth/3.local.md`, `2.auth/4.oauth2.md`), not packages - by design, auth flows stay app code.
+**Local** (username/password) and **OAuth2** are recipes in the docs (`02.auth/3.local.md`, `02.auth/4.oauth2.md`), not packages - by design, auth flows stay app code.
 
 ### Config: @miiajs/config
 

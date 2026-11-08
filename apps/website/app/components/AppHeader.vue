@@ -1,8 +1,4 @@
 <script setup lang="ts">
-const props = defineProps<{
-  wide?: boolean
-}>()
-
 const route = useRoute()
 const colorMode = useColorMode()
 const { open: searchOpen } = useContentSearch()
@@ -17,9 +13,9 @@ onMounted(() => {
 const isDark = computed(() => mounted.value && colorMode.value === 'dark')
 
 const items = computed(() => [
-  { label: 'Docs', to: '/docs/getting-started', active: route.path.startsWith('/docs') && !route.path.startsWith('/docs/roadmap') },
+  { label: 'Home', to: '/', active: route.path === '/' },
+  { label: 'Docs', to: '/docs/getting-started', active: route.path.startsWith('/docs') },
   { label: 'Benchmarks', to: '/benchmarks', active: route.path === '/benchmarks' },
-  { label: 'Roadmap', to: '/docs/roadmap', active: route.path.startsWith('/docs/roadmap') },
   { label: 'Blog', to: '/blog', active: route.path.startsWith('/blog') }
 ])
 
@@ -54,7 +50,6 @@ watch(searchOpen, (value) => {
     title="MiiaJS"
     :ui="{
       root: 'bg-default',
-      container: props.wide ? 'max-w-[1360px] lg:px-8' : 'max-w-[1200px] lg:px-6',
       left: 'lg:flex-none',
       center: 'gap-1',
       right: 'lg:flex-none gap-0.5 -me-2.5 lg:me-0',

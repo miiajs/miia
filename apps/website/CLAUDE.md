@@ -60,7 +60,7 @@ apps/website/
     ├── components/                 # AppHeader, AppFooter, AppLogo, CodeCard, HeroBackground, StarsBg
     │   └── OgImage/MiiaPost.takumi.vue  # OG image template of a blog post
     └── utils/
-        ├── status.ts               # statusColor() helper (auto-imported)
+        ├── experimental-badge.ts   # EXPERIMENTAL_BADGE, the badge of experimental pages (auto-imported)
         └── blog.ts                 # formatPostDate(), isDraftPost() (auto-imported)
 ```
 
@@ -81,6 +81,7 @@ The numbers on the landing page (hero badge, stats strip) and the benchmarks pag
 - Sidebar navigation is built once in `app/app.vue` via `queryCollectionNavigation('docs', [...extraFields])` and `provide`-d to the docs layout.
 - The layout (`app/layouts/docs.vue`) `inject`s the navigation, runs `expandActiveBranch()` over it (recursive walker that also maps `status → badge`), and renders `<UContentNavigation :navigation highlight>`.
 - File ordering uses the `N.name.md` convention. Nested folders follow the same rule. The leading number is stripped from the URL.
+- Folders with 10 or more entries use two-digit prefixes (`01.index.md` ... `16.logger.md`): the navigation sorts by the file path as a string, so `10.response` would come before `2.controllers`.
 
 ### ⚠️ Gotcha: frontmatter → sidebar
 
@@ -100,7 +101,7 @@ Declared in `content.config.ts` for the `docs` collection. Current shape:
 z.object({
   title: z.string().nonempty(),
   description: z.string().nonempty(),
-  status: z.enum(['experimental', 'beta', 'stable']).optional(),
+  status: z.enum(['experimental']).optional(),
   seo: z.object({
     title: z.string().optional(),
     description: z.string().optional()
@@ -110,35 +111,25 @@ z.object({
 
 - `title`, `description` - required on every page.
 - `seo.title` / `seo.description` - optional overrides, read in `[...slug].vue` for `useSeoMeta`.
-- `status` - optional, package maturity indicator. Shown as a colored badge in the page header **and** in the sidebar. Use only on package pages (under `3.packages/`), not on getting-started or core-concepts - those describe the framework itself.
+- `status` - optional, only `experimental`. Shown as a badge in the page header **and** in the sidebar. Use only on package pages (under `3.packages/`), not on getting-started or core-concepts - those describe the framework itself.
 
 ## Status indicator
 
-`app/utils/status.ts` exports `statusColor(status)`:
-
-| status | color | intent |
-|---|---|---|
-| `experimental` | `warning` | yellow - API may break, no proof of correctness |
-| `beta` | `info` | blue - API mostly stable, well-tested internally, not yet production-validated |
-| `stable` | `success` | green - API frozen, semver guarantees, production-tested at scale |
-
-Current rule of thumb (production-readiness, not just test count):
+Only `experimental` is marked. `status: experimental` in a package page's frontmatter puts a dashed `experimental` badge next to the page in the sidebar and in the page header; both use `EXPERIMENTAL_BADGE` from `app/utils/experimental-badge.ts`. Every other package page has no `status`. The full maturity scale (`experimental`, `beta`, `stable`, `planned`, `idea`) lives in the tables of `content/1.docs/4.roadmap/1.index.md`, not in frontmatter.
 
 - **experimental**: low/no test coverage, untested failure modes, API still in motion. Use in side projects, expect churn.
-- **beta**: tests cover the surface area meaningfully, API design has settled, but the package has not faced real production load. **Pre-1.0 default for any package shipped.**
-- **stable**: API frozen with semver guarantees, production-tested at scale, community-validated. **Post-1.0 only.** No package can be `stable` while the project itself is on `0.x`.
 
-Update a page's status by editing its frontmatter - no other changes needed.
+Mark or unmark a page by editing its frontmatter - no other changes needed.
 
 ## Package documentation template
 
-Use this structure when creating a new package page under `content/1.docs/3.packages/`. Based on the most consistent existing pages: `3.jwt.md`, `11.messaging/1.index.md`, `7.swagger.md`.
+Use this structure when creating a new package page under `content/1.docs/3.packages/`. Based on the most consistent existing pages: `03.jwt.md`, `11.messaging/1.index.md`, `07.swagger.md`.
 
 ```markdown
 ---
 title: <Package Name>
 description: <one sentence, 10–18 words, what it does and for whom>
-status: stable | beta | experimental
+status: experimental   # only for an experimental package, otherwise omit
 ---
 
 ## Overview
@@ -227,9 +218,9 @@ bun run typecheck     # vue-tsc
 
 ## Checklist: adding a new package
 
-1. Create `content/1.docs/3.packages/<N.name>.md` following the template above. Pick the next free `N.` prefix.
-2. Set `status:` in frontmatter based on current test coverage.
-3. Add a row for the new package to `content/1.docs/3.packages/1.index.md` under the appropriate category.
+1. Create `content/1.docs/3.packages/<NN.name>.md` following the template above. Pick the next free `NN.` prefix.
+2. Add `status: experimental` to the frontmatter if the package is experimental (see Status indicator).
+3. Add a row for the new package to `content/1.docs/3.packages/01.index.md` under the appropriate category.
 4. Add a row to the package table in `content/1.docs/1.getting-started/1.index.md`.
 5. If you introduced a **new frontmatter field** that must appear in the sidebar, extend the field list in `app/app.vue`:
    ```ts
@@ -293,7 +284,7 @@ To publish, rename `<slug>.draft.md` to `<slug>.md`.
 | `app/layouts/docs.vue` | Doc shell; `inject`s navigation, runs `expandActiveBranch` (which also maps `status → badge`), renders sidebar. |
 | `app/pages/docs/[...slug].vue` | Renders one doc page; `UPageHeader` with status badge slot + `ContentRenderer`. |
 | `content.config.ts` | Zod schemas for `index`, `docs` and `blog` collections; excludes blog drafts outside `nuxt dev`. |
-| `app/utils/status.ts` | `statusColor()` helper, auto-imported. |
+| `app/utils/experimental-badge.ts` | `EXPERIMENTAL_BADGE`, auto-imported. |
 | `app/pages/blog/index.vue` | Post list (`UBlogPosts`), `Draft` badge in dev. |
 | `app/pages/blog/[slug].vue` | One post: article SEO tags, schema.org `Article`, `defineOgImage('MiiaPost', ...)`. |
 | `app/components/OgImage/MiiaPost.takumi.vue` | OG image template of a post (Takumi). |
@@ -307,11 +298,11 @@ Known gaps and structural issues deferred from the status-rollout work. High-pri
 
 ### High-priority (next PR)
 
-- **D1 - Unify auth recipes.** `2.auth/2.jwt.md`, `3.local.md`, `4.oauth2.md` all follow a Problem/Solution recipe pattern but with inconsistent section names. Target order: `Problem → Solution → Wire it up → Variations → Security notes → See also`. In `oauth2.md` rename `## The provider` → `## Solution`. In `local.md` move `## Why not bcrypt?` under `## Security notes`.
+- **D1 - Unify auth recipes.** `02.auth/2.jwt.md`, `3.local.md`, `4.oauth2.md` all follow a Problem/Solution recipe pattern but with inconsistent section names. Target order: `Problem → Solution → Wire it up → Variations → Security notes → See also`. In `oauth2.md` rename `## The provider` → `## Solution`. In `local.md` move `## Why not bcrypt?` under `## Security notes`.
 
 ### Medium / nice-to-have
 
 - **Split `drizzle.md` (368 lines)** into a base page (setup, schemas, basic queries) and an advanced page (type registry, migrations, multi-DB).
 - **Extract the optimized/native adapter description** shared by `node-server.md` and `uws-server.md` into a single page; link from both.
-- **Centralize the `HttpException` table** in `core-concepts/9.exceptions.md`; replace duplicates in controllers/guards/auth docs with links.
+- **Centralize the `HttpException` table** in `core-concepts/09.exceptions.md`; replace duplicates in controllers/guards/auth docs with links.
 - **Replace security-critical blockquotes with `::warning` / `::caution`** callouts (argon2 choice, JWT algorithm whitelist, OAuth state/CSRF).

@@ -29,7 +29,7 @@ useSeoMeta({
     <AppHeader />
 
     <UMain class="flex items-center">
-      <div class="mx-auto flex w-full max-w-[1200px] flex-wrap items-center gap-x-16 gap-y-8 px-4 py-12 sm:px-6 lg:gap-y-10 lg:py-16">
+      <div class="mx-auto flex w-full max-w-(--ui-container) flex-wrap items-center gap-x-16 gap-y-8 px-4 py-12 sm:px-6 lg:gap-y-10 lg:px-8 lg:py-16">
         <div class="flex min-w-0 flex-[1_1_420px] flex-col gap-[18px] lg:gap-5">
           <p class="font-mono text-xs text-muted lg:text-[13px]">
             {{ error.statusCode }}
@@ -87,7 +87,7 @@ useSeoMeta({
       </div>
     </UMain>
 
-    <AppFooter />
+    <AppFooter minimal-on-phones />
 
     <AppSearch />
   </UApp>

@@ -56,7 +56,7 @@ export const collections = {
     schema: z.object({
       title: z.string().nonempty(),
       description: z.string().nonempty(),
-      status: z.enum(['experimental', 'beta', 'stable']).optional(),
+      status: z.enum(['experimental']).optional(),
       seo: z.object({
         title: z.string().optional(),
         description: z.string().optional()

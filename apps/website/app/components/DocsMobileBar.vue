@@ -11,15 +11,12 @@ const menuOpen = ref(false)
 const tocOpen = ref(false)
 const toc = computed(() => page.value?.body?.toc?.links ?? [])
 
-function markCurrent(items: ContentNavigationItem[] | undefined): ContentNavigationItem[] | undefined {
-  return items?.map(item => ({
-    ...item,
-    ...(item.path === route.path && !item.children?.length ? { ui: { link: 'font-semibold before:bg-accented' } } : {}),
-    children: markCurrent(item.children)
-  }))
-}
-
-const navigation = computed(() => markCurrent(docsNavigation.value))
+// The sections are the top-level triggers here, only the current one open; nested groups keep the regular trigger of the sidebar
+const navigation = computed(() => docsNavigation.value?.map((item: ContentNavigationItem) => ({
+  ...item,
+  defaultOpen: route.path === item.path || route.path.startsWith(`${item.path}/`),
+  ui: { trigger: 'font-semibold text-highlighted data-[state=open]:font-semibold' }
+})))
 
 function openSearch() {
   menuOpen.value = false
@@ -150,10 +147,9 @@ function closeOnLink(event: MouseEvent) {
             color="neutral"
             trailing-icon="i-lucide-chevron-right"
             :ui="{
-              list: 'mx-0 mt-0',
               listWithChildren: 'ms-3 border-s-0',
-              link: 'min-h-11 px-2.5 text-[15px] before:rounded-sm',
-              linkTrailingIcon: 'size-4 group-data-[state=open]:rotate-90'
+              link: 'min-h-11 px-2.5 text-[15px]',
+              linkTrailingIcon: 'size-4'
             }"
           >
             <template #link-leading="{ active }">

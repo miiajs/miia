@@ -24,7 +24,7 @@ bun run lint
 ## Where things live
 
 - `content/0.index.yml` - the copy of the landing page
-- `content/1.docs/` - the documentation, one Markdown file per page; the number in a file or folder name orders the sidebar and is dropped from the URL
+- `content/1.docs/` - the documentation, one Markdown file per page; the number in a file or folder name orders the sidebar and is dropped from the URL; in a folder with 10 or more entries it has two digits (`01.index.md`), because the sidebar sorts names as text
 - `app/pages/index.vue` - the landing page
 - `app/pages/benchmarks.vue` and `app/data/benchmarks/` - the benchmarks page and its numbers
 - `app/pages/docs/[...slug].vue` and `app/layouts/docs.vue` - how a doc page renders

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 defineProps<{
   compact?: boolean
+  // Phones get only the copyright and the version, as on the error page
+  minimalOnPhones?: boolean
 }>()
 
 const { miiaVersion } = useRuntimeConfig().public
@@ -46,7 +48,7 @@ const columns: { label: string, links: { label: string, to: string, target?: str
     v-if="compact"
     class="border-t border-default bg-accented"
   >
-    <div class="mx-auto flex max-w-[1360px] flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-[22px] font-mono text-[13px] text-muted sm:px-6 lg:px-8">
+    <div class="mx-auto flex max-w-(--ui-container) flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-[22px] font-mono text-[13px] text-muted sm:px-6 lg:px-8">
       <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS · MIT License</span>
       <div class="flex flex-wrap gap-x-5 gap-y-1">
         <NuxtLink
@@ -73,8 +75,14 @@ const columns: { label: string, links: { label: string, to: string, target?: str
     v-else
     class="border-t border-default bg-accented"
   >
-    <div class="mx-auto flex max-w-[1200px] flex-col gap-7 px-4 pt-10 pb-7 sm:px-6 lg:gap-10 lg:pt-14 lg:pb-8">
-      <div class="flex flex-col gap-7 lg:flex-row lg:flex-wrap lg:justify-between lg:gap-x-14 lg:gap-y-10">
+    <div
+      class="mx-auto flex max-w-(--ui-container) flex-col gap-7 px-4 sm:px-6 lg:gap-10 lg:px-8 lg:pt-14 lg:pb-8"
+      :class="minimalOnPhones ? 'py-7' : 'pt-10 pb-7'"
+    >
+      <div
+        class="flex flex-col gap-7 lg:flex-row lg:flex-wrap lg:justify-between lg:gap-x-14 lg:gap-y-10"
+        :class="minimalOnPhones && 'max-lg:hidden'"
+      >
         <div class="flex flex-col gap-3 lg:max-w-[340px] lg:flex-[1_1_280px] lg:gap-3.5">
           <NuxtLink
             to="/"
@@ -113,7 +121,10 @@ const columns: { label: string, links: { label: string, to: string, target?: str
         </nav>
       </div>
 
-      <div class="flex flex-wrap justify-between gap-3 border-t border-default pt-4 font-mono text-xs text-muted lg:pt-5 lg:text-[13px]">
+      <div
+        class="flex flex-wrap justify-between gap-3 border-default font-mono text-xs text-muted lg:border-t lg:pt-5 lg:text-[13px]"
+        :class="!minimalOnPhones && 'border-t pt-4'"
+      >
         <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS</span>
         <NuxtLink
           to="https://github.com/miiajs/miia/tags"
