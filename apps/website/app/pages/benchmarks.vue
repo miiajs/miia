@@ -12,572 +12,446 @@ const env = ref(environments[0]!.key)
 const activeEnv = computed(() => environments.find(e => e.key === env.value)!)
 const activeData = computed(() => datasets[env.value]!)
 
-function withDelta(rows: BenchRow[]) {
-  const leader = rows[0]?.reqSec ?? 0
-  return rows.map(r => ({
-    ...r,
-    delta: r.reqSec === leader ? '-' : `${(((r.reqSec - leader) / leader) * 100).toFixed(1)}%`
-  }))
-}
-
-const syntheticGet = computed(() => withDelta(activeData.value.syntheticGet))
-const syntheticPost = computed(() => withDelta(activeData.value.syntheticPost))
-const apiGet = computed(() => withDelta(activeData.value.apiGet))
-const apiPost = computed(() => withDelta(activeData.value.apiPost))
-
-const envTabs = environments.map(e => ({ label: e.label, value: e.key, icon: e.icon }))
-
-const columns = [
-  { accessorKey: 'framework', header: 'Framework' },
-  { accessorKey: 'reqSec', header: 'Req/sec' },
-  { accessorKey: 'latency', header: 'Latency (avg)' },
-  { accessorKey: 'delta', header: 'vs leader' }
+const frameworks = [
+  { name: 'MiiaJS', version: '0.6.0', type: 'Decorator-driven, DI, guards, middleware', runtimes: 'Bun, Deno, Node (+ uWS adapter)' },
+  { name: 'Hono', version: '4.13.3', type: 'Lightweight multi-runtime router', runtimes: 'Bun, Deno, Node (+ uWS adapter)' },
+  { name: 'Elysia', version: '1.4.29', type: 'Bun-native framework', runtimes: 'Bun' },
+  { name: 'Fastify', version: '5.12.1', type: 'Plugin-based Node.js framework', runtimes: 'Bun, Node' },
+  { name: 'NestJS + Fastify', version: '11.2.1', type: 'Enterprise decorator framework', runtimes: 'Bun, Node' }
 ]
 
-function barWidth(value: number, max: number) {
-  return `${Math.round((value / max) * 100)}%`
+const methodLine = `measured on MiiaJS ${frameworks[0]!.version} · Autocannon · 100 connections · 5 passes of 30 s`
+
+function benchTest(title: string, description: string, rows: BenchRow[]) {
+  const top = Math.max(...rows.map(row => row.reqSec))
+  return {
+    title,
+    description,
+    rows: rows.map(row => ({
+      name: row.framework,
+      reqSec: row.reqSec.toLocaleString('en-US'),
+      latency: row.latency,
+      width: `${(row.reqSec / top * 100).toFixed(1)}%`,
+      highlight: row.highlight ?? false
+    }))
+  }
 }
 
-function barColor(row: BenchRow) {
-  if (row.highlight) return 'bg-primary/80'
-  return 'bg-[color:var(--ui-bg-accented)]'
-}
+const suites = computed(() => [
+  {
+    eyebrow: 'realistic api',
+    title: 'Realistic API',
+    description: 'Full middleware stack - CORS, JWT, routing, body parsing, validation. The way real APIs work.',
+    tests: [
+      benchTest('GET /api/users/:userId/posts/:postId', 'CORS, JWT verification, nested route params, JSON response.', activeData.value.apiGet),
+      benchTest('POST /api/workspaces/:ws/projects/:proj/tasks', 'CORS, JWT, JSON body, path and query params, custom headers, UUID, 201 status. The heaviest test.', activeData.value.apiPost)
+    ]
+  },
+  {
+    eyebrow: 'synthetic',
+    title: 'Synthetic',
+    description: 'Minimal handlers - pure framework overhead with no middleware. Bare routers have a natural edge here.',
+    tests: [
+      benchTest('GET /', 'Returns { "message": "Hello, World!" }. No middleware, no parsing.', activeData.value.syntheticGet),
+      benchTest('POST /json', 'Parse a JSON body, generate a UUID, return a response.', activeData.value.syntheticPost)
+    ]
+  }
+])
 
-function formatNum(n: number) {
-  return n.toLocaleString('en-US')
-}
+const methodology = [
+  {
+    title: 'Load parameters',
+    stacked: false,
+    items: [
+      { term: 'tool', detail: 'Autocannon v8+' },
+      { term: 'connections', detail: '100 concurrent' },
+      { term: 'duration', detail: '30 s per pass' },
+      { term: 'warmup', detail: '5 s at full connections, for the JIT' },
+      { term: 'passes', detail: '5, averaged with stddev' },
+      { term: 'workers', detail: '1, single-threaded, no clustering' }
+    ]
+  },
+  {
+    title: 'What the API scenarios test',
+    stacked: true,
+    items: [
+      { term: 'cors', detail: 'Origin validation and preflight headers' },
+      { term: 'jwt', detail: 'Bearer token extraction and HS256 verification' },
+      { term: 'routing', detail: 'Path parameters from nested segments' },
+      { term: 'body', detail: 'JSON deserialization, POST scenarios' },
+      { term: 'query', detail: 'URL search parameter extraction' },
+      { term: 'response', detail: 'JSON serialization with custom status codes' }
+    ]
+  }
+]
+
+// The machine name is the description up to the first comma, without the core count in parentheses
+const machines = environments.map(e => ({
+  key: e.key,
+  name: e.description.split(',')[0]!.replace(/\s*\(.*\)$/, ''),
+  lines: [
+    e.specs.slice(0, -1),
+    e.specs.slice(-1),
+    [`Bun ${e.versions.bun}`, `Deno ${e.versions.deno}`, `Node.js ${e.versions.node}`]
+  ],
+  date: e.date
+}))
+
+const internals = [
+  {
+    title: 'Core',
+    items: [
+      { term: 'Trie-based router', detail: 'O(1) static path lookup' },
+      { term: 'Compile-time pipelines', detail: 'middleware chains resolved once at startup, not per request' },
+      { term: 'Sync fast path', detail: 'no Promises when the handler and middleware are synchronous' },
+      { term: 'No runtime reflection', detail: 'native decorators resolve at class definition' },
+      { term: 'Minimal allocations', detail: 'no wrapper objects between your handler and the runtime' }
+    ]
+  },
+  {
+    title: 'Node.js and uWebSockets adapters',
+    items: [
+      { term: 'Lazy Request and Headers proxy', detail: 'no allocation until accessed' },
+      { term: 'Body buffering', detail: 'small payloads skip the ReadableStream overhead' },
+      { term: 'LightResponse cache', detail: 'status, body and headers without constructing a real Response' }
+    ]
+  }
+]
+
+const codeReproduce = `git clone https://github.com/miiajs/benchmarks.git
+cd benchmarks
+bun install
+bun run bench`
+
+const container = 'mx-auto max-w-(--ui-container) px-4 sm:px-6 lg:px-8'
+const eyebrow = 'font-mono text-xs text-muted lg:text-[13px]'
+const heading = 'text-[26px] leading-[1.18] font-semibold tracking-[-0.02em] lg:text-[32px] lg:leading-[1.15]'
+const lead = 'text-base leading-[1.6] text-toned lg:text-[17px]'
+const subheading = 'text-base font-semibold lg:text-[17px]'
+const columns = 'flex flex-col gap-6 lg:flex-row lg:flex-wrap lg:gap-x-14 lg:gap-y-8'
+const column = 'flex min-w-0 flex-col lg:flex-[1_1_420px]'
+const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px] font-medium text-primary underline-offset-4 hover:underline lg:min-h-8'
 </script>
 
 <template>
   <div>
-    <!-- ========================= HERO ========================= -->
-    <section class="relative overflow-hidden">
-      <HeroBackground />
+    <section :class="[container, 'flex flex-col gap-4 pt-9 pb-7 lg:gap-5 lg:pt-[72px] lg:pb-10']">
+      <p :class="eyebrow">
+        benchmarks
+      </p>
+      <h1 class="text-[32px] leading-[1.1] font-semibold tracking-[-0.025em] lg:text-[length:clamp(40px,4.6vw,58px)] lg:leading-[1.05]">
+        Throughput and latency,<br><span class="text-dimmed">with the full stack on.</span>
+      </h1>
+      <p class="max-w-[720px] text-base leading-[1.6] text-toned lg:text-lg">
+        MiiaJS next to Hono, Elysia, Fastify and NestJS on Bun, Deno and Node.js. The realistic tests run with CORS, JWT,
+        routing, body parsing and validation enabled; the synthetic ones measure bare framework overhead.
+      </p>
+      <p class="font-mono text-xs leading-[1.6] text-muted lg:text-[13px]">
+        {{ methodLine }}
+      </p>
+    </section>
 
-      <div class="relative mx-auto max-w-5xl px-4 pt-20 pb-16 sm:pt-28 sm:pb-20 text-center">
-        <p class="font-mono text-xs uppercase tracking-[0.25em] text-[color:var(--color-plasma-500)] mb-5">
-          Benchmarks
+    <div class="border-y border-default bg-muted">
+      <div :class="[container, 'flex flex-col gap-2.5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 lg:py-3.5']">
+        <div
+          role="group"
+          aria-label="Test machine"
+          class="flex gap-1 rounded-[8px] border border-accented bg-elevated p-[3px]"
+        >
+          <button
+            v-for="e in environments"
+            :key="e.key"
+            type="button"
+            :aria-pressed="env === e.key"
+            class="min-h-11 flex-1 rounded-sm px-4 font-mono text-[13px] sm:flex-none lg:min-h-10 lg:text-[13.5px]"
+            :class="env === e.key ? 'bg-inverted font-semibold text-inverted' : 'text-toned hover:text-highlighted'"
+            @click="env = e.key"
+          >
+            {{ e.label }}
+          </button>
+        </div>
+        <p class="font-mono text-xs leading-[1.5] text-muted lg:text-[13px]">
+          {{ activeEnv.description }} · measured {{ activeEnv.date }}
         </p>
-        <h1 class="font-display font-bold leading-[0.95] tracking-tight text-[clamp(2.25rem,7vw,5.5rem)]">
-          <span class="block">Fast as the</span>
-          <span class="block text-plasma">fastest routers</span>
-        </h1>
-        <p class="mx-auto mt-8 max-w-2xl text-base sm:text-lg text-muted leading-relaxed">
-          MiiaJS matches the fastest frameworks in realistic API benchmarks -
-          with full middleware, JWT, CORS, and validation enabled - while
-          staying neck-and-neck with bare routers in synthetic tests.
+      </div>
+    </div>
+
+    <section
+      v-for="(suite, index) in suites"
+      :key="suite.title"
+      :class="[container, 'flex flex-col gap-4 pb-2 lg:gap-6 lg:pb-6', index === 0 ? 'pt-10 lg:pt-16' : 'pt-8 lg:pt-12']"
+    >
+      <div class="flex max-w-[720px] flex-col gap-4 lg:gap-2.5">
+        <p :class="eyebrow">
+          {{ suite.eyebrow }}
+        </p>
+        <h2 :class="heading">
+          {{ suite.title }}
+        </h2>
+        <p :class="lead">
+          {{ suite.description }}
+        </p>
+      </div>
+      <div class="grid gap-4 sm:grid-cols-[repeat(auto-fit,minmax(480px,1fr))] sm:gap-5">
+        <figure
+          v-for="test in suite.tests"
+          :key="test.title"
+          class="min-w-0 rounded-[8px] border border-default bg-elevated sm:row-span-3 sm:grid sm:grid-rows-subgrid sm:gap-y-0"
+        >
+          <figcaption class="flex flex-col gap-1 border-b border-muted px-3.5 py-3 sm:px-[18px] sm:py-3.5">
+            <h3 class="font-mono text-xs leading-[1.5] font-semibold break-all text-highlighted sm:text-[13.5px]">
+              {{ test.title }}
+            </h3>
+            <p class="text-[13.5px] leading-[1.5] text-muted sm:text-sm">
+              {{ test.description }}
+            </p>
+          </figcaption>
+          <div class="hidden grid-cols-[170px_minmax(0,1fr)_72px_64px] gap-3.5 px-[18px] pt-2.5 pb-1 font-mono text-[11.5px] text-muted sm:grid">
+            <span>framework</span>
+            <span />
+            <span class="text-right">req/s</span>
+            <span class="text-right">latency</span>
+          </div>
+          <div class="sm:pb-2.5">
+            <div
+              v-for="row in test.rows"
+              :key="row.name"
+              class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-[5px] px-3.5 py-2 font-mono text-[12.5px] sm:grid-cols-[170px_minmax(0,1fr)_72px_64px] sm:gap-3.5 sm:px-[18px] sm:py-1.5 sm:text-[13px]"
+            >
+              <span
+                class="col-start-1 row-start-1"
+                :class="row.highlight ? 'font-semibold text-highlighted' : 'text-toned'"
+              >{{ row.name }}</span>
+              <span class="col-start-2 row-start-1 text-right sm:contents">
+                <span
+                  class="text-highlighted sm:col-start-3 sm:row-start-1"
+                  :class="row.highlight && 'font-semibold'"
+                >{{ row.reqSec }}</span>
+                <span class="text-muted sm:col-start-4 sm:row-start-1 sm:text-right"><span class="sm:hidden"> · </span>{{ row.latency }}</span>
+              </span>
+              <div
+                aria-hidden="true"
+                class="col-span-2 row-start-2 h-[7px] rounded-[2px] bg-(--ui-border-muted) sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:h-2"
+              >
+                <div
+                  class="h-full rounded-[2px] motion-safe:transition-[width] motion-safe:duration-500"
+                  :class="row.highlight ? 'bg-primary' : 'bg-(--ui-text-dimmed)/30 dark:bg-(--ui-text-dimmed)/40'"
+                  :style="{ width: row.width }"
+                />
+              </div>
+            </div>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <div :class="[container, 'pt-6 lg:pt-8 [&>aside]:my-0']">
+      <ProseNote title="Node.js">
+        <p>
+          MiiaJS with the uWS adapter outperforms Hono uWS by up to 44% and NestJS+Fastify by up to 23% in realistic API
+          tests on M1 Pro. Same transport - the difference is pure framework overhead.
+        </p>
+      </ProseNote>
+    </div>
+
+    <section class="mt-12 border-t border-default lg:mt-16">
+      <div :class="[container, 'flex flex-col gap-4 py-10 lg:gap-8 lg:py-16']">
+        <div class="flex max-w-[720px] flex-col gap-4 lg:gap-2.5">
+          <p :class="eyebrow">
+            methodology
+          </p>
+          <h2 :class="heading">
+            How it is measured
+          </h2>
+          <p :class="lead">
+            All benchmarks run under controlled conditions with randomized server order to reduce bias.
+          </p>
+        </div>
+
+        <div :class="[columns, 'mt-2 lg:mt-0']">
+          <div
+            v-for="group in methodology"
+            :key="group.title"
+            :class="[column, 'gap-4 lg:gap-2']"
+          >
+            <h3 :class="subheading">
+              {{ group.title }}
+            </h3>
+            <dl class="text-[15px] leading-[1.5]">
+              <div
+                v-for="item in group.items"
+                :key="item.term"
+                class="flex border-t border-muted py-2.5 last:border-b sm:grid sm:grid-cols-[120px_minmax(0,1fr)] sm:items-baseline sm:gap-4"
+                :class="group.stacked ? 'flex-col gap-0.5' : 'items-baseline justify-between gap-3'"
+              >
+                <dt class="font-mono text-[12.5px] text-muted sm:text-[13px]">
+                  {{ item.term }}
+                </dt>
+                <dd :class="!group.stacked && 'text-right sm:text-left'">
+                  {{ item.detail }}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+
+        <h3 :class="[subheading, 'mt-2 lg:mt-4']">
+          Test machines
+        </h3>
+        <div class="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:gap-5">
+          <div
+            v-for="machine in machines"
+            :key="machine.key"
+            class="flex min-w-0 flex-col gap-1.5 rounded-[8px] border border-default bg-elevated px-4 py-3.5 sm:flex-[1_1_360px] lg:px-5 lg:py-[18px]"
+          >
+            <h4 class="text-[15.5px] font-semibold lg:mb-1 lg:text-base">
+              {{ machine.name }}
+            </h4>
+            <p class="font-mono text-[12.5px] leading-[1.7] text-toned lg:text-[13px]">
+              <span
+                v-for="(line, i) in machine.lines"
+                :key="i"
+                class="block"
+              >
+                <template
+                  v-for="(part, j) in line"
+                  :key="part"
+                >{{ j ? ' · ' : '' }}<span class="whitespace-nowrap">{{ part }}</span></template>
+              </span>
+            </p>
+            <p class="font-mono text-xs text-muted lg:mt-1.5">
+              measured {{ machine.date }}
+            </p>
+          </div>
+        </div>
+
+        <h3 :class="[subheading, 'mt-2 lg:mt-4']">
+          Frameworks compared
+        </h3>
+        <ul class="rounded-[8px] border border-default bg-elevated md:hidden">
+          <li
+            v-for="framework in frameworks"
+            :key="framework.name"
+            class="flex flex-col gap-[3px] border-muted px-3.5 py-3 not-first:border-t"
+          >
+            <div class="flex items-baseline justify-between gap-2.5">
+              <span :class="framework.name === 'MiiaJS' && 'font-semibold'">{{ framework.name }}</span>
+              <span class="font-mono text-[12.5px]">{{ framework.version }}</span>
+            </div>
+            <span class="text-[13.5px] leading-[1.5] text-muted">{{ framework.type }} · {{ framework.runtimes }}</span>
+          </li>
+        </ul>
+        <div class="hidden overflow-x-auto rounded-[8px] border border-default bg-elevated md:block">
+          <table class="w-full min-w-[720px] border-collapse text-[14.5px] leading-[1.5]">
+            <thead>
+              <tr class="font-mono text-xs text-muted">
+                <th
+                  v-for="label in ['framework', 'version', 'type', 'runtimes']"
+                  :key="label"
+                  scope="col"
+                  class="px-4 py-3 text-left font-normal"
+                >
+                  {{ label }}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="framework in frameworks"
+                :key="framework.name"
+                class="border-t border-muted"
+              >
+                <th
+                  scope="row"
+                  class="px-4 py-3 text-left"
+                  :class="framework.name === 'MiiaJS' ? 'font-semibold' : 'font-normal'"
+                >
+                  {{ framework.name }}
+                </th>
+                <td class="px-4 py-3 font-mono text-[13.5px]">
+                  {{ framework.version }}
+                </td>
+                <td class="px-4 py-3 text-toned">
+                  {{ framework.type }}
+                </td>
+                <td class="px-4 py-3 text-toned">
+                  {{ framework.runtimes }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="font-mono text-xs leading-[1.6] text-muted lg:text-[12.5px]">
+          Hono uWS uses the same @miiajs/uws-server adapter (uWebSockets.js 20.69.0), so the difference is pure framework
+          overhead.
         </p>
       </div>
     </section>
 
-    <UContainer>
-      <!-- Sticky environment tabs -->
-      <div
-        class="sticky z-30 -mx-4 px-4 py-3 glass border-b border-[color:var(--ui-border)]"
-        style="top: calc(4rem + 1px)"
-      >
-        <div class="flex justify-center">
-          <UTabs v-model="env" :items="envTabs" variant="link" :content="false" />
+    <section class="border-t border-default">
+      <div :class="[container, 'flex flex-col gap-3.5 py-10 lg:gap-7 lg:py-16']">
+        <div class="flex flex-col gap-3.5 lg:gap-2.5">
+          <p :class="eyebrow">
+            internals
+          </p>
+          <h2 :class="heading">
+            Where the speed comes from
+          </h2>
         </div>
-        <p class="text-center text-sm text-muted p-1">
-          {{ activeEnv.description }} · measured {{ activeEnv.date }}
-        </p>
+        <div :class="[columns, 'mt-1.5 lg:mt-0']">
+          <div
+            v-for="group in internals"
+            :key="group.title"
+            :class="[column, 'gap-3.5 lg:gap-2']"
+          >
+            <h3 :class="subheading">
+              {{ group.title }}
+            </h3>
+            <ul class="text-[15px] leading-[1.55] text-toned">
+              <li
+                v-for="item in group.items"
+                :key="item.term"
+                class="border-t border-muted py-2.5 last:border-b lg:py-3"
+              >
+                <strong class="font-semibold text-highlighted">{{ item.term }}</strong> - {{ item.detail }}
+              </li>
+            </ul>
+          </div>
+        </div>
       </div>
+    </section>
 
-      <UPageBody class="space-y-20">
-        <!-- ====== REALISTIC API ====== -->
-        <div>
-          <h2 class="text-3xl font-bold mb-2">
-            Realistic API
+    <section class="border-t border-default">
+      <div :class="[container, 'flex flex-col gap-3.5 pt-10 pb-14 lg:flex-row lg:flex-wrap lg:items-center lg:gap-x-14 lg:gap-y-8 lg:pt-16 lg:pb-[88px]']">
+        <div class="contents lg:flex lg:min-w-0 lg:flex-[1_1_400px] lg:flex-col lg:gap-3.5">
+          <p :class="eyebrow">
+            reproduce
+          </p>
+          <h2 :class="heading">
+            Run it yourself
           </h2>
-          <p class="text-muted mb-12">
-            Full middleware stack - CORS, JWT, routing, body parsing, validation. The way real APIs work.
+          <p :class="[lead, 'lg:max-w-[460px]']">
+            The benchmark suite is open source. Its CLI lets you pick scenarios, runtimes and the number of passes.
           </p>
-
-          <!-- API GET chart + table -->
-          <section class="mb-16">
-            <h3 class="text-xl font-semibold mb-1">
-              GET /api/users/:userId/posts/:postId
-            </h3>
-            <p class="text-sm text-muted mb-6">
-              CORS, JWT verification, nested route params, JSON response.
-            </p>
-
-            <div class="space-y-2 mb-8">
-              <div
-                v-for="row in apiGet"
-                :key="row.framework"
-                class="flex items-center gap-3"
-              >
-                <span
-                  class="w-44 sm:w-52 text-sm truncate text-right"
-                  :class="row.highlight ? 'font-semibold text-primary' : 'text-muted'"
-                >
-                  {{ row.framework }}
-                </span>
-                <div class="flex-1 h-7 bg-[color:var(--ui-bg-elevated)] rounded-md overflow-hidden relative">
-                  <div
-                    class="h-full rounded-md transition-all duration-500"
-                    :class="barColor(row)"
-                    :style="{ width: barWidth(row.reqSec, apiGet[0]?.reqSec ?? 1) }"
-                  />
-                  <span
-                    class="absolute right-2 top-1/2 -translate-y-1/2 text-xs tabular-nums font-medium"
-                    :class="row.highlight ? 'text-primary-800 dark:text-primary-200' : 'text-toned'"
-                  >
-                    {{ formatNum(row.reqSec) }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <details class="group">
-              <summary class="cursor-pointer text-sm text-muted hover:text-default select-none">
-                Show full table
-              </summary>
-              <div class="mt-4">
-                <UTable :columns="columns" :data="apiGet">
-                  <template #framework-cell="{ row }">
-                    <span :class="row.original.highlight ? 'font-semibold text-primary' : ''">
-                      {{ row.original.framework }}
-                    </span>
-                  </template>
-                  <template #reqSec-cell="{ row }">
-                    <span
-                      :class="row.original.highlight ? 'font-semibold text-primary' : ''"
-                      class="tabular-nums"
-                    >
-                      {{ formatNum(row.original.reqSec) }}
-                    </span>
-                  </template>
-                  <template #latency-cell="{ row }">
-                    <span class="tabular-nums">{{ row.original.latency }}</span>
-                  </template>
-                  <template #delta-cell="{ row }">
-                    <span class="tabular-nums text-muted">{{ row.original.delta }}</span>
-                  </template>
-                </UTable>
-              </div>
-            </details>
-          </section>
-
-          <!-- API POST chart + table -->
-          <section>
-            <h3 class="text-xl font-semibold mb-1">
-              POST /api/workspaces/:ws/projects/:proj/tasks
-            </h3>
-            <p class="text-sm text-muted mb-6">
-              CORS, JWT, JSON body, path params, query params, custom headers, UUID, <code>201</code> status.
-              The heaviest test.
-            </p>
-
-            <div class="space-y-2 mb-8">
-              <div
-                v-for="row in apiPost"
-                :key="row.framework"
-                class="flex items-center gap-3"
-              >
-                <span
-                  class="w-44 sm:w-52 text-sm truncate text-right"
-                  :class="row.highlight ? 'font-semibold text-primary' : 'text-muted'"
-                >
-                  {{ row.framework }}
-                </span>
-                <div class="flex-1 h-7 bg-[color:var(--ui-bg-elevated)] rounded-md overflow-hidden relative">
-                  <div
-                    class="h-full rounded-md transition-all duration-500"
-                    :class="barColor(row)"
-                    :style="{ width: barWidth(row.reqSec, apiPost[0]?.reqSec ?? 1) }"
-                  />
-                  <span
-                    class="absolute right-2 top-1/2 -translate-y-1/2 text-xs tabular-nums font-medium"
-                    :class="row.highlight ? 'text-primary-800 dark:text-primary-200' : 'text-toned'"
-                  >
-                    {{ formatNum(row.reqSec) }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <details class="group">
-              <summary class="cursor-pointer text-sm text-muted hover:text-default select-none">
-                Show full table
-              </summary>
-              <div class="mt-4">
-                <UTable :columns="columns" :data="apiPost">
-                  <template #framework-cell="{ row }">
-                    <span :class="row.original.highlight ? 'font-semibold text-primary' : ''">
-                      {{ row.original.framework }}
-                    </span>
-                  </template>
-                  <template #reqSec-cell="{ row }">
-                    <span
-                      :class="row.original.highlight ? 'font-semibold text-primary' : ''"
-                      class="tabular-nums"
-                    >
-                      {{ formatNum(row.original.reqSec) }}
-                    </span>
-                  </template>
-                  <template #latency-cell="{ row }">
-                    <span class="tabular-nums">{{ row.original.latency }}</span>
-                  </template>
-                  <template #delta-cell="{ row }">
-                    <span class="tabular-nums text-muted">{{ row.original.delta }}</span>
-                  </template>
-                </UTable>
-              </div>
-            </details>
-          </section>
-        </div>
-
-        <!-- ====== TAKEAWAY ====== -->
-        <div class="rounded-xl border border-primary/20 bg-primary/5 p-6 text-center">
-          <p class="text-base text-toned">
-            <strong>The takeaway:</strong> MiiaJS delivers the throughput of a bare router with the architecture of a full
-            framework. In realistic API tests, it edges out Elysia and outperforms Hono, Fastify, and NestJS on Bun - while
-            offering DI, guards, and middleware they lack or bolt on.
-          </p>
-        </div>
-
-        <USeparator />
-
-        <!-- ====== SYNTHETIC ====== -->
-        <div>
-          <h2 class="text-3xl font-bold mb-2">
-            Synthetic
-          </h2>
-          <p class="text-muted mb-12">
-            Minimal handlers - pure framework overhead with no middleware. Bare routers have a natural edge here; MiiaJS
-            still ranks among the top.
-          </p>
-
-          <!-- Synthetic GET chart + table -->
-          <section class="mb-16">
-            <h3 class="text-xl font-semibold mb-1">
-              GET /
-            </h3>
-            <p class="text-sm text-muted mb-6">
-              Return <code>{ "message": "Hello, World!" }</code>. No middleware, no parsing.
-            </p>
-
-            <div class="space-y-2 mb-8">
-              <div
-                v-for="row in syntheticGet"
-                :key="row.framework"
-                class="flex items-center gap-3"
-              >
-                <span
-                  class="w-44 sm:w-52 text-sm truncate text-right"
-                  :class="row.highlight ? 'font-semibold text-primary' : 'text-muted'"
-                >
-                  {{ row.framework }}
-                </span>
-                <div class="flex-1 h-7 bg-[color:var(--ui-bg-elevated)] rounded-md overflow-hidden relative">
-                  <div
-                    class="h-full rounded-md transition-all duration-500"
-                    :class="barColor(row)"
-                    :style="{ width: barWidth(row.reqSec, syntheticGet[0]?.reqSec ?? 1) }"
-                  />
-                  <span
-                    class="absolute right-2 top-1/2 -translate-y-1/2 text-xs tabular-nums font-medium"
-                    :class="row.highlight ? 'text-primary-800 dark:text-primary-200' : 'text-toned'"
-                  >
-                    {{ formatNum(row.reqSec) }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <details class="group">
-              <summary class="cursor-pointer text-sm text-muted hover:text-default select-none">
-                Show full table
-              </summary>
-              <div class="mt-4">
-                <UTable :columns="columns" :data="syntheticGet">
-                  <template #framework-cell="{ row }">
-                    <span :class="row.original.highlight ? 'font-semibold text-primary' : ''">
-                      {{ row.original.framework }}
-                    </span>
-                  </template>
-                  <template #reqSec-cell="{ row }">
-                    <span
-                      :class="row.original.highlight ? 'font-semibold text-primary' : ''"
-                      class="tabular-nums"
-                    >
-                      {{ formatNum(row.original.reqSec) }}
-                    </span>
-                  </template>
-                  <template #latency-cell="{ row }">
-                    <span class="tabular-nums">{{ row.original.latency }}</span>
-                  </template>
-                  <template #delta-cell="{ row }">
-                    <span class="tabular-nums text-muted">{{ row.original.delta }}</span>
-                  </template>
-                </UTable>
-              </div>
-            </details>
-          </section>
-
-          <!-- Synthetic POST chart + table -->
-          <section>
-            <h3 class="text-xl font-semibold mb-1">
-              POST /json
-            </h3>
-            <p class="text-sm text-muted mb-6">
-              Parse JSON body, generate UUID, return response.
-            </p>
-
-            <div class="space-y-2 mb-8">
-              <div
-                v-for="row in syntheticPost"
-                :key="row.framework"
-                class="flex items-center gap-3"
-              >
-                <span
-                  class="w-44 sm:w-52 text-sm truncate text-right"
-                  :class="row.highlight ? 'font-semibold text-primary' : 'text-muted'"
-                >
-                  {{ row.framework }}
-                </span>
-                <div class="flex-1 h-7 bg-[color:var(--ui-bg-elevated)] rounded-md overflow-hidden relative">
-                  <div
-                    class="h-full rounded-md transition-all duration-500"
-                    :class="barColor(row)"
-                    :style="{ width: barWidth(row.reqSec, syntheticPost[0]?.reqSec ?? 1) }"
-                  />
-                  <span
-                    class="absolute right-2 top-1/2 -translate-y-1/2 text-xs tabular-nums font-medium"
-                    :class="row.highlight ? 'text-primary-800 dark:text-primary-200' : 'text-toned'"
-                  >
-                    {{ formatNum(row.reqSec) }}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            <details class="group">
-              <summary class="cursor-pointer text-sm text-muted hover:text-default select-none">
-                Show full table
-              </summary>
-              <div class="mt-4">
-                <UTable :columns="columns" :data="syntheticPost">
-                  <template #framework-cell="{ row }">
-                    <span :class="row.original.highlight ? 'font-semibold text-primary' : ''">
-                      {{ row.original.framework }}
-                    </span>
-                  </template>
-                  <template #reqSec-cell="{ row }">
-                    <span
-                      :class="row.original.highlight ? 'font-semibold text-primary' : ''"
-                      class="tabular-nums"
-                    >
-                      {{ formatNum(row.original.reqSec) }}
-                    </span>
-                  </template>
-                  <template #latency-cell="{ row }">
-                    <span class="tabular-nums">{{ row.original.latency }}</span>
-                  </template>
-                  <template #delta-cell="{ row }">
-                    <span class="tabular-nums text-muted">{{ row.original.delta }}</span>
-                  </template>
-                </UTable>
-              </div>
-            </details>
-          </section>
-        </div>
-
-        <USeparator />
-
-        <!-- ====== METHODOLOGY ====== -->
-        <section>
-          <h2 class="text-3xl font-bold mb-6">
-            Methodology
-          </h2>
-          <p class="text-muted mb-8">
-            All benchmarks run under controlled conditions with randomized server order to reduce bias. Use the tabs above
-            to compare environments.
-          </p>
-
-          <div class="grid sm:grid-cols-2 gap-8 mb-10">
-            <div>
-              <h3 class="font-semibold mb-3">
-                Load parameters
-              </h3>
-              <ul class="space-y-1 text-sm text-muted">
-                <li><strong>Tool:</strong> Autocannon v8+</li>
-                <li><strong>Connections:</strong> 100 concurrent</li>
-                <li><strong>Duration:</strong> 30s per pass</li>
-                <li><strong>Warmup:</strong> 5s (full connections for JIT)</li>
-                <li><strong>Passes:</strong> 5 (averaged with stddev)</li>
-                <li><strong>Workers:</strong> 1 (single-threaded, no clustering)</li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 class="font-semibold mb-3">
-                What the API scenarios test
-              </h3>
-              <ul class="space-y-1 text-sm text-muted">
-                <li><strong>CORS</strong> - origin validation and preflight headers</li>
-                <li><strong>JWT</strong> - Bearer token extraction and HS256 verification</li>
-                <li><strong>Routing</strong> - path parameter extraction from nested segments</li>
-                <li><strong>Body parsing</strong> - JSON deserialization (POST scenarios)</li>
-                <li><strong>Query parsing</strong> - URL search parameter extraction</li>
-                <li><strong>Response</strong> - JSON serialization with custom status codes</li>
-              </ul>
-            </div>
-          </div>
-
-          <h3 class="font-semibold mb-3">
-            Test environments
-          </h3>
-          <div class="grid sm:grid-cols-2 gap-6 mb-10">
-            <div
-              v-for="e in environments"
-              :key="e.key"
-              class="rounded-lg border p-4 transition-all duration-300"
-              :class="env === e.key ? 'ring-2 ring-primary/50 border-primary/30' : 'border-[color:var(--ui-border)]'"
-            >
-              <h4 class="font-semibold text-sm mb-2">{{ e.label }}</h4>
-              <ul class="text-sm text-muted space-y-1">
-                <li v-for="spec in e.specs" :key="spec">{{ spec }}</li>
-                <li class="italic">Measured {{ e.date }}</li>
-              </ul>
-            </div>
-          </div>
-
-          <h3 class="font-semibold mb-3">
-            Frameworks compared
-          </h3>
-          <UTable
-            :columns="[
-              { accessorKey: 'framework', header: 'Framework' },
-              { accessorKey: 'version', header: 'Version' },
-              { accessorKey: 'type', header: 'Type' },
-              { accessorKey: 'runtimes', header: 'Runtimes' }
-            ]"
-            :data="[
-              { framework: 'MiiaJS', version: '0.6.0', type: 'Decorator-driven, DI, guards, middleware', runtimes: 'Bun, Deno, Node (+ uWS adapter)' },
-              { framework: 'Hono', version: '4.13.3', type: 'Lightweight multi-runtime router', runtimes: 'Bun, Deno, Node (+ uWS adapter)' },
-              { framework: 'Elysia', version: '1.4.29', type: 'Bun-native framework', runtimes: 'Bun' },
-              { framework: 'Fastify', version: '5.12.1', type: 'Plugin-based Node.js framework', runtimes: 'Bun, Node' },
-              { framework: 'NestJS+Fastify', version: '11.2.1', type: 'Enterprise decorator framework', runtimes: 'Bun, Node' }
-            ]"
-          />
-
-          <p class="text-xs text-muted mt-4 italic">
-            * Hono uWS uses the same @miiajs/uws-server adapter (uWebSockets.js 20.69.0) - the difference is pure framework overhead.
-          </p>
-        </section>
-
-        <!-- ====== NODE.JS CALLOUT ====== -->
-        <div class="rounded-xl border border-[color:var(--ui-border)] bg-[color:var(--ui-bg-muted)] p-6">
-          <p class="text-base text-toned">
-            <strong>Node.js:</strong> MiiaJS with the uWS adapter outperforms Hono uWS by up to 44% and NestJS+Fastify by
-            up to 23% in realistic API tests on M1 Pro. Same transport - the difference is pure framework overhead.
-          </p>
-        </div>
-
-        <!-- ====== WHY FAST ====== -->
-        <section>
-          <h2 class="text-3xl font-bold mb-6">
-            Why is MiiaJS fast?
-          </h2>
-
-          <div class="grid sm:grid-cols-2 gap-8">
-            <div>
-              <h3 class="font-semibold mb-3">
-                Core
-              </h3>
-              <ul class="space-y-1 text-sm text-muted">
-                <li><strong>Trie-based router</strong> - O(1) static path lookup</li>
-                <li><strong>Compile-time pipelines</strong> - middleware chains resolved once at startup, not per request</li>
-                <li><strong>Sync fast path</strong> - zero Promises when handler and middleware are synchronous</li>
-                <li><strong>No runtime reflection</strong> - native decorators resolve at class definition, no metadata scanning</li>
-                <li><strong>Minimal allocations</strong> - no wrapper objects between your handler and the runtime</li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 class="font-semibold mb-3">
-                Node.js & uWebSockets adapter
-              </h3>
-              <ul class="space-y-1 text-sm text-muted">
-                <li><strong>Lazy Request/Headers proxy</strong> - no allocation until accessed</li>
-                <li><strong>Body buffering</strong> - small payloads bypass ReadableStream overhead</li>
-                <li><strong>LightResponse cache</strong> - status/body/headers tuple without constructing a real Response</li>
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        <USeparator />
-
-        <!-- ====== REPRODUCE ====== -->
-        <section>
-          <h2 class="text-3xl font-bold mb-4">
-            Reproduce
-          </h2>
-          <p class="text-muted mb-6">
-            The benchmark suite is open source. The interactive CLI lets you pick scenarios, runtimes, and number of passes.
-          </p>
-
-          <CodeCard file="terminal" class="max-w-2xl">
-            <pre class="!m-0 !rounded-none !border-0 !shadow-none overflow-x-auto px-5 py-4 font-mono text-[13px] leading-relaxed text-default bg-transparent"><code><span class="text-dimmed">$ </span>git clone https://github.com/miiajs/benchmarks.git
-<span class="text-dimmed">$ </span>cd benchmarks
-<span class="text-dimmed">$ </span>bun install
-<span class="text-dimmed">$ </span>bun run bench</code></pre>
-          </CodeCard>
-        </section>
-      </UPageBody>
-
-      <!-- ====== CTA ====== -->
-      <section class="relative py-20 sm:py-24">
-        <div class="relative overflow-hidden rounded-[2rem] p-px gradient-plasma">
-          <div class="relative rounded-[calc(2rem-1px)] bg-[color:var(--ui-bg)] px-6 sm:px-12 py-16 sm:py-20 text-center overflow-hidden">
-            <div class="absolute inset-0 bg-grid opacity-30" />
-            <div
-              class="absolute -left-20 -top-20 h-72 w-72 rounded-full blur-3xl"
-              style="background: radial-gradient(circle, rgba(255,77,109,0.25), transparent 70%);"
+          <NuxtLink
+            to="https://github.com/miiajs/benchmarks"
+            target="_blank"
+            :class="[textLink, 'order-last lg:order-none']"
+          >
+            github.com/miiajs/benchmarks
+            <UIcon
+              name="i-lucide-arrow-up-right"
+              class="size-3.5"
             />
-            <div
-              class="absolute -right-20 -bottom-20 h-72 w-72 rounded-full blur-3xl"
-              style="background: radial-gradient(circle, rgba(34,211,238,0.25), transparent 70%);"
-            />
-
-            <h2 class="relative font-display font-bold text-4xl sm:text-5xl leading-[1.05] tracking-tight">
-              Ready to build<br>
-              <span class="text-plasma">something fast?</span>
-            </h2>
-            <p class="relative mx-auto mt-6 max-w-lg text-muted leading-relaxed">
-              Start building in minutes. Open source, MIT licensed.
-            </p>
-
-            <div class="relative mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
-              <UButton
-                to="/docs/getting-started"
-                size="xl"
-                color="primary"
-                trailing-icon="i-lucide-arrow-right"
-                class="font-display !rounded-full !px-7 glow-plasma"
-              >
-                Get started
-              </UButton>
-              <UButton
-                to="https://github.com/miiajs/miia"
-                target="_blank"
-                size="xl"
-                color="neutral"
-                variant="outline"
-                icon="i-simple-icons-github"
-                class="font-display !rounded-full !px-7 !border-[color:var(--ui-border-accented)]"
-              >
-                View on GitHub
-              </UButton>
-            </div>
-          </div>
+          </NuxtLink>
         </div>
-      </section>
-    </UContainer>
+        <CodePanel
+          file="terminal"
+          lang="bash"
+          :code="codeReproduce"
+          class="mt-1 min-w-0 lg:mt-0 lg:flex-[1_1_520px]"
+        />
+      </div>
+    </section>
   </div>
 </template>
