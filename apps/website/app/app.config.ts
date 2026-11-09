@@ -40,6 +40,7 @@ export default defineAppConfig({
     },
     contentToc: {
       slots: {
+        root: 'lg:mx-0 lg:px-0',
         container: 'lg:pt-10',
         trigger: 'mb-1.5 font-mono text-xs font-normal text-muted lowercase',
         listWithChildren: 'ms-3.5',

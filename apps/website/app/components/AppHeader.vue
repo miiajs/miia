@@ -52,7 +52,7 @@ watch(searchOpen, (value) => {
       root: 'bg-default',
       left: 'lg:flex-none',
       center: 'gap-1',
-      right: 'lg:flex-none gap-0.5 -me-2.5 lg:me-0',
+      right: 'lg:flex-none gap-0.5 -me-3',
       title: 'font-normal text-[19px] lg:text-[21px] min-h-11 items-center',
       header: 'px-4',
       body: 'flex-1 flex flex-col p-0 sm:p-0'

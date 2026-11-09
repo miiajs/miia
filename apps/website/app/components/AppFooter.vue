@@ -48,7 +48,7 @@ const columns: { label: string, links: { label: string, to: string, target?: str
     v-if="compact"
     class="border-t border-default bg-accented"
   >
-    <div class="mx-auto flex max-w-(--ui-container) flex-wrap items-center justify-between gap-x-8 gap-y-3 px-4 py-[22px] font-mono text-[13px] text-muted sm:px-6 lg:px-8">
+    <UContainer class="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 py-[22px] font-mono text-[13px] text-muted">
       <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS · MIT License</span>
       <div class="flex flex-wrap gap-x-5 gap-y-1">
         <NuxtLink
@@ -68,15 +68,15 @@ const columns: { label: string, links: { label: string, to: string, target?: str
           v{{ miiaVersion }}
         </NuxtLink>
       </div>
-    </div>
+    </UContainer>
   </footer>
 
   <footer
     v-else
     class="border-t border-default bg-accented"
   >
-    <div
-      class="mx-auto flex max-w-(--ui-container) flex-col gap-7 px-4 sm:px-6 lg:gap-10 lg:px-8 lg:pt-14 lg:pb-8"
+    <UContainer
+      class="flex flex-col gap-7 lg:gap-10 lg:pt-14 lg:pb-8"
       :class="minimalOnPhones ? 'py-7' : 'pt-10 pb-7'"
     >
       <div
@@ -134,6 +134,6 @@ const columns: { label: string, links: { label: string, to: string, target?: str
           v{{ miiaVersion }}
         </NuxtLink>
       </div>
-    </div>
+    </UContainer>
   </footer>
 </template>

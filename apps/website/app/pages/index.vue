@@ -72,7 +72,7 @@ const benchRows = (() => {
   }))
 })()
 
-const container = 'mx-auto flex max-w-(--ui-container) flex-col gap-4 px-4 sm:px-6 lg:px-8 lg:flex-row lg:flex-wrap lg:gap-x-14 lg:gap-y-10'
+const sectionLayout = 'flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:gap-x-14 lg:gap-y-10'
 const eyebrow = 'font-mono text-xs text-muted lg:text-[13px]'
 const heading = 'text-[26px] leading-[1.18] font-semibold tracking-[-0.02em] lg:text-[length:clamp(28px,3vw,36px)] lg:leading-[1.15]'
 const lead = 'max-w-[460px] text-base leading-[1.6] text-toned lg:text-[17px]'
@@ -82,7 +82,10 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
 
 <template>
   <div v-if="page">
-    <section class="mx-auto flex max-w-(--ui-container) flex-col gap-7 px-4 pt-10 pb-12 sm:px-6 lg:flex-row lg:px-8 lg:flex-wrap lg:items-center lg:gap-14 lg:pt-[88px] lg:pb-20">
+    <UContainer
+      as="section"
+      class="flex flex-col gap-7 pt-10 pb-12 lg:flex-row lg:flex-wrap lg:items-center lg:gap-14 lg:pt-[88px] lg:pb-20"
+    >
       <div class="flex min-w-0 flex-col gap-5 lg:flex-[1_1_480px] lg:gap-[26px]">
         <h1 class="text-[36px] leading-[1.08] font-semibold tracking-[-0.025em] lg:text-[length:clamp(40px,4.6vw,62px)] lg:leading-[1.04]">
           {{ heroTitle[0] }}<br><span class="text-dimmed">{{ heroTitle[1] }}</span>
@@ -121,10 +124,10 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
         :code="codeDecorators"
         class="min-w-0 lg:flex-[1_1_520px]"
       />
-    </section>
+    </UContainer>
 
     <section class="border-t border-default">
-      <div :class="[container, 'py-12 lg:items-start lg:py-20']">
+      <UContainer :class="[sectionLayout, 'py-12 lg:items-start lg:py-20']">
         <div class="flex min-w-0 flex-col gap-4 lg:flex-[1_1_400px] lg:gap-[18px]">
           <p :class="eyebrow">
             architecture
@@ -160,11 +163,11 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
             </p>
           </div>
         </div>
-      </div>
+      </UContainer>
     </section>
 
     <section class="border-t border-default">
-      <div :class="[container, 'gap-5 py-12 lg:items-center lg:py-20']">
+      <UContainer :class="[sectionLayout, 'gap-5 py-12 lg:items-center lg:py-20']">
         <div class="flex min-w-0 flex-col gap-4 lg:flex-[1_1_400px] lg:gap-[18px]">
           <p :class="eyebrow">
             runtimes
@@ -185,11 +188,11 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
           :code="codeRuntime"
           class="min-w-0 lg:flex-[1_1_520px]"
         />
-      </div>
+      </UContainer>
     </section>
 
     <section class="border-t border-default">
-      <div class="mx-auto flex max-w-(--ui-container) flex-col gap-4 px-4 py-12 sm:px-6 lg:gap-9 lg:px-8 lg:py-20">
+      <UContainer class="flex flex-col gap-4 py-12 lg:gap-9 lg:py-20">
         <div class="contents lg:flex lg:flex-wrap lg:items-end lg:justify-between lg:gap-x-12 lg:gap-y-4">
           <div class="flex max-w-[640px] flex-col gap-4 lg:gap-[18px]">
             <p :class="eyebrow">
@@ -230,11 +233,11 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
             </p>
           </div>
         </div>
-      </div>
+      </UContainer>
     </section>
 
     <section class="border-t border-default">
-      <div :class="[container, 'py-12 lg:items-center lg:py-20']">
+      <UContainer :class="[sectionLayout, 'py-12 lg:items-center lg:py-20']">
         <div class="contents lg:flex lg:min-w-0 lg:flex-[1_1_380px] lg:flex-col lg:gap-[18px]">
           <p :class="eyebrow">
             performance
@@ -292,11 +295,11 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
             </div>
           </div>
         </figure>
-      </div>
+      </UContainer>
     </section>
 
     <section class="border-t border-default">
-      <div :class="[container, 'pt-12 pb-14 lg:items-center lg:pt-20 lg:pb-24']">
+      <UContainer :class="[sectionLayout, 'pt-12 pb-14 lg:items-center lg:pt-20 lg:pb-24']">
         <div class="contents lg:flex lg:min-w-0 lg:flex-[1_1_400px] lg:flex-col lg:gap-[18px]">
           <p :class="eyebrow">
             get started
@@ -323,7 +326,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
           :code="codeTerminal"
           class="mt-1 min-w-0 lg:mt-0 lg:flex-[1_1_520px]"
         />
-      </div>
+      </UContainer>
     </section>
   </div>
 </template>

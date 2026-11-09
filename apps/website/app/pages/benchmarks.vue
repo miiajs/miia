@@ -123,7 +123,6 @@ cd benchmarks
 bun install
 bun run bench`
 
-const container = 'mx-auto max-w-(--ui-container) px-4 sm:px-6 lg:px-8'
 const eyebrow = 'font-mono text-xs text-muted lg:text-[13px]'
 const heading = 'text-[26px] leading-[1.18] font-semibold tracking-[-0.02em] lg:text-[32px] lg:leading-[1.15]'
 const lead = 'text-base leading-[1.6] text-toned lg:text-[17px]'
@@ -135,7 +134,10 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
 
 <template>
   <div>
-    <section :class="[container, 'flex flex-col gap-4 pt-9 pb-7 lg:gap-5 lg:pt-[72px] lg:pb-10']">
+    <UContainer
+      as="section"
+      class="flex flex-col gap-4 pt-9 pb-7 lg:gap-5 lg:pt-[72px] lg:pb-10"
+    >
       <p :class="eyebrow">
         benchmarks
       </p>
@@ -149,10 +151,10 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
       <p class="font-mono text-xs leading-[1.6] text-muted lg:text-[13px]">
         {{ methodLine }}
       </p>
-    </section>
+    </UContainer>
 
     <div class="border-y border-default bg-muted">
-      <div :class="[container, 'flex flex-col gap-2.5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 lg:py-3.5']">
+      <UContainer class="flex flex-col gap-2.5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 lg:py-3.5">
         <div
           role="group"
           aria-label="Test machine"
@@ -173,13 +175,14 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
         <p class="font-mono text-xs leading-[1.5] text-muted lg:text-[13px]">
           {{ activeEnv.description }} · measured {{ activeEnv.date }}
         </p>
-      </div>
+      </UContainer>
     </div>
 
-    <section
+    <UContainer
       v-for="(suite, index) in suites"
       :key="suite.title"
-      :class="[container, 'flex flex-col gap-4 pb-2 lg:gap-6 lg:pb-6', index === 0 ? 'pt-10 lg:pt-16' : 'pt-8 lg:pt-12']"
+      as="section"
+      :class="['flex flex-col gap-4 pb-2 lg:gap-6 lg:pb-6', index === 0 ? 'pt-10 lg:pt-16' : 'pt-8 lg:pt-12']"
     >
       <div class="flex max-w-[720px] flex-col gap-4 lg:gap-2.5">
         <p :class="eyebrow">
@@ -243,19 +246,19 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
           </div>
         </figure>
       </div>
-    </section>
+    </UContainer>
 
-    <div :class="[container, 'pt-6 lg:pt-8 [&>aside]:my-0']">
+    <UContainer class="pt-6 lg:pt-8 [&>aside]:my-0">
       <ProseNote title="Node.js">
         <p>
           MiiaJS with the uWS adapter outperforms Hono uWS by up to 44% and NestJS+Fastify by up to 23% in realistic API
           tests on M1 Pro. Same transport - the difference is pure framework overhead.
         </p>
       </ProseNote>
-    </div>
+    </UContainer>
 
     <section class="mt-12 border-t border-default lg:mt-16">
-      <div :class="[container, 'flex flex-col gap-4 py-10 lg:gap-8 lg:py-16']">
+      <UContainer class="flex flex-col gap-4 py-10 lg:gap-8 lg:py-16">
         <div class="flex max-w-[720px] flex-col gap-4 lg:gap-2.5">
           <p :class="eyebrow">
             methodology
@@ -385,11 +388,11 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
           Hono uWS uses the same @miiajs/uws-server adapter (uWebSockets.js 20.69.0), so the difference is pure framework
           overhead.
         </p>
-      </div>
+      </UContainer>
     </section>
 
     <section class="border-t border-default">
-      <div :class="[container, 'flex flex-col gap-3.5 py-10 lg:gap-7 lg:py-16']">
+      <UContainer class="flex flex-col gap-3.5 py-10 lg:gap-7 lg:py-16">
         <div class="flex flex-col gap-3.5 lg:gap-2.5">
           <p :class="eyebrow">
             internals
@@ -418,11 +421,11 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
             </ul>
           </div>
         </div>
-      </div>
+      </UContainer>
     </section>
 
     <section class="border-t border-default">
-      <div :class="[container, 'flex flex-col gap-3.5 pt-10 pb-14 lg:flex-row lg:flex-wrap lg:items-center lg:gap-x-14 lg:gap-y-8 lg:pt-16 lg:pb-[88px]']">
+      <UContainer class="flex flex-col gap-3.5 pt-10 pb-14 lg:flex-row lg:flex-wrap lg:items-center lg:gap-x-14 lg:gap-y-8 lg:pt-16 lg:pb-[88px]">
         <div class="contents lg:flex lg:min-w-0 lg:flex-[1_1_400px] lg:flex-col lg:gap-3.5">
           <p :class="eyebrow">
             reproduce
@@ -451,7 +454,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
           :code="codeReproduce"
           class="mt-1 min-w-0 lg:mt-0 lg:flex-[1_1_520px]"
         />
-      </div>
+      </UContainer>
     </section>
   </div>
 </template>

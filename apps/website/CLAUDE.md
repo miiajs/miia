@@ -81,6 +81,7 @@ apps/website/
     └── utils/
         ├── brand-colors.ts         # BRAND_COLORS, see Brand (auto-imported)
         ├── experimental-badge.ts   # EXPERIMENTAL_BADGE, the badge of experimental pages (auto-imported)
+        ├── page-columns.ts         # TOC_COLUMNS, the main column + TOC grid of doc pages and posts (auto-imported)
         └── blog.ts                 # formatPostDate(), isDraftPost() (auto-imported)
 ```
 
@@ -96,7 +97,7 @@ The accent, the neutrals and the fonts are tokens in `app/assets/css/main.css`:
 
 - `@theme static` holds the font stacks (`--font-sans` IBM Plex Sans, `--font-mono` IBM Plex Mono) and the brand scale `--color-brand-50` ... `--color-brand-950`: 600 is the accent of the light theme, 400 the one of the dark theme. `app/app.config.ts` sets `ui.colors.primary: 'brand'` (and `neutral: 'stone'`), so Nuxt UI's `primary` is this scale.
 - `:root` and `.dark` set Nuxt UI's `--ui-*` variables per theme: backgrounds (paper `#F3F1EB` in light, `#151517` in dark), borders, text and `--ui-primary` (`primary-600` in light, `primary-400` in dark). Nuxt UI declares them in `@layer theme`, so every variable set in `:root` is set in `.dark` too.
-- `--ui-container: 1280px` is the one container width of the site: the header, the footer and every page column read it (`max-w-(--ui-container)` with `px-4 sm:px-6 lg:px-8`).
+- `--ui-container: 1280px` is the one container width of the site. The header, the footer and every page column take it through `UContainer` (`max-w-(--ui-container)` with `px-4 sm:px-6 lg:px-8`; the gutters change in `ui.container` in `app/app.config.ts`), so no page writes `max-w-(--ui-container)` by hand.
 
 Copies of the values, for places CSS variables do not reach:
 
@@ -117,6 +118,8 @@ When the accent changes, update the brand scale in `main.css`, then `BRAND_COLOR
 3. Page chrome from `@nuxt/ui`: `<UPage>` → `<UPageHeader :title :description>` (its `#headline` slot holds the breadcrumb, `core concepts / modules` from `findPageBreadcrumb()` over `useDocsNavigation()`, and the experimental badge) + `<UPageBody>` → `<ContentRenderer :value="page">`.
 4. Surrounding pages via `queryCollectionItemSurroundings` → `<UContentSurround>` (labelled `previous` / `next`), then an "Edit this page on GitHub" link built from `page.stem`.
 5. Right rail TOC from `page.body.toc.links` → `<UContentToc>`, from `lg` up. Below `lg`, `DocsMobileBar` shows the same links under "on this page".
+
+The columns of `<UPage>` (the page and the TOC on the right) are `TOC_COLUMNS` from `app/utils/page-columns.ts`, shared with blog posts. The desktop look of the TOC lives in `ui.contentToc` in `app/app.config.ts`, for both; a page adds only its own classes below `lg`.
 
 ## Navigation and sorting
 
@@ -306,7 +309,7 @@ discussion: https://github.com/miiajs/miia/discussions/<n>   # optional, a URL
 - There is no `image` field: every post gets a generated OG image (below).
 - The list page selects only the fields it shows (`.select(...)`), otherwise `/blog/_payload.json` carries the body of every post.
 
-Both pages have their own markup, no `UBlogPosts` / `UBlogPost`. `/blog` (`app/pages/blog/index.vue`): a header with the `RSS feed` link, the latest post as a large entry (date, tags, title, description, `topics`, "Read the post"), then one row per older post (date and tags | title and description), and an empty state that links the feed. A post (`app/pages/blog/[slug].vue`): breadcrumb, title, description and `date · author`, then the body with the "In this post" TOC (a sticky side column from `lg` up, a collapsible block above the body below it), then "All posts" and the discussion and share links.
+Both pages have their own markup, no `UBlogPosts` / `UBlogPost`. `/blog` (`app/pages/blog/index.vue`): a header with the `RSS feed` link, the latest post as a large entry (date, tags, title, description, `topics`, "Read the post"), then one row per older post (date and tags | title and description), and an empty state that links the feed. A post (`app/pages/blog/[slug].vue`): breadcrumb, title, description and `date · author`, then the body with the "In this post" TOC, then "All posts" and the discussion and share links. The header, the TOC and the body are one grid on `TOC_COLUMNS`: from `lg` up the TOC is the sticky column on the right with the docs' look, its label level with the breadcrumb; below `lg` it is a collapsible block between the header and the body.
 
 ### Drafts
 
@@ -381,6 +384,7 @@ commands:
 | `app/utils/brand-colors.ts` | `BRAND_COLORS`, the brand colors for `theme-color` and the OG image, auto-imported. |
 | `content.config.ts` | Zod schemas for `index`, `docs` and `blog` collections; excludes blog drafts outside `nuxt dev`. |
 | `app/utils/experimental-badge.ts` | `EXPERIMENTAL_BADGE`, auto-imported. |
+| `app/utils/page-columns.ts` | `TOC_COLUMNS`, the main column and the TOC column of doc pages and posts, auto-imported. |
 | `app/pages/blog/index.vue` | Post list: RSS link, the latest post with `topics`, rows of older posts, `Draft` badge in dev. |
 | `app/pages/blog/[slug].vue` | One post: article SEO tags, schema.org `Article`, `defineOgImage('MiiaPost', ...)`, TOC, discussion and share links. |
 | `app/components/OgImage/MiiaPost.takumi.vue` | OG image template of a post (Takumi). |

@@ -23,13 +23,15 @@ useSeoMeta({
 const latest = computed(() => posts.value?.[0])
 const older = computed(() => posts.value?.slice(1) ?? [])
 
-const container = 'mx-auto max-w-(--ui-container) px-4 sm:px-6 lg:px-8'
 const tag = 'rounded-[3px] border border-default px-1.5 py-px text-xs text-toned'
 </script>
 
 <template>
   <div>
-    <section :class="[container, 'flex flex-col gap-5 pt-9 pb-7 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between lg:gap-x-12 lg:pt-[72px] lg:pb-10']">
+    <UContainer
+      as="section"
+      class="flex flex-col gap-5 pt-9 pb-7 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between lg:gap-x-12 lg:pt-[72px] lg:pb-10"
+    >
       <div class="flex max-w-[680px] flex-col gap-4">
         <p class="font-mono text-xs text-muted lg:text-[13px]">
           blog
@@ -52,11 +54,12 @@ const tag = 'rounded-[3px] border border-default px-1.5 py-px text-xs text-toned
         />
         RSS feed
       </NuxtLink>
-    </section>
+    </UContainer>
 
-    <section
+    <UContainer
       v-if="latest"
-      :class="[container, 'pb-16 lg:pb-24']"
+      as="section"
+      class="pb-16 lg:pb-24"
     >
       <article class="flex flex-col gap-4 border-t border-default pt-7 pb-8 last:border-b lg:flex-row lg:gap-14 lg:pt-10 lg:pb-11">
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-xs text-muted lg:w-[200px] lg:shrink-0 lg:flex-col lg:items-start lg:text-[13px]">
@@ -147,11 +150,12 @@ const tag = 'rounded-[3px] border border-default px-1.5 py-px text-xs text-toned
           </p>
         </div>
       </article>
-    </section>
+    </UContainer>
 
-    <section
+    <UContainer
       v-else
-      :class="[container, 'pb-16 lg:pb-24']"
+      as="section"
+      class="pb-16 lg:pb-24"
     >
       <p class="border-t border-default pt-7 text-muted lg:pt-10">
         No posts yet. Subscribe to the
@@ -164,6 +168,6 @@ const tag = 'rounded-[3px] border border-default px-1.5 py-px text-xs text-toned
         </NuxtLink>
         to get the first one.
       </p>
-    </section>
+    </UContainer>
   </div>
 </template>

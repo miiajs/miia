@@ -41,7 +41,7 @@ const editUrl = computed(() => `https://github.com/miiajs/miia/edit/main/apps/we
   <UPage
     v-if="page"
     :ui="{
-      root: 'lg:grid-cols-[minmax(0,1fr)_10rem] lg:gap-10 xl:grid-cols-[minmax(0,1fr)_12.5rem] xl:gap-12',
+      root: TOC_COLUMNS,
       center: [toc.length ? 'lg:col-span-1' : 'lg:col-span-2', 'max-w-[780px]'],
       right: 'lg:col-span-1'
     }"
@@ -106,7 +106,7 @@ const editUrl = computed(() => `https://github.com/miiajs/miia/edit/main/apps/we
         :links="toc"
         title="On this page"
         color="neutral"
-        :ui="{ root: 'hidden lg:flex lg:mx-0 lg:px-0' }"
+        :ui="{ root: 'hidden lg:flex' }"
       >
         <template #link="{ link }">
           <span class="wrap-anywhere">{{ link.text }}</span>

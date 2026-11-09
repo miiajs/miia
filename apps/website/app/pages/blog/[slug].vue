@@ -43,13 +43,14 @@ const actions = [
 ]
 
 const toc = computed(() => post.value?.body?.toc?.links ?? [])
-
-const container = 'mx-auto max-w-(--ui-container) px-4 sm:px-6 lg:px-8'
 </script>
 
 <template>
-  <div v-if="post">
-    <header :class="[container, 'flex flex-col gap-3.5 pt-8 lg:gap-[18px] lg:pt-16']">
+  <UContainer
+    v-if="post"
+    :class="['flex flex-col pb-10 lg:grid lg:pb-[88px]', TOC_COLUMNS]"
+  >
+    <header class="flex max-w-[720px] flex-col gap-3.5 pt-8 pb-[22px] lg:col-start-1 lg:row-start-1 lg:gap-[18px] lg:pt-10 lg:pb-10">
       <p class="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-xs text-muted lg:text-[13px]">
         <span>
           <NuxtLink
@@ -65,10 +66,10 @@ const container = 'mx-auto max-w-(--ui-container) px-4 sm:px-6 lg:px-8'
           variant="subtle"
         />
       </p>
-      <h1 class="max-w-[900px] text-[29px] leading-[1.15] font-semibold tracking-[-0.02em] lg:text-[length:clamp(36px,4vw,52px)] lg:leading-[1.1] lg:tracking-[-0.025em]">
+      <h1 class="text-[29px] leading-[1.15] font-semibold tracking-[-0.02em] lg:text-[length:clamp(36px,4vw,52px)] lg:leading-[1.1] lg:tracking-[-0.025em]">
         {{ post.title }}
       </h1>
-      <p class="max-w-[760px] text-[16.5px] leading-[1.6] text-toned lg:text-[19px]">
+      <p class="text-[16.5px] leading-[1.6] text-toned lg:text-[19px]">
         {{ post.description }}
       </p>
       <p class="mt-0.5 font-mono text-xs text-muted lg:mt-1.5 lg:text-[13px]">
@@ -76,53 +77,55 @@ const container = 'mx-auto max-w-(--ui-container) px-4 sm:px-6 lg:px-8'
       </p>
     </header>
 
-    <div :class="[container, 'flex flex-col pt-[22px] pb-10 lg:flex-row lg:items-start lg:gap-16 lg:pt-10 lg:pb-[88px]']">
-      <UContentToc
-        v-if="toc.length"
-        :links="toc"
-        color="neutral"
-        :ui="{
-          root: 'static mx-0 px-0 sm:mx-0 sm:px-0 bg-transparent backdrop-blur-none lg:sticky lg:order-last lg:max-w-[250px] lg:min-w-0 lg:flex-[1_1_220px]',
-          container: 'border-0 py-0 sm:py-0 lg:pt-8 lg:pb-8',
-          trigger: 'mt-0 mb-0 min-h-12 rounded-md border border-default bg-elevated px-3.5 py-0 text-[13px] text-highlighted lg:mb-2 lg:min-h-0 lg:rounded-none lg:border-0 lg:bg-transparent lg:px-0 lg:text-xs lg:text-muted',
-          trailingIcon: 'size-4',
-          content: 'max-lg:px-3.5 max-lg:pt-2',
-          link: 'max-lg:min-h-11 max-lg:py-0 max-lg:text-[15px] lg:py-1.5'
-        }"
-      >
-        In this post<span class="lg:hidden"> · {{ toc.length }} {{ toc.length === 1 ? 'section' : 'sections' }}</span>
-      </UContentToc>
+    <UContentToc
+      v-if="toc.length"
+      :links="toc"
+      color="neutral"
+      class="lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start"
+      :ui="{
+        root: 'mx-0 px-0 sm:mx-0 sm:px-0 max-lg:static max-lg:bg-transparent max-lg:backdrop-blur-none',
+        container: 'border-0 py-0 sm:py-0',
+        trigger: 'max-lg:mt-0 max-lg:mb-0 max-lg:min-h-12 max-lg:rounded-md max-lg:border max-lg:border-default max-lg:bg-elevated max-lg:px-3.5 max-lg:py-0 max-lg:text-[13px] max-lg:text-highlighted',
+        trailingIcon: 'size-4',
+        content: 'max-lg:px-3.5 max-lg:pt-2',
+        link: 'max-lg:min-h-11 max-lg:py-0 max-lg:text-[15px]'
+      }"
+    >
+      In this post<span class="lg:hidden"> · {{ toc.length }} {{ toc.length === 1 ? 'section' : 'sections' }}</span>
+      <template #link="{ link }">
+        <span class="wrap-anywhere">{{ link.text }}</span>
+      </template>
+    </UContentToc>
 
-      <article class="-mx-4 mt-6 min-w-0 border-t border-default px-4 pt-1.5 text-[16.5px] sm:-mx-6 sm:px-6 lg:mx-0 lg:mt-0 lg:px-0 lg:max-w-[720px] lg:flex-[999_1_600px] lg:pt-2.5 lg:text-[17.5px] [&_h2]:text-[23px] lg:[&_h2]:text-[28px]">
-        <ContentRenderer
-          v-if="post.body"
-          :value="post"
-        />
+    <article class="-mx-4 mt-6 min-w-0 border-t border-default px-4 pt-1.5 text-[16.5px] sm:-mx-6 sm:px-6 lg:col-start-1 lg:row-start-2 lg:mx-0 lg:mt-0 lg:max-w-[720px] lg:px-0 lg:pt-2.5 lg:text-[17.5px] [&_h2]:text-[23px] lg:[&_h2]:text-[28px]">
+      <ContentRenderer
+        v-if="post.body"
+        :value="post"
+      />
 
-        <div class="mt-5 flex flex-col gap-1 border-t border-default pt-4 lg:mt-7 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between lg:gap-x-8 lg:gap-y-4 lg:pt-6">
+      <div class="mt-5 flex flex-col gap-1 border-t border-default pt-4 lg:mt-7 lg:flex-row lg:flex-wrap lg:items-center lg:justify-between lg:gap-x-8 lg:gap-y-4 lg:pt-6">
+        <NuxtLink
+          to="/blog"
+          class="inline-flex min-h-11 items-center gap-2 self-start text-[15px] font-medium text-highlighted hover:text-toned"
+        >
+          <UIcon
+            name="i-lucide-arrow-left"
+            class="size-3.5"
+          />
+          All posts
+        </NuxtLink>
+        <div class="flex flex-col font-mono text-[13px] lg:flex-row lg:flex-wrap lg:gap-x-5 lg:gap-y-1">
           <NuxtLink
-            to="/blog"
-            class="inline-flex min-h-11 items-center gap-2 self-start text-[15px] font-medium text-highlighted hover:text-toned"
+            v-for="action in actions"
+            :key="action.label"
+            :to="action.to"
+            target="_blank"
+            class="flex min-h-11 items-center text-toned hover:text-highlighted lg:min-h-0 lg:py-2.5"
           >
-            <UIcon
-              name="i-lucide-arrow-left"
-              class="size-3.5"
-            />
-            All posts
+            {{ action.label }}
           </NuxtLink>
-          <div class="flex flex-col font-mono text-[13px] lg:flex-row lg:flex-wrap lg:gap-x-5 lg:gap-y-1">
-            <NuxtLink
-              v-for="action in actions"
-              :key="action.label"
-              :to="action.to"
-              target="_blank"
-              class="flex min-h-11 items-center text-toned hover:text-highlighted lg:min-h-0 lg:py-2.5"
-            >
-              {{ action.label }}
-            </NuxtLink>
-          </div>
         </div>
-      </article>
-    </div>
-  </div>
+      </div>
+    </article>
+  </UContainer>
 </template>
