@@ -4,13 +4,16 @@ Documentation site for MiiaJS. This CLAUDE.md describes how the site is wired so
 
 ## Stack
 
-- **Nuxt 4** (ESM, `srcDir: app/`)
-- **@nuxt/content 3** - file-based collections under `content/`
-- **@nuxt/ui 4** - UI kit, provides `UPage`, `UPageHeader`, `UContentNavigation`, `UBadge`, Prose components
-- **@nuxt/image**, **@nuxtjs/seo**, **Tailwind 4**
+- **Nuxt 4.6** (ESM, `srcDir: app/`)
+- **@nuxt/content 3.16** - file-based collections under `content/`. `content.experimental.sqliteConnector: 'native'` keeps the local database in Node's built-in `node:sqlite`, so there is no `better-sqlite3`
+- **@nuxt/ui 4.12** - UI kit, provides `UPage`, `UPageHeader`, `UContentNavigation`, `UBadge`, Prose components
+- **@nuxt/fonts 1.2** - IBM Plex Sans and IBM Plex Mono, self-hosted (served from `/_nuxt/fonts/`, no Google Fonts). It is listed in `modules` itself, and the families in `fonts.families` have `global: true`, which also feeds them to the OG image template: nuxt-og-image 7 takes its fonts only from `@nuxt/fonts` 1.x. Without its own entry Nuxt UI brings `@nuxt/fonts` 0.14, and with it the OG image silently falls back to the built-in Inter
+- **@nuxtjs/seo 6** - site config, sitemap, robots, schema.org and nuxt-og-image 7 with Takumi 2 (`@takumi-rs/core` 2.x). Two of its modules are off: `aiReady: false` (llms.txt is a separate plan) and `skewProtection: false` (a static site needs no version polling). The sitemap is prerendered only because `/sitemap.xml` is listed in `nitro.prerender.routes`
+- **Tailwind 4.3** - the theme lives in `app/assets/css/main.css` (see Brand)
+- **Code highlighting** - Shiki themes `miia-light` / `miia-dark` from `shiki-themes.ts`, set in `content.build.markdown.highlight`; Content passes them to `@nuxtjs/mdc`, so `<MDC>` renders with the same themes
 - No third-party docs theme (no docus, no shadcn-docs-nuxt) - own layout built on top of `@nuxt/ui` primitives
 
-Exact versions are in `package.json`.
+Exact versions are in `package.json`. Nuxt 4.6 and `@nuxtjs/seo` 6 need Node `^22.22.3 || ^24.15.0 || >=26`.
 
 ## Scripts
 
@@ -29,26 +32,27 @@ The site is a workspace of the monorepo (`apps/*`); install from the repository 
 ```
 apps/website/
 ├── content/
-│   ├── 0.index.yml                 # `index` collection: landing page copy (sections, features, cta, seo)
+│   ├── 0.index.yml                 # `index` collection: landing page copy (hero, architecture, runtimes, packages, performance, start, seo)
 │   ├── 1.docs/                     # `docs` collection, renders under /docs/*
 │   │   ├── 1.getting-started/
-│   │   ├── 2.core-concepts/
-│   │   ├── 3.packages/
+│   │   ├── 2.core-concepts/        # 01.index.md ... 16.logger.md
+│   │   ├── 3.packages/             # 01.index.md ... 14.multipart.md
 │   │   └── 4.roadmap/
 │   └── 2.blog/                     # `blog` collection, renders under /blog/*; `<slug>.draft.md` is a draft
 ├── content.config.ts               # Nuxt Content collection schemas (Zod)
-├── nuxt.config.ts                  # modules, site meta, prerender, redirects
-├── public/                         # favicons, og-image
+├── nuxt.config.ts                  # modules, fonts, site meta, version, prerender, redirects
+├── shiki-themes.ts                 # miia-light / miia-dark code block themes
+├── public/                         # favicons, og-image (colors baked in, see Brand)
 ├── server/
 │   └── routes/blog/rss.xml.ts      # RSS 2.0 feed of the blog
 └── app/
-    ├── app.vue                     # root, builds navigation + search data, provides navigation
-    ├── app.config.ts
-    ├── error.vue
-    ├── assets/css/main.css         # Tailwind 4 theme, plasma/violet/cyan accents
+    ├── app.vue                     # root: theme-color, default SEO and OG tags, loading bar, AppSearch
+    ├── app.config.ts               # Nuxt UI: primary `brand`, neutral `stone`, sidebar, TOC and prose styles
+    ├── error.vue                   # 404 and error page: header, footer, AppSearch
+    ├── assets/css/main.css         # Tailwind 4 theme: Plex font stacks, brand scale, Nuxt UI `--ui-*` tokens per theme
     ├── layouts/
     │   ├── default.vue             # landing, benchmarks and blog shell
-    │   └── docs.vue                # doc shell: header, sidebar nav, footer
+    │   └── docs.vue                # doc shell: header, DocsMobileBar, sidebar nav, compact footer
     ├── pages/
     │   ├── index.vue               # landing page (reads content/0.index.yml)
     │   ├── benchmarks.vue          # benchmarks page
@@ -57,29 +61,67 @@ apps/website/
     │       ├── index.vue           # post list
     │       └── [slug].vue          # one post
     ├── data/benchmarks/            # benchmark datasets per machine (m1.ts, server.ts)
-    ├── components/                 # AppHeader, AppFooter, AppLogo, CodeCard, HeroBackground, StarsBg
-    │   └── OgImage/MiiaPost.takumi.vue  # OG image template of a blog post
+    ├── components/
+    │   ├── AppHeader.vue           # nav, search, theme toggle, GitHub; the site menu below lg
+    │   ├── AppFooter.vue           # link columns, © and version; `compact` in docs, `minimalOnPhones` on the error page
+    │   ├── AppLogo.vue             # mark + wordmark, dots in `--ui-primary`
+    │   ├── AppSearch.vue           # ⌘K docs search (`UContentSearch`), mounted in app.vue and error.vue
+    │   ├── CodePanel.vue           # highlighted code outside Markdown (renders through ProsePre)
+    │   ├── DocsMobileBar.vue       # docs below lg: the page menu and "on this page"
+    │   ├── OgImage/MiiaPost.takumi.vue  # OG image template of a blog post
+    │   └── content/                # *.global.vue, see Prose components
+    │       ├── ProsePre.global.vue
+    │       ├── ProseCallout.global.vue  # frame of ::note, ::tip, ::warning, ::caution
+    │       ├── ProseNote, ProseTip, ProseWarning, ProseCaution (.global.vue)
+    │       └── AppCard.global.vue  # `::app-card` block of blog posts
+    ├── composables/
+    │   ├── docs-navigation.ts      # useDocsNavigation()
+    │   ├── docs-page.ts            # useDocsPage(path), shared by the doc page and DocsMobileBar
+    │   └── copy.ts                 # useCopy() for the copy buttons
     └── utils/
+        ├── brand-colors.ts         # BRAND_COLORS, see Brand (auto-imported)
         ├── experimental-badge.ts   # EXPERIMENTAL_BADGE, the badge of experimental pages (auto-imported)
         └── blog.ts                 # formatPostDate(), isDraftPost() (auto-imported)
 ```
 
-The numbers on the landing page (hero badge, stats strip) and the benchmarks page are measured by hand in the [`miiajs/benchmarks`](https://github.com/miiajs/benchmarks) repo; do not edit them without a new run.
+The header links Home, Docs, Benchmarks and Blog. Roadmap is in the footer (`documentation` column) and in the docs sidebar.
 
-`app/utils/*` and `app/components/*` are auto-imported by Nuxt 4 - no explicit imports needed in `.vue` files.
+The numbers of the benchmarks page (the datasets in `app/data/benchmarks/` and the figures in its prose) and of the landing page's performance table, which reads the Bun rows of `apiPost` in `m1.ts`, are measured by hand in the [`miiajs/benchmarks`](https://github.com/miiajs/benchmarks) repo; do not edit them without a new run.
+
+`app/utils/*`, `app/composables/*` and `app/components/*` are auto-imported by Nuxt 4 - no explicit imports needed in `.vue` files. Components in `components/content/` keep their own name (`ProsePre`, `AppCard`), without a `Content` prefix.
+
+## Brand
+
+The accent, the neutrals and the fonts are tokens in `app/assets/css/main.css`:
+
+- `@theme static` holds the font stacks (`--font-sans` IBM Plex Sans, `--font-mono` IBM Plex Mono) and the brand scale `--color-brand-50` ... `--color-brand-950`: 600 is the accent of the light theme, 400 the one of the dark theme. `app/app.config.ts` sets `ui.colors.primary: 'brand'` (and `neutral: 'stone'`), so Nuxt UI's `primary` is this scale.
+- `:root` and `.dark` set Nuxt UI's `--ui-*` variables per theme: backgrounds (paper `#F3F1EB` in light, `#151517` in dark), borders, text and `--ui-primary` (`primary-600` in light, `primary-400` in dark). Nuxt UI declares them in `@layer theme`, so every variable set in `:root` is set in `.dark` too.
+- `--ui-container: 1280px` is the one container width of the site: the header, the footer and every page column read it (`max-w-(--ui-container)` with `px-4 sm:px-6 lg:px-8`).
+
+Copies of the values, for places CSS variables do not reach:
+
+- `app/utils/brand-colors.ts` - `BRAND_COLORS`: the `theme-color` meta in `app/app.vue` and the colors of the OG image template.
+- `shiki-themes.ts` - the code block themes (ink, accent, muted text and the code block background of each theme, the `--ui-bg-elevated` value).
+- `public/` - `favicon.svg`, `favicon.ico`, `favicon-16/32/192/512.png`, `apple-touch-icon.png` and `og-image.png` have the colors baked in. `favicon.svg` switches to the dark colors through `prefers-color-scheme` inside the SVG; the PNG and ICO files do not follow the theme, so their square is filled with paper. Their sources are in `tmp/design/website/assets/` at the repository root: `icons.html`, `og-image.html`, `favicon.svg` and `render.mjs`, which renders them with playwright-core and Chrome and assembles the ICO. `tmp/` is gitignored, so the sources exist only locally, not in the repository.
+
+When the accent changes, update the brand scale in `main.css`, then `BRAND_COLORS` and `shiki-themes.ts`, and regenerate the `public/` files from their sources.
+
+## Version
+
+`nuxt.config.ts` imports `packages/core/package.json` (`with { type: 'json' }`) and puts its `version` into `runtimeConfig.public.miiaVersion` at build time. The footer and the mobile site menu show `v{miiaVersion}`; there is no request to npm. The site shows the version of the checkout it was built from, so it changes when a release bumps `@miiajs/core`.
 
 ## How a doc page renders
 
-1. Route `/docs/:slug` hits `app/pages/docs/[...slug].vue`.
-2. `queryCollection('docs').path(route.path).first()` loads the markdown + frontmatter.
-3. Page chrome from `@nuxt/ui`: `<UPage>` → `<UPageHeader :title :description>` (with `#headline` slot for the status badge) + `<UPageBody>` → `<ContentRenderer :value="page">`.
-4. Surrounding pages via `queryCollectionItemSurroundings` → `<UContentSurround>`.
-5. Right rail TOC from `page.body.toc.links` → `<UContentToc>`.
+1. Route `/docs/:slug` hits `app/pages/docs/[...slug].vue` (layout `docs`).
+2. `useDocsPage(route.path)` (`app/composables/docs-page.ts`) loads the markdown + frontmatter with `queryCollection('docs').path(path).first()`. `DocsMobileBar` calls it with the same path, and both share one `useAsyncData` entry (`dedupe: 'defer'`).
+3. Page chrome from `@nuxt/ui`: `<UPage>` → `<UPageHeader :title :description>` (its `#headline` slot holds the breadcrumb, `core concepts / modules` from `findPageBreadcrumb()` over `useDocsNavigation()`, and the experimental badge) + `<UPageBody>` → `<ContentRenderer :value="page">`.
+4. Surrounding pages via `queryCollectionItemSurroundings` → `<UContentSurround>` (labelled `previous` / `next`), then an "Edit this page on GitHub" link built from `page.stem`.
+5. Right rail TOC from `page.body.toc.links` → `<UContentToc>`, from `lg` up. Below `lg`, `DocsMobileBar` shows the same links under "on this page".
 
 ## Navigation and sorting
 
-- Sidebar navigation is built once in `app/app.vue` via `queryCollectionNavigation('docs', [...extraFields])` and `provide`-d to the docs layout.
-- The layout (`app/layouts/docs.vue`) `inject`s the navigation, runs `expandActiveBranch()` over it (recursive walker that also maps `status → badge`), and renders `<UContentNavigation :navigation highlight>`.
+- Sidebar navigation comes from `useDocsNavigation()` (`app/composables/docs-navigation.ts`): `useAsyncData('navigation', () => queryCollectionNavigation('docs', ['status']))`, transformed to the children of `/docs`, then `expandActiveBranch()` for the current route - a recursive walker that opens a `defaultOpen: false` folder (set in its `.navigation.yml`) when it holds the current page, maps `status → badge` and sets `exact` on leaf links. The docs layout, `DocsMobileBar`, `AppSearch` and the breadcrumb of the doc page call it; they share the one `navigation` entry, so the tree is fetched once. There is no `provide`/`inject`.
+- The layout (`app/layouts/docs.vue`) renders each section (`1.getting-started`, `2.core-concepts`, ...) as a group: a lowercase title and a `<UContentNavigation>` over its children. Below `lg`, `DocsMobileBar` puts the tree into a full-screen menu, with the sections as triggers and only the current one open. Both lists take their look from `ui.contentNavigation` in `app/app.config.ts`.
 - File ordering uses the `N.name.md` convention. Nested folders follow the same rule. The leading number is stripped from the URL.
 - Folders with 10 or more entries use two-digit prefixes (`01.index.md` ... `16.logger.md`): the navigation sorts by the file path as a string, so `10.response` would come before `2.controllers`.
 
@@ -91,7 +133,7 @@ The numbers on the landing page (hero badge, stats strip) and the benchmarks pag
 queryCollectionNavigation('docs', ['status'])
 ```
 
-If you add a new frontmatter field that should show up in the sidebar, update this call in `app/app.vue`. Otherwise the field will render fine on the page itself but will be silently `undefined` on sidebar items - and no error is thrown.
+If you add a new frontmatter field that should show up in the sidebar, update this call in `app/composables/docs-navigation.ts`. Otherwise the field will render fine on the page itself but will be silently `undefined` on sidebar items - and no error is thrown.
 
 ## Frontmatter schema
 
@@ -174,15 +216,15 @@ Writing conventions used across the site:
 
 ## Available MDC components
 
-From `@nuxt/ui` - callable in `.md` files via MDC syntax:
+Callable in `.md` files via MDC syntax:
 
 ```markdown
 ::note
 General information.
 ::
 
-::tip
-A best-practice suggestion.
+::tip{title="Prefer the factory form"}
+A best-practice suggestion, with an optional title.
 ::
 
 ::warning
@@ -203,7 +245,19 @@ npm install foo
 ::
 ```
 
-Other available: `::callout`, `::badge`, `::accordion`, `::card`, `::card-group`. All come from `@nuxt/ui`'s Prose layer - no component registration needed.
+The four callouts and code blocks are the site's own components (see Prose components). A callout takes an optional `title`: `::note{title="..."}`. Text after the name on the opening line (`::note Startup order`) is not a title - it is not valid MDC, and the block renders as plain text.
+
+Other available: `::badge`, `::accordion`, `::card`, `::card-group`, and `::code-group` above. They come from `@nuxt/ui`'s Prose layer - no component registration needed. `::callout` is the site's own frame: it takes `type` (`note`, `tip`, `warning`, `caution`) and `title`, not Nuxt UI's `color` or `icon`. Blog posts also have `::app-card` (see Blog).
+
+## Prose components
+
+`app/components/content/` replaces some of Nuxt UI's Prose components where `ui.prose` in `app/app.config.ts` is not enough (it styles slots; it cannot add a header row or a prop):
+
+- `ProsePre` - every fenced code block: a header row with the file name (`` ```ts [app.ts] ``) or the language and a copy button. A block without a language (MDC reports it as `text`) gets neither. Under `::code-group` the tabs take the place of the header (`hideHeader`, set by Nuxt UI's `ProseCodeGroup`; the tabs are styled in `prose.codeGroup`). `CodePanel` renders code outside Markdown through `<MDC>`, so the landing and benchmarks pages get the same block.
+- `ProseCallout` - the frame of `::note`, `::tip`, `::warning` and `::caution`: a header row with a marker, the type label and the optional `title`, the body below. `ProseNote`, `ProseTip`, `ProseWarning` and `ProseCaution` wrap it with their `type`.
+- `AppCard` - the `::app-card` block (see Blog).
+
+The files must be named `*.global.vue`. Outside `nuxt dev`, Nuxt Content's component map holds only global components and the ones a document names by their tag. Prose components are reached through a mapping instead (`pre` → `ProsePre`, `note` → `ProseNote` in Nuxt UI's `mdc.components.map`), so that list never names them. A plain `ProseNote.vue` here still takes the name over from Nuxt UI's global one, because Content scans `components/content/` first: it works in `nuxt dev` and is missing from the build. The `.global` suffix makes the component global and keeps its name. `AppCard` follows the same convention.
 
 ## Running the site
 
@@ -212,7 +266,6 @@ cd apps/website
 bun install           # once
 bun run dev           # dev server with HMR
 bun run build         # static build (Nitro prerender)
-bun run generate      # same as build for this project
 bun run typecheck     # vue-tsc
 ```
 
@@ -222,7 +275,7 @@ bun run typecheck     # vue-tsc
 2. Add `status: experimental` to the frontmatter if the package is experimental (see Status indicator).
 3. Add a row for the new package to `content/1.docs/3.packages/01.index.md` under the appropriate category.
 4. Add a row to the package table in `content/1.docs/1.getting-started/1.index.md`.
-5. If you introduced a **new frontmatter field** that must appear in the sidebar, extend the field list in `app/app.vue`:
+5. If you introduced a **new frontmatter field** that must appear in the sidebar, extend the field list in `app/composables/docs-navigation.ts`:
    ```ts
    queryCollectionNavigation('docs', ['status', 'yourNewField'])
    ```
@@ -230,23 +283,30 @@ bun run typecheck     # vue-tsc
 
 ## Blog
 
-Posts live in `content/2.blog/<slug>.md` (the `blog` collection) and render at `/blog/<slug>`; `/blog` lists them, newest first. The header and the footer (`Resources`) link to `/blog`.
+Posts live in `content/2.blog/<slug>.md` (the `blog` collection) and render at `/blog/<slug>`; `/blog` lists them, newest first. The header (`Blog`) and the footer (`project` column) link to `/blog`.
 
 Frontmatter:
 
 ```yaml
 ---
 title: 'MiiaJS 0.9: module boundaries, typed tokens and a rebuilt CLI'
-description: One or two sentences. Also the text of the list card, the RSS item and the OG image.
+description: One or two sentences. Also the text of the list entry, the RSS item and the OG image.
 date: 2026-11-05        # publication day
 author: Ruslan Matiushev
 tags: [release]         # optional, defaults to []
+topics: [modules, typed tokens, CLI]   # optional
+discussion: https://github.com/miiajs/miia/discussions/<n>   # optional, a URL
 ---
 ```
 
-- `date` is `z.date()` in the schema, but queries return it as a `YYYY-MM-DD` string. Format it with `formatPostDate()` (`app/utils/blog.ts`, UTC). `UBlogPost` formats its `date` prop in the local time zone, which can show the day before, so the list renders the date through the `#date` slot.
+- `date` is `z.date()` in the schema, but queries return it as a `YYYY-MM-DD` string. Format it with `formatPostDate()` (`app/utils/blog.ts`, UTC): the string is midnight UTC, and formatting it in the local time zone can show the day before. Both pages render it in a `<time :datetime>`.
+- `tags` - the first tag is the post's section: the breadcrumb of the post (`blog / release`) and the top line of its OG image (`blog · release`). `/blog` shows every tag next to the date.
+- `topics` - listed under the description of the latest post on `/blog`, joined with ` · `. Older posts do not show them.
+- `discussion` - when set, the post ends with a "Discuss on GitHub" link before "Share on X" and "Share on LinkedIn".
 - There is no `image` field: every post gets a generated OG image (below).
 - The list page selects only the fields it shows (`.select(...)`), otherwise `/blog/_payload.json` carries the body of every post.
+
+Both pages have their own markup, no `UBlogPosts` / `UBlogPost`. `/blog` (`app/pages/blog/index.vue`): a header with the `RSS feed` link, the latest post as a large entry (date, tags, title, description, `topics`, "Read the post"), then one row per older post (date and tags | title and description), and an empty state that links the feed. A post (`app/pages/blog/[slug].vue`): breadcrumb, title, description and `date · author`, then the body with the "In this post" TOC (a sticky side column from `lg` up, a collapsible block above the body below it), then "All posts" and the discussion and share links.
 
 ### Drafts
 
@@ -254,20 +314,51 @@ A draft is a file named `<slug>.draft.md`. Nuxt Content strips `.draft` from the
 
 Drafts exist only in `nuxt dev`: `content.config.ts` excludes `2.blog/*.draft.md` from the collection source unless `NODE_ENV` is `development`, which only `nuxt dev` sets. Do not replace this with a `draft: true` field and a query filter. Nuxt Content prerenders `/__nuxt_content/blog/sql_dump.txt` with every file the collection matches, so a filtered draft would still be public in that file. With the exclude, a draft is absent from the dump, the payloads, the RSS feed and the sitemap.
 
-To publish, rename `<slug>.draft.md` to `<slug>.md`.
+Drafts are not in git: `apps/website/.gitignore` lists `content/2.blog/*.draft.md`, so a draft lives only in the local checkout. To publish, rename `<slug>.draft.md` to `<slug>.md`; from then on git sees the post.
 
 ### OG images
 
-`blog/[slug].vue` calls `defineOgImage('MiiaPost', { title, description, date }, { width: 1200, height: 630 })`. The template is `app/components/OgImage/MiiaPost.takumi.vue`, rendered by Takumi: `@takumi-rs/core` is a site dependency and the `.takumi.vue` suffix picks the renderer. nuxt-og-image 6.5 accepts only the 1.x line of `@takumi-rs/core`.
+`blog/[slug].vue` calls `defineOgImage('MiiaPost', { title, description, date: formatPostDate(date), path, tag: tags[0] }, { width: 1200, height: 630 })`. The template is `app/components/OgImage/MiiaPost.takumi.vue`, rendered by Takumi: `@takumi-rs/core` 2.x is a site dependency (nuxt-og-image 7 needs the 2.x line) and the `.takumi.vue` suffix picks the renderer. It draws the light theme from `BRAND_COLORS`: the mark and `blog · <tag>` on top, the title and the description, `miiajs.com<path>` and the date at the bottom.
 
 - The template name must not clash with nuxt-og-image's community templates (`BlogPost` is one of them).
 - Pass `width` and `height`: the module defaults to 1200x600, and its tags replace the 1200x630 ones from `app/app.vue`.
-- Keep `style` attributes static: nuxt-og-image reads them at build time to pick the fonts and weights it loads (Space Grotesk and Inter here).
+- Keep `font-family` and `font-weight` in static `style` attributes and bind only colors with `:style`: nuxt-og-image reads the template at build time to pick the families and weights it loads. The families come from `@nuxt/fonts` (`global: true` in `fonts.families`), here IBM Plex Sans and IBM Plex Mono.
 - The build prerenders the image to `/_og/s/<hash>.png`. Pages without `defineOgImage` (docs, landing, `/blog`) keep the static `/og-image.png`.
 
 ### RSS
 
-`server/routes/blog/rss.xml.ts` writes an RSS 2.0 feed (`atom:link` to itself, `dc:creator` for the author, a `category` per tag) from `queryCollection(event, 'blog')`, with the base URL from `getSiteConfig(event).url`. The prerender crawler does not follow `.xml` links, so `/blog/rss.xml` is listed in `nitro.prerender.routes`. `app.head` in `nuxt.config.ts` has the autodiscovery `<link rel="alternate">`; links to the feed use `target: '_blank'` so the click does not go through the client router.
+`server/routes/blog/rss.xml.ts` writes an RSS 2.0 feed (`atom:link` to itself, `dc:creator` for the author, a `category` per tag) from `queryCollection(event, 'blog')`, with the base URL from `getSiteConfig(event).url`. The prerender crawler does not follow `.xml` links, so `/blog/rss.xml` is listed in `nitro.prerender.routes`. `app.head` in `nuxt.config.ts` has the autodiscovery `<link rel="alternate">`. The feed is linked from `/blog` only (the `RSS feed` link of its header and the empty state), not from the footer; the links use `target: '_blank'` so the click does not go through the client router.
+
+### App card
+
+`::app-card` (`app/components/content/AppCard.global.vue`) shows an app the reader can run: name, description, packages, runtimes, what it needs, a `source` link to its folder on GitHub and the commands to start it, with a copy button. The props go in a YAML block:
+
+```markdown
+::app-card
+---
+name: messaging-app
+description: An event-driven orders flow on the message bus, with the Redis Streams transport.
+packages: ['@miiajs/core', '@miiajs/messaging', '@miiajs/messaging-redis']
+runtimes: [Bun, Node.js, Deno]
+needs: Redis (`docker compose up -d`)
+path: examples/messaging-app
+commands:
+  - cd examples/messaging-app
+  - docker compose up -d
+  - bun run dev
+---
+::
+```
+
+| prop | type | description |
+|---|---|---|
+| `name` | string | Title of the card. |
+| `description` | string | Plain text. |
+| `packages` | string[] | `@miiajs/*` names; the scope is dropped after the first one, so the row reads `@miiajs/core · messaging · messaging-redis`. Quote them in YAML, a plain value cannot start with `@`. |
+| `runtimes` | string[] | Joined with ` · `. |
+| `needs` | string, optional | Text in backticks renders as code. |
+| `path` | string | Folder in the `miiajs/miia` repository; `source` links to `https://github.com/miiajs/miia/tree/main/<path>`. |
+| `commands` | string[] | One per line under "run it"; the copy button copies them all. |
 
 ### Checklist: a new post
 
@@ -280,17 +371,22 @@ To publish, rename `<slug>.draft.md` to `<slug>.md`.
 
 | File | Purpose |
 |---|---|
-| `app/app.vue` | Root; builds navigation from `queryCollectionNavigation('docs', ['status'])`, provides it via `provide('navigation')`. Mount search. |
-| `app/layouts/docs.vue` | Doc shell; `inject`s navigation, runs `expandActiveBranch` (which also maps `status → badge`), renders sidebar. |
-| `app/pages/docs/[...slug].vue` | Renders one doc page; `UPageHeader` with status badge slot + `ContentRenderer`. |
+| `app/app.vue` | Root; `theme-color` from `BRAND_COLORS`, default SEO and OG tags, loading bar, mounts `AppSearch`. |
+| `app/composables/docs-navigation.ts` | `useDocsNavigation()`: `queryCollectionNavigation('docs', ['status'])` under the `navigation` key, `expandActiveBranch` (which also maps `status → badge`). |
+| `app/layouts/docs.vue` | Doc shell; sidebar groups from `useDocsNavigation()`, `DocsMobileBar`, compact footer. |
+| `app/components/DocsMobileBar.vue` | Docs below `lg`: the page menu with the doc tree and "on this page". |
+| `app/pages/docs/[...slug].vue` | Renders one doc page; `UPageHeader` with breadcrumb and status badge in `#headline` + `ContentRenderer`, prev/next, edit link, TOC. |
+| `app/components/content/*.global.vue` | `ProsePre`, the callouts and `AppCard`. |
+| `app/assets/css/main.css` | Font stacks, brand scale, Nuxt UI `--ui-*` tokens per theme, `--ui-container`. |
+| `app/utils/brand-colors.ts` | `BRAND_COLORS`, the brand colors for `theme-color` and the OG image, auto-imported. |
 | `content.config.ts` | Zod schemas for `index`, `docs` and `blog` collections; excludes blog drafts outside `nuxt dev`. |
 | `app/utils/experimental-badge.ts` | `EXPERIMENTAL_BADGE`, auto-imported. |
-| `app/pages/blog/index.vue` | Post list (`UBlogPosts`), `Draft` badge in dev. |
-| `app/pages/blog/[slug].vue` | One post: article SEO tags, schema.org `Article`, `defineOgImage('MiiaPost', ...)`. |
+| `app/pages/blog/index.vue` | Post list: RSS link, the latest post with `topics`, rows of older posts, `Draft` badge in dev. |
+| `app/pages/blog/[slug].vue` | One post: article SEO tags, schema.org `Article`, `defineOgImage('MiiaPost', ...)`, TOC, discussion and share links. |
 | `app/components/OgImage/MiiaPost.takumi.vue` | OG image template of a post (Takumi). |
 | `app/utils/blog.ts` | `formatPostDate()`, `isDraftPost()`, auto-imported. |
 | `server/routes/blog/rss.xml.ts` | RSS feed of the blog, prerendered to `/blog/rss.xml`. |
-| `nuxt.config.ts` | Modules, SEO defaults, prerender routes. |
+| `nuxt.config.ts` | Modules, fonts, highlight themes, `miiaVersion`, SEO defaults, prerender routes. |
 
 ## Documentation follow-ups
 
