@@ -74,7 +74,9 @@ export const collections = {
       description: z.string().nonempty(),
       date: z.date(),
       author: z.string().nonempty(),
-      tags: z.array(z.string()).default([])
+      tags: z.array(z.string()).default([]),
+      topics: z.array(z.string()).optional(),
+      discussion: z.string().url().optional()
     })
   })
 }

@@ -129,13 +129,11 @@ export default defineNuxtConfig({
     }
   },
 
-  // The OG image template gets its fonts from @nuxt/fonts, global families only; it names Inter and Space Grotesk until it moves to Plex
+  // `global: true` also hands the families to the OG image template: nuxt-og-image takes its fonts from @nuxt/fonts
   fonts: {
     families: [
-      { name: 'IBM Plex Sans', weights: [400, 500, 600] },
-      { name: 'IBM Plex Mono', weights: [400, 500] },
-      { name: 'Inter', global: true },
-      { name: 'Space Grotesk', global: true }
+      { name: 'IBM Plex Sans', weights: [400, 500, 600], global: true },
+      { name: 'IBM Plex Mono', weights: [400, 500], global: true }
     ]
   },
 
