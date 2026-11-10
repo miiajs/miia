@@ -31,11 +31,11 @@ const navigation = useDocsNavigation()
                 <UContentSearchButton
                   :collapsed="false"
                   label="Search docs"
-                  class="min-h-11 w-full gap-2.5 rounded-md bg-elevated ps-3 pe-2.5 text-sm font-normal text-muted ring-accented hover:bg-elevated hover:text-default"
+                  class="min-h-11 w-full gap-2.5 rounded-md bg-elevated ps-3 pe-2.5 text-small font-normal text-muted ring-accented hover:bg-elevated hover:text-default"
                   :ui="{ leadingIcon: 'size-4' }"
                 >
                   <template #trailing>
-                    <span class="rounded-[4px] border border-default px-1.5 py-px font-mono text-xs">⌘K</span>
+                    <span class="rounded-[4px] border border-default px-1.5 py-px font-mono text-caption/4">⌘K</span>
                   </template>
                 </UContentSearchButton>
               </template>
@@ -48,7 +48,7 @@ const navigation = useDocsNavigation()
                   v-for="group in navigation"
                   :key="group.path"
                 >
-                  <p class="mb-1.5 px-2.5 font-mono text-xs text-muted lowercase">
+                  <p class="mb-1.5 px-2.5 font-mono text-caption text-muted lowercase">
                     {{ group.title }}
                   </p>
                   <UContentNavigation

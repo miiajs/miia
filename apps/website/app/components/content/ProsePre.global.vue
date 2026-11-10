@@ -28,7 +28,7 @@ function copyCode() {
   >
     <div
       v-if="label && !hideHeader"
-      class="flex min-h-11 items-center border-b border-muted ps-3.5 pe-12 font-mono text-xs text-muted sm:ps-[18px]"
+      class="flex min-h-11 items-center border-b border-muted ps-3.5 pe-12 font-mono text-caption text-muted sm:ps-[18px]"
     >
       <span class="truncate">{{ label }}</span>
     </div>
@@ -45,7 +45,7 @@ function copyCode() {
 
     <pre
       ref="pre"
-      class="m-0 overflow-x-auto p-3.5 font-mono text-[13px] leading-[1.7] whitespace-pre text-highlighted sm:p-[18px] sm:text-sm **:[.line]:block **:[.line.highlight]:bg-accented"
+      class="m-0 overflow-x-auto p-3.5 font-mono text-code whitespace-pre text-highlighted sm:p-[18px] **:[.line]:block **:[.line.highlight]:bg-accented"
       :class="props.class"
     ><slot /></pre>
   </div>

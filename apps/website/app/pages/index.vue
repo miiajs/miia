@@ -73,11 +73,11 @@ const benchRows = (() => {
 })()
 
 const sectionLayout = 'flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:gap-x-14 lg:gap-y-10'
-const eyebrow = 'font-mono text-xs text-muted lg:text-[13px]'
-const heading = 'text-[26px] leading-[1.18] font-semibold tracking-[-0.02em] lg:text-[length:clamp(28px,3vw,36px)] lg:leading-[1.15]'
-const lead = 'max-w-[460px] text-base leading-[1.6] text-toned lg:text-[17px]'
-const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px] font-medium text-primary underline-offset-4 hover:underline lg:min-h-8'
-const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
+const eyebrow = 'font-mono text-meta text-muted'
+const heading = 'text-heading font-semibold'
+const lead = 'max-w-[460px] text-body-lg text-toned'
+const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui font-medium text-primary underline-offset-4 hover:underline lg:min-h-8'
+const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
 </script>
 
 <template>
@@ -87,10 +87,10 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
       class="flex flex-col gap-7 pt-10 pb-12 lg:flex-row lg:flex-wrap lg:items-center lg:gap-14 lg:pt-[88px] lg:pb-20"
     >
       <div class="flex min-w-0 flex-col gap-5 lg:flex-[1_1_480px] lg:gap-[26px]">
-        <h1 class="text-[36px] leading-[1.08] font-semibold tracking-[-0.025em] lg:text-[length:clamp(40px,4.6vw,62px)] lg:leading-[1.04]">
+        <h1 class="text-display font-semibold">
           {{ heroTitle[0] }}<br><span class="text-dimmed">{{ heroTitle[1] }}</span>
         </h1>
-        <p class="max-w-[520px] text-[17px] leading-[1.6] text-toned lg:text-lg">
+        <p class="max-w-[520px] text-lead text-toned">
           {{ page.hero.description }}
         </p>
         <div class="flex flex-col gap-2.5 lg:flex-row lg:flex-wrap lg:gap-3">
@@ -100,7 +100,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
             v-bind="link"
             :class="[button, 'font-semibold']"
           />
-          <div class="flex min-h-12 items-center gap-2.5 rounded-sm border border-accented bg-elevated ps-3.5 pe-0.5 font-mono text-sm lg:pe-1">
+          <div class="flex min-h-12 items-center gap-2.5 rounded-sm border border-accented bg-elevated ps-3.5 pe-0.5 font-mono text-code lg:pe-1">
             <span
               class="text-dimmed"
               aria-hidden="true"
@@ -155,10 +155,10 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
             :key="feature.title"
             class="flex flex-col gap-1.5 border-t border-default py-[18px] last:border-b lg:flex-row lg:flex-wrap lg:gap-x-8 lg:gap-y-2 lg:py-[22px]"
           >
-            <h3 class="text-base font-semibold lg:flex-[0_0_220px] lg:text-[17px]">
+            <h3 class="text-card-title font-semibold lg:flex-[0_0_220px]">
               {{ feature.title }}
             </h3>
-            <p class="text-[15px] leading-[1.6] text-toned lg:flex-[1_1_280px]">
+            <p class="text-ui text-toned lg:flex-[1_1_280px]">
               {{ feature.description }}
             </p>
           </div>
@@ -178,7 +178,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
           <p :class="lead">
             {{ page.runtimes.description }}
           </p>
-          <p class="font-mono text-xs leading-[1.6] text-muted lg:text-[13px]">
+          <p class="font-mono text-meta text-muted">
             tested on {{ page.runtimes.tested.join(' · ') }}
           </p>
         </div>
@@ -222,13 +222,13 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
             :key="item.title"
             class="flex flex-col gap-1.5 border-default p-4 not-first:border-t sm:gap-2.5 sm:border-r sm:border-b sm:p-[22px] sm:not-first:border-t-0"
           >
-            <h3 class="text-[15.5px] font-semibold sm:text-base">
+            <h3 class="text-card-title font-semibold">
               {{ item.title }}
             </h3>
-            <p class="text-sm leading-[1.55] text-toned sm:text-[14.5px]">
+            <p class="text-small text-toned">
               {{ item.description }}
             </p>
-            <p class="font-mono text-xs text-muted sm:mt-auto sm:pt-1.5 sm:text-[12.5px]">
+            <p class="font-mono text-caption text-muted sm:mt-auto sm:pt-1.5">
               {{ item.packages }}
             </p>
           </div>
@@ -261,7 +261,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
         </div>
         <figure class="mt-1 min-w-0 overflow-x-auto rounded-[8px] border border-default bg-elevated font-mono lg:mt-0 lg:flex-[1_1_560px]">
           <div class="sm:min-w-[500px]">
-            <div class="grid gap-4 border-b border-muted px-3.5 py-2.5 text-[11.5px] leading-[1.5] text-muted sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:px-[18px] sm:py-3 sm:text-xs">
+            <div class="grid gap-4 border-b border-muted px-3.5 py-2.5 text-caption text-muted sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:px-[18px] sm:py-3">
               <span class="sm:col-span-2">{{ benchRoute }}</span>
               <span class="hidden text-right sm:block">req/s</span>
               <span class="hidden text-right sm:block">latency</span>
@@ -270,7 +270,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-[15px]'
               <div
                 v-for="row in benchRows"
                 :key="row.name"
-                class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-muted px-3.5 py-3 text-[13px] not-first:border-t sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:gap-4 sm:px-[18px] sm:text-[13.5px]"
+                class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-muted px-3.5 py-3 text-meta not-first:border-t sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:gap-4 sm:px-[18px]"
                 :class="row.highlight ? 'text-highlighted' : 'text-toned'"
               >
                 <span

@@ -123,13 +123,13 @@ cd benchmarks
 bun install
 bun run bench`
 
-const eyebrow = 'font-mono text-xs text-muted lg:text-[13px]'
-const heading = 'text-[26px] leading-[1.18] font-semibold tracking-[-0.02em] lg:text-[32px] lg:leading-[1.15]'
-const lead = 'text-base leading-[1.6] text-toned lg:text-[17px]'
-const subheading = 'text-base font-semibold lg:text-[17px]'
+const eyebrow = 'font-mono text-meta text-muted'
+const heading = 'text-heading font-semibold'
+const lead = 'text-body-lg text-toned'
+const subheading = 'text-card-title font-semibold'
 const columns = 'flex flex-col gap-6 lg:flex-row lg:flex-wrap lg:gap-x-14 lg:gap-y-8'
 const column = 'flex min-w-0 flex-col lg:flex-[1_1_420px]'
-const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px] font-medium text-primary underline-offset-4 hover:underline lg:min-h-8'
+const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui font-medium text-primary underline-offset-4 hover:underline lg:min-h-8'
 </script>
 
 <template>
@@ -141,14 +141,14 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
       <p :class="eyebrow">
         benchmarks
       </p>
-      <h1 class="text-[32px] leading-[1.1] font-semibold tracking-[-0.025em] lg:text-[length:clamp(40px,4.6vw,58px)] lg:leading-[1.05]">
+      <h1 class="text-display font-semibold">
         Throughput and latency,<br><span class="text-dimmed">with the full stack on.</span>
       </h1>
-      <p class="max-w-[720px] text-base leading-[1.6] text-toned lg:text-lg">
+      <p class="max-w-[720px] text-lead text-toned">
         MiiaJS next to Hono, Elysia, Fastify and NestJS on Bun, Deno and Node.js. The realistic tests run with CORS, JWT,
         routing, body parsing and validation enabled; the synthetic ones measure bare framework overhead.
       </p>
-      <p class="font-mono text-xs leading-[1.6] text-muted lg:text-[13px]">
+      <p class="font-mono text-meta text-muted">
         {{ methodLine }}
       </p>
     </UContainer>
@@ -165,14 +165,14 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
             :key="e.key"
             type="button"
             :aria-pressed="env === e.key"
-            class="min-h-11 flex-1 rounded-sm px-4 font-mono text-[13px] sm:flex-none lg:min-h-10 lg:text-[13.5px]"
+            class="min-h-11 flex-1 rounded-sm px-4 font-mono text-meta sm:flex-none lg:min-h-10"
             :class="env === e.key ? 'bg-inverted font-semibold text-inverted' : 'text-toned hover:text-highlighted'"
             @click="env = e.key"
           >
             {{ e.label }}
           </button>
         </div>
-        <p class="font-mono text-xs leading-[1.5] text-muted lg:text-[13px]">
+        <p class="font-mono text-meta text-muted">
           {{ activeEnv.description }} · measured {{ activeEnv.date }}
         </p>
       </UContainer>
@@ -202,14 +202,14 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
           class="min-w-0 rounded-[8px] border border-default bg-elevated sm:row-span-3 sm:grid sm:grid-rows-subgrid sm:gap-y-0"
         >
           <figcaption class="flex flex-col gap-1 border-b border-muted px-3.5 py-3 sm:px-[18px] sm:py-3.5">
-            <h3 class="font-mono text-xs leading-[1.5] font-semibold break-all text-highlighted sm:text-[13.5px]">
+            <h3 class="font-mono text-meta font-semibold break-all text-highlighted">
               {{ test.title }}
             </h3>
-            <p class="text-[13.5px] leading-[1.5] text-muted sm:text-sm">
+            <p class="text-small text-muted">
               {{ test.description }}
             </p>
           </figcaption>
-          <div class="hidden grid-cols-[170px_minmax(0,1fr)_72px_64px] gap-3.5 px-[18px] pt-2.5 pb-1 font-mono text-[11.5px] text-muted sm:grid">
+          <div class="hidden grid-cols-[170px_minmax(0,1fr)_72px_64px] gap-3.5 px-[18px] pt-2.5 pb-1 font-mono text-caption text-muted sm:grid">
             <span>framework</span>
             <span />
             <span class="text-right">req/s</span>
@@ -219,7 +219,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
             <div
               v-for="row in test.rows"
               :key="row.name"
-              class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-[5px] px-3.5 py-2 font-mono text-[12.5px] sm:grid-cols-[170px_minmax(0,1fr)_72px_64px] sm:gap-3.5 sm:px-[18px] sm:py-1.5 sm:text-[13px]"
+              class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2.5 gap-y-[5px] px-3.5 py-2 font-mono text-meta sm:grid-cols-[170px_minmax(0,1fr)_72px_64px] sm:gap-3.5 sm:px-[18px] sm:py-1.5"
             >
               <span
                 class="col-start-1 row-start-1"
@@ -280,14 +280,14 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
             <h3 :class="subheading">
               {{ group.title }}
             </h3>
-            <dl class="text-[15px] leading-[1.5]">
+            <dl class="text-ui">
               <div
                 v-for="item in group.items"
                 :key="item.term"
                 class="flex border-t border-muted py-2.5 last:border-b sm:grid sm:grid-cols-[120px_minmax(0,1fr)] sm:items-baseline sm:gap-4"
                 :class="group.stacked ? 'flex-col gap-0.5' : 'items-baseline justify-between gap-3'"
               >
-                <dt class="font-mono text-[12.5px] text-muted sm:text-[13px]">
+                <dt class="font-mono text-meta text-muted">
                   {{ item.term }}
                 </dt>
                 <dd :class="!group.stacked && 'text-right sm:text-left'">
@@ -307,10 +307,10 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
             :key="machine.key"
             class="flex min-w-0 flex-col gap-1.5 rounded-[8px] border border-default bg-elevated px-4 py-3.5 sm:flex-[1_1_360px] lg:px-5 lg:py-[18px]"
           >
-            <h4 class="text-[15.5px] font-semibold lg:mb-1 lg:text-base">
+            <h4 class="text-card-title font-semibold lg:mb-1">
               {{ machine.name }}
             </h4>
-            <p class="font-mono text-[12.5px] leading-[1.7] text-toned lg:text-[13px]">
+            <p class="font-mono text-meta leading-relaxed text-toned">
               <span
                 v-for="(line, i) in machine.lines"
                 :key="i"
@@ -322,7 +322,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
                 >{{ j ? ' · ' : '' }}<span class="whitespace-nowrap">{{ part }}</span></template>
               </span>
             </p>
-            <p class="font-mono text-xs text-muted lg:mt-1.5">
+            <p class="font-mono text-meta text-muted lg:mt-1.5">
               measured {{ machine.date }}
             </p>
           </div>
@@ -339,15 +339,15 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
           >
             <div class="flex items-baseline justify-between gap-2.5">
               <span :class="framework.name === 'MiiaJS' && 'font-semibold'">{{ framework.name }}</span>
-              <span class="font-mono text-[12.5px]">{{ framework.version }}</span>
+              <span class="font-mono text-caption">{{ framework.version }}</span>
             </div>
-            <span class="text-[13.5px] leading-[1.5] text-muted">{{ framework.type }} · {{ framework.runtimes }}</span>
+            <span class="text-small text-muted">{{ framework.type }} · {{ framework.runtimes }}</span>
           </li>
         </ul>
         <div class="hidden overflow-x-auto rounded-[8px] border border-default bg-elevated md:block">
-          <table class="w-full min-w-[720px] border-collapse text-[14.5px] leading-[1.5]">
+          <table class="w-full min-w-[720px] border-collapse text-small">
             <thead>
-              <tr class="font-mono text-xs text-muted">
+              <tr class="font-mono text-caption text-muted">
                 <th
                   v-for="label in ['framework', 'version', 'type', 'runtimes']"
                   :key="label"
@@ -371,7 +371,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
                 >
                   {{ framework.name }}
                 </th>
-                <td class="px-4 py-3 font-mono text-[13.5px]">
+                <td class="px-4 py-3 font-mono text-meta">
                   {{ framework.version }}
                 </td>
                 <td class="px-4 py-3 text-toned">
@@ -384,7 +384,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
             </tbody>
           </table>
         </div>
-        <p class="font-mono text-xs leading-[1.6] text-muted lg:text-[12.5px]">
+        <p class="font-mono text-caption text-muted">
           Hono uWS uses the same @miiajs/uws-server adapter (uWebSockets.js 20.69.0), so the difference is pure framework
           overhead.
         </p>
@@ -410,7 +410,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-[15px]
             <h3 :class="subheading">
               {{ group.title }}
             </h3>
-            <ul class="text-[15px] leading-[1.55] text-toned">
+            <ul class="text-ui text-toned">
               <li
                 v-for="item in group.items"
                 :key="item.term"

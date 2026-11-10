@@ -34,7 +34,7 @@ function closeOnLink(event: MouseEvent) {
       <button
         type="button"
         aria-label="Open documentation menu"
-        class="flex min-h-12 min-w-0 flex-1 items-center gap-2.5 border-e border-default ps-4 pe-3.5 text-start text-[15px] text-highlighted"
+        class="flex min-h-12 min-w-0 flex-1 items-center gap-2.5 border-e border-default ps-4 pe-3.5 text-start text-ui text-highlighted"
         @click="menuOpen = true"
       >
         <UIcon
@@ -52,7 +52,7 @@ function closeOnLink(event: MouseEvent) {
         type="button"
         :aria-expanded="tocOpen"
         aria-controls="docs-mobile-toc"
-        class="flex min-h-12 shrink-0 items-center gap-1.5 px-3.5 font-mono text-xs text-toned"
+        class="flex min-h-12 shrink-0 items-center gap-1.5 px-3.5 font-mono text-caption text-toned"
         @click="tocOpen = !tocOpen"
       >
         on this page
@@ -77,7 +77,7 @@ function closeOnLink(event: MouseEvent) {
         >
           <NuxtLink
             :to="`#${link.id}`"
-            class="flex min-h-11 items-center text-[15px] text-toned hover:text-highlighted"
+            class="flex min-h-11 items-center text-ui text-toned hover:text-highlighted"
             @click="tocOpen = false"
           >
             {{ link.text }}
@@ -92,7 +92,7 @@ function closeOnLink(event: MouseEvent) {
             >
               <NuxtLink
                 :to="`#${child.id}`"
-                class="flex min-h-11 items-center text-[15px] text-muted hover:text-highlighted"
+                class="flex min-h-11 items-center text-ui text-muted hover:text-highlighted"
                 @click="tocOpen = false"
               >
                 {{ child.text }}
@@ -114,7 +114,7 @@ function closeOnLink(event: MouseEvent) {
     >
       <template #content>
         <div class="flex items-center justify-between border-b border-default bg-accented py-0.5 ps-4 pe-0.5">
-          <span class="font-mono text-xs text-muted">documentation</span>
+          <span class="font-mono text-caption text-muted">documentation</span>
           <UButton
             color="neutral"
             variant="ghost"
@@ -131,7 +131,7 @@ function closeOnLink(event: MouseEvent) {
         >
           <button
             type="button"
-            class="mx-2 mb-3 flex min-h-11 w-[calc(100%-1rem)] items-center gap-2.5 rounded-md border border-accented bg-elevated px-3 text-start text-[15px] text-muted"
+            class="mx-2 mb-3 flex min-h-11 w-[calc(100%-1rem)] items-center gap-2.5 rounded-md border border-accented bg-elevated px-3 text-start text-ui text-muted"
             @click="openSearch"
           >
             <UIcon
@@ -148,7 +148,7 @@ function closeOnLink(event: MouseEvent) {
             trailing-icon="i-lucide-chevron-right"
             :ui="{
               listWithChildren: 'ms-3 border-s-0',
-              link: 'min-h-11 px-2.5 text-[15px]',
+              link: 'min-h-11 px-2.5 text-ui',
               linkTrailingIcon: 'size-4'
             }"
           >

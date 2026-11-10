@@ -71,7 +71,7 @@ watch(searchOpen, (value) => {
         :key="item.to"
         :to="item.to"
         :aria-current="item.active ? 'page' : undefined"
-        class="p-3 text-sm transition-colors"
+        class="p-3 text-small transition-colors"
         :class="item.active
           ? 'font-medium text-highlighted underline decoration-primary decoration-2 underline-offset-[7px]'
           : 'text-toned hover:text-highlighted'"
@@ -135,7 +135,7 @@ watch(searchOpen, (value) => {
           :key="item.to"
           :to="item.to"
           :aria-current="item.active ? 'page' : undefined"
-          class="flex min-h-14 items-center justify-between border-b border-default text-[19px] font-medium text-highlighted"
+          class="flex min-h-14 items-center justify-between border-b border-default text-subheading font-medium text-highlighted"
         >
           {{ item.label }}
           <UIcon
@@ -146,7 +146,7 @@ watch(searchOpen, (value) => {
       </nav>
 
       <div class="flex flex-col gap-2.5 px-4 pt-7">
-        <p class="font-mono text-xs text-muted">
+        <p class="font-mono text-caption text-muted">
           theme
         </p>
         <div
@@ -159,7 +159,7 @@ watch(searchOpen, (value) => {
             :key="theme.value"
             type="button"
             :aria-pressed="preference === theme.value"
-            class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md text-sm"
+            class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-md text-small"
             :class="preference === theme.value ? 'bg-inverted font-medium text-inverted' : 'text-toned'"
             @click="preference = theme.value"
           >
@@ -173,7 +173,7 @@ watch(searchOpen, (value) => {
       </div>
 
       <div class="flex flex-col px-4 pt-7">
-        <p class="mb-1 font-mono text-xs text-muted">
+        <p class="mb-1 font-mono text-caption text-muted">
           community
         </p>
         <NuxtLink
@@ -181,7 +181,7 @@ watch(searchOpen, (value) => {
           :key="link.label"
           :to="link.to"
           target="_blank"
-          class="flex min-h-12 items-center justify-between border-b border-muted text-base text-highlighted last:border-b-0"
+          class="flex min-h-12 items-center justify-between border-b border-muted text-body text-highlighted last:border-b-0"
         >
           {{ link.label }}
           <UIcon
@@ -191,7 +191,7 @@ watch(searchOpen, (value) => {
         </NuxtLink>
       </div>
 
-      <div class="mt-auto flex justify-between border-t border-default p-4 font-mono text-xs text-muted">
+      <div class="mt-auto flex justify-between border-t border-default p-4 font-mono text-meta text-muted">
         <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS</span>
         <span>v{{ miiaVersion }}</span>
       </div>

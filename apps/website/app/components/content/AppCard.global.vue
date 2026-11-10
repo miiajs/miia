@@ -20,7 +20,7 @@ const packages = computed(() => props.packages.map((name, index) => index ? name
 const needs = computed(() => props.needs?.split('`').map((text, index) => ({ text, code: index % 2 === 1 })) ?? [])
 
 const row = 'flex flex-col gap-0.5 px-3.5 py-2.5 not-first:border-t not-first:border-muted sm:grid sm:grid-cols-[96px_minmax(0,1fr)] sm:gap-0 sm:px-0 sm:py-0'
-const label = 'font-mono text-xs text-muted sm:py-2.5 sm:ps-[18px] sm:text-[12.5px]'
+const label = 'font-mono text-caption text-muted sm:py-2.5 sm:ps-[18px]'
 const value = 'sm:py-2.5 sm:pe-[18px]'
 </script>
 
@@ -30,7 +30,7 @@ const value = 'sm:py-2.5 sm:pe-[18px]'
     class="my-5 overflow-hidden rounded-[8px] border border-default bg-elevated lg:my-[22px]"
   >
     <div class="flex flex-col gap-1.5 border-b border-muted p-3.5 sm:px-[18px] sm:py-4">
-      <div class="flex items-center justify-between gap-3 font-mono text-xs text-muted">
+      <div class="flex items-center justify-between gap-3 font-mono text-caption text-muted">
         <span class="inline-flex items-center gap-2">
           <span
             aria-hidden="true"
@@ -50,18 +50,18 @@ const value = 'sm:py-2.5 sm:pe-[18px]'
           />
         </NuxtLink>
       </div>
-      <p class="text-[17px] font-semibold text-highlighted sm:text-lg">
+      <p class="text-card-title font-semibold text-highlighted">
         {{ props.name }}
       </p>
-      <p class="text-[14.5px] leading-[1.55] text-toned sm:text-[15px]">
+      <p class="text-ui text-toned">
         {{ props.description }}
       </p>
     </div>
 
-    <div class="text-sm leading-[1.5]">
+    <div class="text-small">
       <div :class="row">
         <span :class="label">packages</span>
-        <span :class="[value, 'font-mono text-[12.5px] sm:text-[13px]']">{{ packages }}</span>
+        <span :class="[value, 'font-mono text-meta']">{{ packages }}</span>
       </div>
       <div :class="row">
         <span :class="label">runtimes</span>
@@ -84,7 +84,7 @@ const value = 'sm:py-2.5 sm:pe-[18px]'
     </div>
 
     <div class="border-t border-muted bg-default/50">
-      <div class="flex items-center justify-between py-0.5 ps-3.5 pe-0.5 font-mono text-xs text-muted sm:ps-[18px] sm:pe-1.5">
+      <div class="flex items-center justify-between py-0.5 ps-3.5 pe-0.5 font-mono text-caption text-muted sm:ps-[18px] sm:pe-1.5">
         <span>run it</span>
         <UButton
           color="neutral"
@@ -96,7 +96,7 @@ const value = 'sm:py-2.5 sm:pe-[18px]'
           @click="copy(props.commands.join('\n'))"
         />
       </div>
-      <pre class="m-0 overflow-x-auto px-3.5 pb-3.5 font-mono text-[12.5px] leading-[1.75] whitespace-pre text-highlighted sm:px-[18px] sm:pb-4 sm:text-[13.5px]">{{ props.commands.join('\n') }}</pre>
+      <pre class="m-0 overflow-x-auto px-3.5 pb-3.5 font-mono text-code whitespace-pre text-highlighted sm:px-[18px] sm:pb-4">{{ props.commands.join('\n') }}</pre>
     </div>
   </aside>
 </template>

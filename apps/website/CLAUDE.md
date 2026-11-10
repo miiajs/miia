@@ -9,7 +9,7 @@ Documentation site for MiiaJS. This CLAUDE.md describes how the site is wired so
 - **@nuxt/ui 4.12** - UI kit, provides `UPage`, `UPageHeader`, `UContentNavigation`, `UBadge`, Prose components
 - **@nuxt/fonts 1.2** - IBM Plex Sans and IBM Plex Mono, self-hosted (served from `/_nuxt/fonts/`, no Google Fonts). It is listed in `modules` itself, and the families in `fonts.families` have `global: true`, which also feeds them to the OG image template: nuxt-og-image 7 takes its fonts only from `@nuxt/fonts` 1.x. Without its own entry Nuxt UI brings `@nuxt/fonts` 0.14, and with it the OG image silently falls back to the built-in Inter
 - **@nuxtjs/seo 6** - site config, sitemap, robots, schema.org and nuxt-og-image 7 with Takumi 2 (`@takumi-rs/core` 2.x). Two of its modules are off: `aiReady: false` (llms.txt is a separate plan) and `skewProtection: false` (a static site needs no version polling). The sitemap is prerendered only because `/sitemap.xml` is listed in `nitro.prerender.routes`
-- **Tailwind 4.3** - the theme lives in `app/assets/css/main.css` (see Brand)
+- **Tailwind 4.3** - the theme lives in `app/assets/css/main.css` (see Brand and Typography)
 - **Code highlighting** - Shiki themes `miia-light` / `miia-dark` from `shiki-themes.ts`, set in `content.build.markdown.highlight`; Content passes them to `@nuxtjs/mdc`, so `<MDC>` renders with the same themes
 - No third-party docs theme (no docus, no shadcn-docs-nuxt) - own layout built on top of `@nuxt/ui` primitives
 
@@ -47,9 +47,9 @@ apps/website/
 │   └── routes/blog/rss.xml.ts      # RSS 2.0 feed of the blog
 └── app/
     ├── app.vue                     # root: theme-color, default SEO and OG tags, loading bar, AppSearch
-    ├── app.config.ts               # Nuxt UI: primary `brand`, neutral `stone`, sidebar, TOC and prose styles
+    ├── app.config.ts               # Nuxt UI: primary `brand`, neutral `stone`, type tokens for tailwind-merge, sidebar, TOC and prose styles
     ├── error.vue                   # 404 and error page: header, footer, AppSearch
-    ├── assets/css/main.css         # Tailwind 4 theme: Plex font stacks, brand scale, Nuxt UI `--ui-*` tokens per theme
+    ├── assets/css/main.css         # Tailwind 4 theme: Plex font stacks, brand scale, type tokens, Nuxt UI `--ui-*` tokens per theme
     ├── layouts/
     │   ├── default.vue             # landing, benchmarks and blog shell
     │   └── docs.vue                # doc shell: header, DocsMobileBar, sidebar nav, compact footer
@@ -106,6 +106,33 @@ Copies of the values, for places CSS variables do not reach:
 - `public/` - `favicon.svg`, `favicon.ico`, `favicon-16/32/192/512.png`, `apple-touch-icon.png` and `og-image.png` have the colors baked in. `favicon.svg` switches to the dark colors through `prefers-color-scheme` inside the SVG; the PNG and ICO files do not follow the theme, so their square is filled with paper. Their sources are in `tmp/design/website/assets/` at the repository root: `icons.html`, `og-image.html`, `favicon.svg` and `render.mjs`, which renders them with playwright-core and Chrome and assembles the ICO. `tmp/` is gitignored, so the sources exist only locally, not in the repository.
 
 When the accent changes, update the brand scale in `main.css`, then `BRAND_COLORS` and `shiki-themes.ts`, and regenerate the `public/` files from their sources.
+
+## Typography
+
+Text sizes are tokens named by role, in `@theme static` of `app/assets/css/main.css`: `--text-<name>` with its `--text-<name>--line-height` and, for headings, `--text-<name>--letter-spacing`, so one class `text-<name>` sets all three. Sizes are in rem. The three heading sizes grow with the viewport through `clamp()`; the others are fixed, with one step at `lg` set in the `@media (min-width: 64rem)` block of `:root`.
+
+| Token | Size, px | From `lg` | Line height | Tracking | Used for |
+|---|---|---|---|---|---|
+| `display` | 36 to 60, grows from 640 to 1280 | | 1.05 | -0.025em | h1 of the landing, benchmarks, blog and error pages |
+| `title` | 32 to 44, grows from 768 to 1280 | | 1.1 | -0.02em | h1 of a doc page and of a post |
+| `heading` | 26 to 34, grows from 768 to 1280 | | 1.15 | -0.02em | section headings of the landing and benchmarks pages, the latest post on `/blog` |
+| `heading-sm` | 22 | 26 | 1.25 | -0.015em | h2 in prose (docs and posts) |
+| `subheading` | 19 | 21 | 1.3 | -0.01em | h3 in prose, older posts on `/blog`, items of the site menu |
+| `card-title` | 16 | 17 | 1.35 | | card titles, previous / next, test machines, h4 in prose, `AppCard` name |
+| `lead` | 17 | 19 | 1.6 | | intro paragraphs: hero, description of a doc page or a post, error page |
+| `body-lg` | 16.5 | 17.5 | 1.7 | | post body, section descriptions, description of the latest post |
+| `body` | 16 | 16.5 | 1.7 | | doc body, community links of the site menu |
+| `ui` | 15 | 15 | 1.6 | | buttons, text links, card text, callouts, lists, footer links |
+| `small` | 14 | 14 | 1.5 | | header nav, docs sidebar, TOC, tables, figure captions, short card descriptions |
+| `meta` | 12 | 13 | 1.5 | | mono: eyebrows, breadcrumbs, dates, "measured ..." lines, footer bottom line |
+| `caption` | 12 | 12 | 1.5 | | mono: group and panel labels, table heads, ⌘K, the experimental badge |
+| `code` | 13 | 14 | 1.7 | | code blocks: `ProsePre`, the error page panel, `AppCard`, the install command of the hero |
+
+- No `text-[Npx]`, `text-[clamp(...)]`, `leading-[...]` or `tracking-[...]`: a size is a token, and a new size is a new token. The exceptions are the em sizes of inline code (`text-[0.86em]` and the like), the logo (its scale in `AppHeader` and `AppFooter`, its tracking in `AppLogo`) and `leading-[inherit]`: prose `p` and `li` (`ui.prose` in `app/app.config.ts`) and the paragraphs of a callout take the line height of the token on their container - `body` on a doc page, `body-lg` in a post, `ui` in a callout.
+- A named `leading-*` next to a token only where the line height holds the size of a box: `leading-5` on the sidebar links, `leading-snug` on a callout title, `leading-relaxed` on the specs of a test machine.
+- Chips and keys (`EXPERIMENTAL_BADGE`, ⌘K, the tags on `/blog`) take `text-caption/4`, a 16 px line box.
+- `UPageHeader` sets `text-3xl sm:text-4xl` on its title, so the doc page writes `text-title sm:text-title` to replace both.
+- Nuxt UI merges the classes of its components (`:ui`, `class`, `app.config.ts`) with tailwind-merge, which takes an unknown `text-<name>` for a color: it would drop the token or the color next to it (`text-meta text-muted`). The token names are therefore registered in `app/app.config.ts` under `ui.tv.twMergeConfig.extend.classGroups['font-size']`. The list lives in two places, `main.css` and `app.config.ts`, and they must match. In those merged strings the token goes before a `leading-*`: tailwind-merge drops a `leading-*` that comes before a size.
 
 ## Version
 
@@ -380,7 +407,7 @@ commands:
 | `app/components/DocsMobileBar.vue` | Docs below `lg`: the page menu with the doc tree and "on this page". |
 | `app/pages/docs/[...slug].vue` | Renders one doc page; `UPageHeader` with breadcrumb and status badge in `#headline` + `ContentRenderer`, prev/next, edit link, TOC. |
 | `app/components/content/*.global.vue` | `ProsePre`, the callouts and `AppCard`. |
-| `app/assets/css/main.css` | Font stacks, brand scale, Nuxt UI `--ui-*` tokens per theme, `--ui-container`. |
+| `app/assets/css/main.css` | Font stacks, brand scale, type tokens (`text-<name>`), Nuxt UI `--ui-*` tokens per theme, `--ui-container`. |
 | `app/utils/brand-colors.ts` | `BRAND_COLORS`, the brand colors for `theme-color` and the OG image, auto-imported. |
 | `content.config.ts` | Zod schemas for `index`, `docs` and `blog` collections; excludes blog drafts outside `nuxt dev`. |
 | `app/utils/experimental-badge.ts` | `EXPERIMENTAL_BADGE`, auto-imported. |

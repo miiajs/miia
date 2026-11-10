@@ -6,5 +6,5 @@ export const EXPERIMENTAL_BADGE: BadgeProps = {
   color: 'neutral',
   variant: 'outline',
   size: 'sm',
-  class: 'rounded-[3px] border border-dashed border-(--ui-text-dimmed) bg-transparent px-[5px] py-0 font-mono text-[11px]/4 font-normal text-toned ring-0'
+  class: 'rounded-[3px] border border-dashed border-(--ui-text-dimmed) bg-transparent px-[5px] py-0 font-mono text-caption/4 font-normal text-toned ring-0'
 }

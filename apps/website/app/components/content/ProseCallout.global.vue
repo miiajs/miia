@@ -26,13 +26,13 @@ const markers = {
         class="shrink-0"
         :class="markers[props.type]"
       />
-      <span class="font-mono text-xs text-muted">{{ props.type }}</span>
+      <span class="font-mono text-caption text-muted">{{ props.type }}</span>
       <span
         v-if="props.title"
-        class="text-[15px] leading-snug font-semibold text-highlighted"
+        class="text-ui leading-snug font-semibold text-highlighted"
       >{{ props.title }}</span>
     </div>
-    <div class="px-3.5 pt-3.5 pb-4 text-[15px] leading-[1.65] text-default sm:px-[18px] sm:text-[15.5px] [&>:first-child]:mt-0 [&>:last-child]:mb-0 [&>div]:my-3.5 [&>ol]:my-3 [&>p]:my-3 [&>p]:leading-[1.65] [&>ul]:my-3">
+    <div class="px-3.5 pt-3.5 pb-4 text-ui text-default sm:px-[18px] [&>:first-child]:mt-0 [&>:last-child]:mb-0 [&>div]:my-3.5 [&>ol]:my-3 [&>p]:my-3 [&>p]:leading-[inherit] [&>ul]:my-3">
       <slot />
     </div>
   </aside>

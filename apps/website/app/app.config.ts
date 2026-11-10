@@ -1,5 +1,15 @@
 export default defineAppConfig({
   ui: {
+    // The type tokens of main.css, the same list: unregistered, tailwind-merge takes `text-<token>` for a color and drops it or the color next to it
+    tv: {
+      twMergeConfig: {
+        extend: {
+          classGroups: {
+            'font-size': [{ text: ['display', 'title', 'heading', 'heading-sm', 'subheading', 'card-title', 'lead', 'body-lg', 'body', 'ui', 'small', 'meta', 'caption', 'code'] }]
+          }
+        }
+      }
+    },
     colors: {
       primary: 'brand',
       neutral: 'stone'
@@ -16,7 +26,7 @@ export default defineAppConfig({
         listWithChildren: 'ms-2.5',
         itemWithChildren: 'data-[state=open]:mb-1',
         trigger: 'font-normal text-toned hover:text-highlighted data-[state=open]:font-medium data-[state=open]:text-highlighted',
-        link: 'gap-2 py-1.5 text-[14.5px] leading-5 before:rounded-[4px]',
+        link: 'gap-2 py-1.5 text-small leading-5 before:rounded-[4px]',
         // Wraps instead of truncating: the current page's marker and an experimental badge do not fit one line in the sidebar
         linkTitle: 'text-clip',
         linkTrailing: 'gap-2',
@@ -42,9 +52,9 @@ export default defineAppConfig({
       slots: {
         root: 'lg:mx-0 lg:px-0',
         container: 'lg:pt-10',
-        trigger: 'mb-1.5 font-mono text-xs font-normal text-muted lowercase',
+        trigger: 'mb-1.5 font-mono text-caption font-normal text-muted lowercase',
         listWithChildren: 'ms-3.5',
-        link: 'py-1 text-[13.5px] leading-[1.45]'
+        link: 'py-1 text-small'
       },
       variants: {
         active: {
@@ -63,7 +73,7 @@ export default defineAppConfig({
         slots: {
           list: 'border-default bg-elevated rounded-t-[8px] p-1 pe-12',
           indicator: 'inset-y-1 bg-accented rounded-sm shadow-none',
-          trigger: 'min-h-9 font-mono text-xs text-muted hover:bg-accented/50 rounded-sm'
+          trigger: 'min-h-9 font-mono text-caption text-muted hover:bg-accented/50 rounded-sm'
         }
       },
       code: {
@@ -75,44 +85,44 @@ export default defineAppConfig({
         }
       },
       p: {
-        base: 'my-[18px] leading-[1.7] lg:my-[22px]'
+        base: 'my-[18px] leading-[inherit] lg:my-[22px]'
       },
       li: {
-        base: 'leading-[1.7]'
+        base: 'leading-[inherit]'
       },
       a: {
         base: 'border-b-0 font-normal underline decoration-1 underline-offset-[0.2em] hover:decoration-2'
       },
       h2: {
         slots: {
-          base: 'mt-[30px] mb-[18px] text-[22px] leading-[1.25] font-semibold tracking-[-0.01em] lg:mt-10 lg:mb-[22px] lg:text-[26px] lg:tracking-[-0.015em] [&>a>code]:text-[0.86em] [&>a>code]:font-semibold'
+          base: 'mt-[30px] mb-[18px] text-heading-sm font-semibold lg:mt-10 lg:mb-[22px] [&>a>code]:text-[0.86em] [&>a>code]:font-semibold'
         }
       },
       h3: {
         slots: {
-          base: 'mt-8 mb-3 text-lg leading-snug font-semibold tracking-[-0.01em] lg:text-xl [&>a>code]:text-[0.86em] [&>a>code]:font-semibold'
+          base: 'mt-8 mb-3 text-subheading font-semibold [&>a>code]:text-[0.86em] [&>a>code]:font-semibold'
         }
       },
       h4: {
         slots: {
-          base: 'text-base font-semibold lg:text-[17px]'
+          base: 'text-card-title font-semibold'
         }
       },
       // The frame scrolls sideways on narrow screens; a column floor keeps a three-column table from squeezing into a phone
       table: {
         slots: {
           root: 'rounded-[8px] border border-default bg-elevated',
-          base: 'border-collapse rounded-none text-sm leading-[1.55] lg:text-[14.5px]'
+          base: 'border-collapse rounded-none text-small'
         }
       },
       thead: {
         base: 'bg-transparent'
       },
       th: {
-        base: 'min-w-32 border-0 first:border-s-0 px-3.5 py-2.5 font-mono text-xs font-normal text-muted lowercase lg:px-4 lg:py-3 [&_code]:normal-case'
+        base: 'min-w-32 border-0 first:border-s-0 px-3.5 py-2.5 font-mono text-caption font-normal text-muted lowercase lg:px-4 lg:py-3 [&_code]:normal-case'
       },
       td: {
-        base: 'min-w-32 border-0 first:border-s-0 border-t border-muted px-3.5 py-2.5 text-sm leading-[1.55] lg:px-4 lg:py-3 lg:text-[14.5px] [&_code]:text-[0.86em]'
+        base: 'min-w-32 border-0 first:border-s-0 border-t border-muted px-3.5 py-2.5 text-small lg:px-4 lg:py-3 [&_code]:text-[0.86em]'
       }
     }
   }

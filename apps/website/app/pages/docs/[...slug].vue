@@ -51,9 +51,9 @@ const editUrl = computed(() => `https://github.com/miiajs/miia/edit/main/apps/we
       :description="page.description"
       :ui="{
         root: 'pt-6 pb-[18px] lg:pt-10 lg:pb-7',
-        headline: 'mb-[18px] flex-wrap gap-x-3 gap-y-1.5 font-mono text-xs font-normal text-muted lg:mb-[22px] lg:text-[13px]',
-        title: 'text-[34px] leading-[1.12] font-semibold tracking-[-0.02em] sm:text-[34px] lg:text-[44px] lg:leading-[1.1]',
-        description: 'mt-[18px] text-[17px] leading-[1.55] text-toned lg:mt-[22px] lg:text-[19px]'
+        headline: 'mb-[18px] flex-wrap gap-x-3 gap-y-1.5 font-mono text-meta font-normal text-muted lg:mb-[22px]',
+        title: 'text-title sm:text-title font-semibold',
+        description: 'mt-[18px] text-lead text-toned lg:mt-[22px]'
       }"
     >
       <template #headline>
@@ -65,7 +65,7 @@ const editUrl = computed(() => `https://github.com/miiajs/miia/edit/main/apps/we
       </template>
     </UPageHeader>
 
-    <UPageBody class="mt-0 space-y-0 pb-10 text-base lg:pt-1.5 lg:pb-[72px] lg:text-[16.5px]">
+    <UPageBody class="mt-0 space-y-0 pb-10 text-body lg:pt-1.5 lg:pb-[72px]">
       <ContentRenderer
         v-if="page.body"
         :value="page"
@@ -80,15 +80,15 @@ const editUrl = computed(() => `https://github.com/miiajs/miia/edit/main/apps/we
         }"
       >
         <template #link="{ link }">
-          <span class="font-mono text-xs text-muted">{{ link.path === surround?.[0]?.path ? 'previous' : 'next' }}</span>
-          <span class="text-base font-semibold text-highlighted">{{ link.title }}</span>
+          <span class="font-mono text-caption text-muted">{{ link.path === surround?.[0]?.path ? 'previous' : 'next' }}</span>
+          <span class="text-card-title font-semibold text-highlighted">{{ link.title }}</span>
         </template>
       </UContentSurround>
 
       <NuxtLink
         :to="editUrl"
         target="_blank"
-        class="mt-[18px] inline-flex min-h-8 items-center gap-2 font-mono text-[13px] text-muted hover:text-highlighted lg:mt-[22px]"
+        class="mt-[18px] inline-flex min-h-8 items-center gap-2 font-mono text-meta text-muted hover:text-highlighted lg:mt-[22px]"
       >
         Edit this page on GitHub
         <UIcon

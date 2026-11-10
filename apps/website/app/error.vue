@@ -31,13 +31,13 @@ useSeoMeta({
     <UMain class="flex items-center">
       <UContainer class="flex flex-wrap items-center gap-x-16 gap-y-8 py-12 lg:gap-y-10 lg:py-16">
         <div class="flex min-w-0 flex-[1_1_420px] flex-col gap-[18px] lg:gap-5">
-          <p class="font-mono text-xs text-muted lg:text-[13px]">
+          <p class="font-mono text-meta text-muted">
             {{ error.statusCode }}
           </p>
-          <h1 class="text-4xl leading-[1.08] font-semibold tracking-[-0.025em] text-highlighted lg:text-[clamp(40px,4.6vw,60px)] lg:leading-[1.05]">
+          <h1 class="text-display font-semibold text-highlighted">
             {{ notFound ? 'Page not found.' : 'Something went wrong.' }}
           </h1>
-          <p class="max-w-[480px] text-[16.5px] leading-relaxed text-toned lg:text-lg">
+          <p class="max-w-[480px] text-lead text-toned">
             <template v-if="notFound">
               Nothing is served at <code class="font-mono text-[0.88em] break-all text-highlighted">{{ path }}</code>. The page may have moved, or the link has a typo.
             </template>
@@ -50,19 +50,19 @@ useSeoMeta({
               to="/"
               label="Back to home"
               color="neutral"
-              class="min-h-12 justify-center rounded-md px-5 text-[15px] font-semibold"
+              class="min-h-12 justify-center rounded-md px-5 text-ui font-semibold"
             />
             <UButton
               color="neutral"
               variant="outline"
               icon="i-lucide-search"
               label="Search docs"
-              class="min-h-12 justify-center gap-2.5 rounded-md bg-elevated px-4 text-[15px] font-normal text-highlighted ring-default"
+              class="min-h-12 justify-center gap-2.5 rounded-md bg-elevated px-4 text-ui font-normal text-highlighted ring-default"
               :ui="{ leadingIcon: 'size-4' }"
               @click="searchOpen = true"
             >
               <template #trailing>
-                <span class="hidden rounded-sm border border-default px-1.5 py-px font-mono text-xs text-muted sm:inline">⌘K</span>
+                <span class="hidden rounded-sm border border-default px-1.5 py-px font-mono text-caption/4 text-muted sm:inline">⌘K</span>
               </template>
             </UButton>
           </div>
@@ -72,15 +72,15 @@ useSeoMeta({
           v-if="notFound"
           class="m-0 min-w-0 flex-[1_1_480px] rounded-lg border border-default bg-elevated"
         >
-          <div class="border-b border-muted px-3.5 py-2.5 font-mono text-[11.5px] break-all text-muted lg:px-[18px] lg:py-3 lg:text-xs">
+          <div class="border-b border-muted px-3.5 py-2.5 font-mono text-caption break-all text-muted lg:px-[18px] lg:py-3">
             GET {{ path }}
           </div>
-          <pre class="m-0 overflow-x-auto p-3.5 font-mono text-[12.5px] leading-[1.75] text-highlighted lg:p-[18px] lg:text-sm">{
+          <pre class="m-0 overflow-x-auto p-3.5 font-mono text-code text-highlighted lg:p-[18px]">{
   "statusCode": <span class="text-primary">404</span>,
   "error": "Not Found",
   "message": {{ message }}
 }</pre>
-          <figcaption class="border-t border-muted px-3.5 py-2.5 text-[13.5px] leading-normal text-muted lg:px-[18px] lg:py-3 lg:text-sm">
+          <figcaption class="border-t border-muted px-3.5 py-2.5 text-small text-muted lg:px-[18px] lg:py-3">
             What a MiiaJS app answers for a route it does not have.
           </figcaption>
         </figure>

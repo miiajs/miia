@@ -19,6 +19,41 @@
   --color-brand-800: #162A80;
   --color-brand-900: #101F5D;
   --color-brand-950: #08143F;
+
+  /* Type scale by role: `text-<name>` sets size, line height and tracking. The names are also listed in app.config.ts (ui.tv) */
+  --text-display: clamp(2.25rem, 0.75rem + 3.75vw, 3.75rem);
+  --text-display--line-height: 1.05;
+  --text-display--letter-spacing: -0.025em;
+  --text-title: clamp(2rem, 0.875rem + 2.34375vw, 2.75rem);
+  --text-title--line-height: 1.1;
+  --text-title--letter-spacing: -0.02em;
+  --text-heading: clamp(1.625rem, 0.875rem + 1.5625vw, 2.125rem);
+  --text-heading--line-height: 1.15;
+  --text-heading--letter-spacing: -0.02em;
+  --text-heading-sm: 1.375rem;
+  --text-heading-sm--line-height: 1.25;
+  --text-heading-sm--letter-spacing: -0.015em;
+  --text-subheading: 1.1875rem;
+  --text-subheading--line-height: 1.3;
+  --text-subheading--letter-spacing: -0.01em;
+  --text-card-title: 1rem;
+  --text-card-title--line-height: 1.35;
+  --text-lead: 1.0625rem;
+  --text-lead--line-height: 1.6;
+  --text-body-lg: 1.03125rem;
+  --text-body-lg--line-height: 1.7;
+  --text-body: 1rem;
+  --text-body--line-height: 1.7;
+  --text-ui: 0.9375rem;
+  --text-ui--line-height: 1.6;
+  --text-small: 0.875rem;
+  --text-small--line-height: 1.5;
+  --text-meta: 0.75rem;
+  --text-meta--line-height: 1.5;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.5;
+  --text-code: 0.8125rem;
+  --text-code--line-height: 1.7;
 }
 
 /* Nuxt UI declares these in @layer theme: every one set here is set in .dark too */
@@ -68,5 +103,14 @@
 @media (min-width: 64rem) {
   :root {
     --ui-header-height: 4.25rem;
+    /* The lg step of the fixed type sizes */
+    --text-heading-sm: 1.625rem;
+    --text-subheading: 1.3125rem;
+    --text-card-title: 1.0625rem;
+    --text-lead: 1.1875rem;
+    --text-body-lg: 1.09375rem;
+    --text-body: 1.03125rem;
+    --text-meta: 0.8125rem;
+    --text-code: 0.875rem;
   }
 }

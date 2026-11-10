@@ -48,7 +48,7 @@ const columns: { label: string, links: { label: string, to: string, target?: str
     v-if="compact"
     class="border-t border-default bg-accented"
   >
-    <UContainer class="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 py-[22px] font-mono text-[13px] text-muted">
+    <UContainer class="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 py-[22px] font-mono text-meta text-muted">
       <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS · MIT License</span>
       <div class="flex flex-wrap gap-x-5 gap-y-1">
         <NuxtLink
@@ -91,7 +91,7 @@ const columns: { label: string, links: { label: string, to: string, target?: str
           >
             <AppLogo />
           </NuxtLink>
-          <p class="text-[15px] leading-relaxed text-toned">
+          <p class="text-ui text-toned">
             Structured TypeScript APIs on Web Standards. Open source, MIT licensed.
           </p>
         </div>
@@ -105,7 +105,7 @@ const columns: { label: string, links: { label: string, to: string, target?: str
             :key="column.label"
             class="flex flex-col lg:flex-[1_1_140px] lg:gap-1"
           >
-            <p class="mb-1 font-mono text-xs text-muted lg:mb-2">
+            <p class="mb-1 font-mono text-caption text-muted lg:mb-2">
               {{ column.label }}
             </p>
             <NuxtLink
@@ -113,7 +113,7 @@ const columns: { label: string, links: { label: string, to: string, target?: str
               :key="link.label"
               :to="link.to"
               :target="link.target"
-              class="py-2.5 text-[15px] text-highlighted hover:text-toned lg:py-1.5"
+              class="py-2.5 text-ui text-highlighted hover:text-toned lg:py-1.5"
             >
               {{ link.label }}
             </NuxtLink>
@@ -122,7 +122,7 @@ const columns: { label: string, links: { label: string, to: string, target?: str
       </div>
 
       <div
-        class="flex flex-wrap justify-between gap-3 border-default font-mono text-xs text-muted lg:border-t lg:pt-5 lg:text-[13px]"
+        class="flex flex-wrap justify-between gap-3 border-default font-mono text-meta text-muted lg:border-t lg:pt-5"
         :class="!minimalOnPhones && 'border-t pt-4'"
       >
         <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS</span>
