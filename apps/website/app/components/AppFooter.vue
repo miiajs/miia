@@ -122,8 +122,8 @@ const columns: { label: string, links: { label: string, to: string, target?: str
       </div>
 
       <div
-        class="flex flex-wrap justify-between gap-3 border-default font-mono text-meta text-muted lg:border-t lg:pt-5"
-        :class="!minimalOnPhones && 'border-t pt-4'"
+        class="flex flex-wrap justify-between gap-3 border-default font-mono text-meta text-muted lg:border-t lg:pt-8"
+        :class="!minimalOnPhones && 'border-t pt-7'"
       >
         <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS</span>
         <NuxtLink

@@ -425,8 +425,12 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
     </section>
 
     <section class="border-t border-default">
-      <UContainer class="flex flex-col gap-3.5 pt-10 pb-14 lg:flex-row lg:flex-wrap lg:items-center lg:gap-x-14 lg:gap-y-8 lg:pt-16 lg:pb-[88px]">
-        <div class="contents lg:flex lg:min-w-0 lg:flex-[1_1_400px] lg:flex-col lg:gap-3.5">
+      <SplitRow
+        flow
+        class="gap-3.5 py-10 lg:gap-y-8 lg:py-16"
+        text-class="lg:gap-3.5"
+      >
+        <template #text>
           <p :class="eyebrow">
             reproduce
           </p>
@@ -447,14 +451,16 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
               class="size-3.5"
             />
           </NuxtLink>
-        </div>
-        <CodePanel
-          file="terminal"
-          lang="bash"
-          :code="codeReproduce"
-          class="mt-1 min-w-0 lg:mt-0 lg:flex-[1_1_520px]"
-        />
-      </UContainer>
+        </template>
+        <template #panel>
+          <CodePanel
+            file="terminal"
+            lang="bash"
+            :code="codeReproduce"
+            class="mt-1 lg:mt-0"
+          />
+        </template>
+      </SplitRow>
     </section>
   </div>
 </template>

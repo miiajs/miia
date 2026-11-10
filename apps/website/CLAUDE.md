@@ -68,6 +68,7 @@ apps/website/
     │   ├── AppSearch.vue           # ⌘K docs search (`UContentSearch`), mounted in app.vue and error.vue
     │   ├── CodePanel.vue           # highlighted code outside Markdown (renders through ProsePre)
     │   ├── DocsMobileBar.vue       # docs below lg: the page menu and "on this page"
+    │   ├── SplitRow.vue            # text + panel row of the home, benchmarks and 404 pages, one 400/520 split
     │   ├── OgImage/MiiaPost.takumi.vue  # OG image template of a blog post
     │   └── content/                # *.global.vue, see Prose components
     │       ├── ProsePre.global.vue
@@ -412,6 +413,7 @@ commands:
 | `content.config.ts` | Zod schemas for `index`, `docs` and `blog` collections; excludes blog drafts outside `nuxt dev`. |
 | `app/utils/experimental-badge.ts` | `EXPERIMENTAL_BADGE`, auto-imported. |
 | `app/utils/page-columns.ts` | `TOC_COLUMNS`, the main column and the TOC column of doc pages and posts, auto-imported. |
+| `app/components/SplitRow.vue` | Text + panel row of the home, benchmarks and 404 pages: one 400/520 split, so the panels line up; slots `#text` and `#panel`, props `align`, `flow` (the text column dissolves below `lg`), `textClass`; `class` and `as` go to its `UContainer`. |
 | `app/pages/blog/index.vue` | Post list: RSS link, the latest post with `topics`, rows of older posts, `Draft` badge in dev. |
 | `app/pages/blog/[slug].vue` | One post: article SEO tags, schema.org `Article`, `defineOgImage('MiiaPost', ...)`, TOC, discussion and share links. |
 | `app/components/OgImage/MiiaPost.takumi.vue` | OG image template of a post (Takumi). |

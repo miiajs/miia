@@ -72,7 +72,6 @@ const benchRows = (() => {
   }))
 })()
 
-const sectionLayout = 'flex flex-col gap-4 lg:flex-row lg:flex-wrap lg:gap-x-14 lg:gap-y-10'
 const eyebrow = 'font-mono text-meta text-muted'
 const heading = 'text-heading font-semibold'
 const lead = 'max-w-[460px] text-body-lg text-toned'
@@ -82,11 +81,12 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
 
 <template>
   <div v-if="page">
-    <UContainer
+    <SplitRow
       as="section"
-      class="flex flex-col gap-7 pt-10 pb-12 lg:flex-row lg:flex-wrap lg:items-center lg:gap-14 lg:pt-[88px] lg:pb-20"
+      class="gap-7 py-12 lg:gap-y-14 lg:py-20"
+      text-class="gap-5 lg:gap-[26px]"
     >
-      <div class="flex min-w-0 flex-col gap-5 lg:flex-[1_1_480px] lg:gap-[26px]">
+      <template #text>
         <h1 class="text-display font-semibold">
           {{ heroTitle[0] }}<br><span class="text-dimmed">{{ heroTitle[1] }}</span>
         </h1>
@@ -117,18 +117,22 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
             />
           </div>
         </div>
-      </div>
-      <CodePanel
-        file="users.controller.ts"
-        lang="ts"
-        :code="codeDecorators"
-        class="min-w-0 lg:flex-[1_1_520px]"
-      />
-    </UContainer>
+      </template>
+      <template #panel>
+        <CodePanel
+          file="users.controller.ts"
+          lang="ts"
+          :code="codeDecorators"
+        />
+      </template>
+    </SplitRow>
 
     <section class="border-t border-default">
-      <UContainer :class="[sectionLayout, 'py-12 lg:items-start lg:py-20']">
-        <div class="flex min-w-0 flex-col gap-4 lg:flex-[1_1_400px] lg:gap-[18px]">
+      <SplitRow
+        align="start"
+        class="gap-4 py-12 lg:py-20"
+      >
+        <template #text>
           <p :class="eyebrow">
             architecture
           </p>
@@ -148,8 +152,8 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
               class="size-3.5"
             />
           </NuxtLink>
-        </div>
-        <div class="flex min-w-0 flex-col lg:flex-[1_1_560px]">
+        </template>
+        <template #panel>
           <div
             v-for="feature in page.architecture.features"
             :key="feature.title"
@@ -162,13 +166,13 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
               {{ feature.description }}
             </p>
           </div>
-        </div>
-      </UContainer>
+        </template>
+      </SplitRow>
     </section>
 
     <section class="border-t border-default">
-      <UContainer :class="[sectionLayout, 'gap-5 py-12 lg:items-center lg:py-20']">
-        <div class="flex min-w-0 flex-col gap-4 lg:flex-[1_1_400px] lg:gap-[18px]">
+      <SplitRow class="gap-5 py-12 lg:py-20">
+        <template #text>
           <p :class="eyebrow">
             runtimes
           </p>
@@ -181,14 +185,15 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
           <p class="font-mono text-meta text-muted">
             tested on {{ page.runtimes.tested.join(' · ') }}
           </p>
-        </div>
-        <CodePanel
-          file="main.ts"
-          lang="ts"
-          :code="codeRuntime"
-          class="min-w-0 lg:flex-[1_1_520px]"
-        />
-      </UContainer>
+        </template>
+        <template #panel>
+          <CodePanel
+            file="main.ts"
+            lang="ts"
+            :code="codeRuntime"
+          />
+        </template>
+      </SplitRow>
     </section>
 
     <section class="border-t border-default">
@@ -237,8 +242,11 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
     </section>
 
     <section class="border-t border-default">
-      <UContainer :class="[sectionLayout, 'py-12 lg:items-center lg:py-20']">
-        <div class="contents lg:flex lg:min-w-0 lg:flex-[1_1_380px] lg:flex-col lg:gap-[18px]">
+      <SplitRow
+        flow
+        class="gap-4 py-12 lg:py-20"
+      >
+        <template #text>
           <p :class="eyebrow">
             performance
           </p>
@@ -258,49 +266,54 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
               class="size-3.5"
             />
           </NuxtLink>
-        </div>
-        <figure class="mt-1 min-w-0 overflow-x-auto rounded-[8px] border border-default bg-elevated font-mono lg:mt-0 lg:flex-[1_1_560px]">
-          <div class="sm:min-w-[500px]">
-            <div class="grid gap-4 border-b border-muted px-3.5 py-2.5 text-caption text-muted sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:px-[18px] sm:py-3">
-              <span class="sm:col-span-2">{{ benchRoute }}</span>
-              <span class="hidden text-right sm:block">req/s</span>
-              <span class="hidden text-right sm:block">latency</span>
-            </div>
-            <div>
-              <div
-                v-for="row in benchRows"
-                :key="row.name"
-                class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-muted px-3.5 py-3 text-meta not-first:border-t sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:gap-4 sm:px-[18px]"
-                :class="row.highlight ? 'text-highlighted' : 'text-toned'"
-              >
-                <span
-                  class="col-start-1 row-start-1"
-                  :class="row.highlight && 'font-medium'"
-                >{{ row.name }}</span>
-                <span class="col-start-2 row-start-1 text-right sm:contents">
+        </template>
+        <template #panel>
+          <figure class="mt-1 overflow-x-auto rounded-[8px] border border-default bg-elevated font-mono lg:mt-0">
+            <div class="sm:min-w-[500px]">
+              <div class="grid gap-4 border-b border-muted px-3.5 py-2.5 text-caption text-muted sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:px-[18px] sm:py-3">
+                <span class="sm:col-span-2">{{ benchRoute }}</span>
+                <span class="hidden text-right sm:block">req/s</span>
+                <span class="hidden text-right sm:block">latency</span>
+              </div>
+              <div>
+                <div
+                  v-for="row in benchRows"
+                  :key="row.name"
+                  class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-muted px-3.5 py-3 text-meta not-first:border-t sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:gap-4 sm:px-[18px]"
+                  :class="row.highlight ? 'text-highlighted' : 'text-toned'"
+                >
                   <span
-                    class="sm:col-start-3 sm:row-start-1"
+                    class="col-start-1 row-start-1"
                     :class="row.highlight && 'font-medium'"
-                  >{{ row.reqSec }}<span class="text-muted sm:hidden"> req/s</span></span>
-                  <span class="text-muted sm:col-start-4 sm:row-start-1 sm:text-right"><span class="sm:hidden"> · </span>{{ row.latency }}</span>
-                </span>
-                <div class="col-span-2 row-start-2 h-2 rounded-[2px] bg-(--ui-border-muted) sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:h-2.5">
-                  <div
-                    class="h-full rounded-[2px]"
-                    :class="row.highlight ? 'bg-primary' : 'bg-(--ui-text-dimmed)/30 dark:bg-(--ui-text-dimmed)/40'"
-                    :style="{ width: row.width }"
-                  />
+                  >{{ row.name }}</span>
+                  <span class="col-start-2 row-start-1 text-right sm:contents">
+                    <span
+                      class="sm:col-start-3 sm:row-start-1"
+                      :class="row.highlight && 'font-medium'"
+                    >{{ row.reqSec }}<span class="text-muted sm:hidden"> req/s</span></span>
+                    <span class="text-muted sm:col-start-4 sm:row-start-1 sm:text-right"><span class="sm:hidden"> · </span>{{ row.latency }}</span>
+                  </span>
+                  <div class="col-span-2 row-start-2 h-2 rounded-[2px] bg-(--ui-border-muted) sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:h-2.5">
+                    <div
+                      class="h-full rounded-[2px]"
+                      :class="row.highlight ? 'bg-primary' : 'bg-(--ui-text-dimmed)/30 dark:bg-(--ui-text-dimmed)/40'"
+                      :style="{ width: row.width }"
+                    />
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        </figure>
-      </UContainer>
+          </figure>
+        </template>
+      </SplitRow>
     </section>
 
     <section class="border-t border-default">
-      <UContainer :class="[sectionLayout, 'pt-12 pb-14 lg:items-center lg:pt-20 lg:pb-24']">
-        <div class="contents lg:flex lg:min-w-0 lg:flex-[1_1_400px] lg:flex-col lg:gap-[18px]">
+      <SplitRow
+        flow
+        class="gap-4 py-12 lg:py-20"
+      >
+        <template #text>
           <p :class="eyebrow">
             get started
           </p>
@@ -319,14 +332,16 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
               :ui="{ trailingIcon: 'size-3.5' }"
             />
           </div>
-        </div>
-        <CodePanel
-          file="terminal"
-          lang="bash"
-          :code="codeTerminal"
-          class="mt-1 min-w-0 lg:mt-0 lg:flex-[1_1_520px]"
-        />
-      </UContainer>
+        </template>
+        <template #panel>
+          <CodePanel
+            file="terminal"
+            lang="bash"
+            :code="codeTerminal"
+            class="mt-1 lg:mt-0"
+          />
+        </template>
+      </SplitRow>
     </section>
   </div>
 </template>

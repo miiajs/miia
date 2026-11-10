@@ -29,8 +29,11 @@ useSeoMeta({
     <AppHeader />
 
     <UMain class="flex items-center">
-      <UContainer class="flex flex-wrap items-center gap-x-16 gap-y-8 py-12 lg:gap-y-10 lg:py-16">
-        <div class="flex min-w-0 flex-[1_1_420px] flex-col gap-[18px] lg:gap-5">
+      <SplitRow
+        class="gap-8 py-12 lg:py-16"
+        text-class="gap-[18px] lg:gap-5"
+      >
+        <template #text>
           <p class="font-mono text-meta text-muted">
             {{ error.statusCode }}
           </p>
@@ -66,25 +69,27 @@ useSeoMeta({
               </template>
             </UButton>
           </div>
-        </div>
+        </template>
 
-        <figure
+        <template
           v-if="notFound"
-          class="m-0 min-w-0 flex-[1_1_480px] rounded-lg border border-default bg-elevated"
+          #panel
         >
-          <div class="border-b border-muted px-3.5 py-2.5 font-mono text-caption break-all text-muted lg:px-[18px] lg:py-3">
-            GET {{ path }}
-          </div>
-          <pre class="m-0 overflow-x-auto p-3.5 font-mono text-code text-highlighted lg:p-[18px]">{
+          <figure class="m-0 rounded-lg border border-default bg-elevated">
+            <div class="border-b border-muted px-3.5 py-2.5 font-mono text-caption break-all text-muted lg:px-[18px] lg:py-3">
+              GET {{ path }}
+            </div>
+            <pre class="m-0 overflow-x-auto p-3.5 font-mono text-code text-highlighted lg:p-[18px]">{
   "statusCode": <span class="text-primary">404</span>,
   "error": "Not Found",
   "message": {{ message }}
 }</pre>
-          <figcaption class="border-t border-muted px-3.5 py-2.5 text-small text-muted lg:px-[18px] lg:py-3">
-            What a MiiaJS app answers for a route it does not have.
-          </figcaption>
-        </figure>
-      </UContainer>
+            <figcaption class="border-t border-muted px-3.5 py-2.5 text-small text-muted lg:px-[18px] lg:py-3">
+              What a MiiaJS app answers for a route it does not have.
+            </figcaption>
+          </figure>
+        </template>
+      </SplitRow>
     </UMain>
 
     <AppFooter minimal-on-phones />
