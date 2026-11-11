@@ -76,7 +76,7 @@ const columns: { label: string, links: { label: string, to: string, target?: str
     class="border-t border-default bg-accented"
   >
     <UContainer
-      class="flex flex-col gap-7 lg:gap-10 lg:pt-14 lg:pb-8"
+      class="flex flex-col gap-7 lg:gap-10 lg:pt-14 lg:pb-5"
       :class="minimalOnPhones ? 'py-7' : 'pt-10 pb-7'"
     >
       <div
@@ -122,7 +122,7 @@ const columns: { label: string, links: { label: string, to: string, target?: str
       </div>
 
       <div
-        class="flex flex-wrap justify-between gap-3 border-default font-mono text-meta text-muted lg:border-t lg:pt-8"
+        class="flex flex-wrap justify-between gap-3 border-default font-mono text-meta text-muted lg:border-t lg:pt-5"
         :class="!minimalOnPhones && 'border-t pt-7'"
       >
         <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS</span>
