@@ -32,7 +32,7 @@ const tag = 'rounded-[3px] border border-default px-1.5 py-px text-caption/4 tex
       as="section"
       class="flex flex-col gap-5 pt-9 pb-7 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between lg:gap-x-12 lg:pt-[72px] lg:pb-10"
     >
-      <div class="flex max-w-[680px] flex-col gap-4">
+      <div class="flex max-w-reading flex-col gap-4">
         <p class="font-mono text-meta text-muted">
           blog
         </p>
@@ -90,7 +90,7 @@ const tag = 'rounded-[3px] border border-default px-1.5 py-px text-caption/4 tex
               {{ latest.title }}
             </NuxtLink>
           </h2>
-          <p class="max-w-[720px] text-body-lg text-toned">
+          <p class="max-w-reading text-body-lg text-toned">
             {{ latest.description }}
           </p>
           <p

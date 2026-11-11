@@ -144,7 +144,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
       <h1 class="text-display font-semibold">
         Throughput and latency,<br><span class="text-dimmed">with the full stack on.</span>
       </h1>
-      <p class="max-w-[720px] text-lead text-toned">
+      <p class="max-w-reading text-lead text-toned">
         MiiaJS next to Hono, Elysia, Fastify and NestJS on Bun, Deno and Node.js. The realistic tests run with CORS, JWT,
         routing, body parsing and validation enabled; the synthetic ones measure bare framework overhead.
       </p>
@@ -154,7 +154,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
     </UContainer>
 
     <div class="border-y border-default bg-muted">
-      <UContainer class="flex flex-col gap-2.5 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-6 sm:gap-y-3 lg:py-3.5">
+      <UContainer class="flex flex-col gap-2.5 py-3 sm:items-start lg:flex-row lg:items-center lg:gap-x-6 lg:py-3.5">
         <div
           role="group"
           aria-label="Test machine"
@@ -172,7 +172,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
             {{ e.label }}
           </button>
         </div>
-        <p class="font-mono text-meta text-muted">
+        <p class="min-w-0 font-mono text-meta text-muted">
           {{ activeEnv.description }} · measured {{ activeEnv.date }}
         </p>
       </UContainer>
@@ -184,7 +184,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
       as="section"
       :class="['flex flex-col gap-4 pb-2 lg:gap-6 lg:pb-6', index === 0 ? 'pt-10 lg:pt-16' : 'pt-8 lg:pt-12']"
     >
-      <div class="flex max-w-[720px] flex-col gap-4 lg:gap-2.5">
+      <div class="flex max-w-reading flex-col gap-4 lg:gap-2.5">
         <p :class="eyebrow">
           {{ suite.eyebrow }}
         </p>
@@ -195,7 +195,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
           {{ suite.description }}
         </p>
       </div>
-      <div class="grid gap-4 sm:grid-cols-[repeat(auto-fit,minmax(480px,1fr))] sm:gap-5">
+      <div class="grid gap-4 sm:gap-5 lg:grid-cols-2">
         <figure
           v-for="test in suite.tests"
           :key="test.title"
@@ -259,7 +259,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
 
     <section class="mt-12 border-t border-default lg:mt-16">
       <UContainer class="flex flex-col gap-4 py-10 lg:gap-8 lg:py-16">
-        <div class="flex max-w-[720px] flex-col gap-4 lg:gap-2.5">
+        <div class="flex max-w-reading flex-col gap-4 lg:gap-2.5">
           <p :class="eyebrow">
             methodology
           </p>
@@ -301,11 +301,11 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
         <h3 :class="[subheading, 'mt-2 lg:mt-4']">
           Test machines
         </h3>
-        <div class="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:gap-5">
+        <div class="flex flex-col gap-4 sm:grid sm:grid-cols-2 sm:gap-5">
           <div
             v-for="machine in machines"
             :key="machine.key"
-            class="flex min-w-0 flex-col gap-1.5 rounded-[8px] border border-default bg-elevated px-4 py-3.5 sm:flex-[1_1_360px] lg:px-5 lg:py-[18px]"
+            class="flex min-w-0 flex-col gap-1.5 rounded-[8px] border border-default bg-elevated px-4 py-3.5 lg:px-5 lg:py-[18px]"
           >
             <h4 class="text-card-title font-semibold lg:mb-1">
               {{ machine.name }}
@@ -331,7 +331,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
         <h3 :class="[subheading, 'mt-2 lg:mt-4']">
           Frameworks compared
         </h3>
-        <ul class="rounded-[8px] border border-default bg-elevated md:hidden">
+        <ul class="rounded-[8px] border border-default bg-elevated sm:hidden">
           <li
             v-for="framework in frameworks"
             :key="framework.name"
@@ -344,8 +344,8 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
             <span class="text-small text-muted">{{ framework.type }} · {{ framework.runtimes }}</span>
           </li>
         </ul>
-        <div class="hidden overflow-x-auto rounded-[8px] border border-default bg-elevated md:block">
-          <table class="w-full min-w-[720px] border-collapse text-small">
+        <div class="hidden overflow-x-auto rounded-[8px] border border-default bg-elevated sm:block">
+          <table class="w-full border-collapse text-small">
             <thead>
               <tr class="font-mono text-caption text-muted">
                 <th
@@ -427,7 +427,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
     <section class="border-t border-default">
       <SplitRow
         flow
-        class="gap-3.5 py-10 lg:gap-y-8 lg:py-16"
+        class="gap-3.5 py-10 lg:py-16"
         text-class="lg:gap-3.5"
       >
         <template #text>
@@ -437,7 +437,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
           <h2 :class="heading">
             Run it yourself
           </h2>
-          <p :class="[lead, 'lg:max-w-[460px]']">
+          <p :class="[lead, 'max-w-split']">
             The benchmark suite is open source. Its CLI lets you pick scenarios, runtimes and the number of passes.
           </p>
           <NuxtLink

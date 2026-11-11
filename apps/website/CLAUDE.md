@@ -9,7 +9,7 @@ Documentation site for MiiaJS. This CLAUDE.md describes how the site is wired so
 - **@nuxt/ui 4.12** - UI kit, provides `UPage`, `UPageHeader`, `UContentNavigation`, `UBadge`, Prose components
 - **@nuxt/fonts 1.2** - IBM Plex Sans and IBM Plex Mono, self-hosted (served from `/_nuxt/fonts/`, no Google Fonts). It is listed in `modules` itself, and the families in `fonts.families` have `global: true`, which also feeds them to the OG image template: nuxt-og-image 7 takes its fonts only from `@nuxt/fonts` 1.x. Without its own entry Nuxt UI brings `@nuxt/fonts` 0.14, and with it the OG image silently falls back to the built-in Inter
 - **@nuxtjs/seo 6** - site config, sitemap, robots, schema.org and nuxt-og-image 7 with Takumi 2 (`@takumi-rs/core` 2.x). Two of its modules are off: `aiReady: false` (llms.txt is a separate plan) and `skewProtection: false` (a static site needs no version polling). The sitemap is prerendered only because `/sitemap.xml` is listed in `nitro.prerender.routes`
-- **Tailwind 4.3** - the theme lives in `app/assets/css/main.css` (see Brand and Typography)
+- **Tailwind 4.3** - the theme lives in `app/assets/css/main.css` (see Brand, Typography and Layout)
 - **Code highlighting** - Shiki themes `miia-light` / `miia-dark` from `shiki-themes.ts`, set in `content.build.markdown.highlight`; Content passes them to `@nuxtjs/mdc`, so `<MDC>` renders with the same themes
 - No third-party docs theme (no docus, no shadcn-docs-nuxt) - own layout built on top of `@nuxt/ui` primitives
 
@@ -47,9 +47,9 @@ apps/website/
 │   └── routes/blog/rss.xml.ts      # RSS 2.0 feed of the blog
 └── app/
     ├── app.vue                     # root: theme-color, default SEO and OG tags, loading bar, AppSearch
-    ├── app.config.ts               # Nuxt UI: primary `brand`, neutral `stone`, type tokens for tailwind-merge, sidebar, TOC and prose styles
+    ├── app.config.ts               # Nuxt UI: primary `brand`, neutral `stone`, type and measure tokens for tailwind-merge, sidebar, TOC and prose styles
     ├── error.vue                   # 404 and error page: header, footer, AppSearch
-    ├── assets/css/main.css         # Tailwind 4 theme: Plex font stacks, brand scale, type tokens, Nuxt UI `--ui-*` tokens per theme
+    ├── assets/css/main.css         # Tailwind 4 theme: Plex font stacks, brand scale, type and measure tokens, Nuxt UI `--ui-*` tokens per theme
     ├── layouts/
     │   ├── default.vue             # landing, benchmarks and blog shell
     │   └── docs.vue                # doc shell: header, DocsMobileBar, sidebar nav, compact footer
@@ -68,7 +68,7 @@ apps/website/
     │   ├── AppSearch.vue           # ⌘K docs search (`UContentSearch`), mounted in app.vue and error.vue
     │   ├── CodePanel.vue           # highlighted code outside Markdown (renders through ProsePre)
     │   ├── DocsMobileBar.vue       # docs below lg: the page menu and "on this page"
-    │   ├── SplitRow.vue            # text + panel row of the home, benchmarks and 404 pages, one 400/520 split
+    │   ├── SplitRow.vue            # text + panel row of the home, benchmarks and 404 pages, two columns from lg: 432 / 472 at 1024, 520 / 640 from 1280
     │   ├── OgImage/MiiaPost.takumi.vue  # OG image template of a blog post
     │   └── content/                # *.global.vue, see Prose components
     │       ├── ProsePre.global.vue
@@ -134,6 +134,17 @@ Text sizes are tokens named by role, in `@theme static` of `app/assets/css/main.
 - Chips and keys (`EXPERIMENTAL_BADGE`, ⌘K, the tags on `/blog`) take `text-caption/4`, a 16 px line box.
 - `UPageHeader` sets `text-3xl sm:text-4xl` on its title, so the doc page writes `text-title sm:text-title` to replace both.
 - Nuxt UI merges the classes of its components (`:ui`, `class`, `app.config.ts`) with tailwind-merge, which takes an unknown `text-<name>` for a color: it would drop the token or the color next to it (`text-meta text-muted`). The token names are therefore registered in `app/app.config.ts` under `ui.tv.twMergeConfig.extend.classGroups['font-size']`. The list lives in two places, `main.css` and `app.config.ts`, and they must match. In those merged strings the token goes before a `leading-*`: tailwind-merge drops a `leading-*` that comes before a size.
+
+## Layout
+
+- The layout changes only at `sm` (640) and `lg` (1024): the number of columns, a row turning into a column. `md` is not used. `xl` (1280, the container maximum) only widens the docs sidebar and the TOC column (`app/layouts/docs.vue`, `TOC_COLUMNS`); no column count changes there.
+- No row or grid takes its column count from its content: no `flex-wrap` with a basis that does not fit at the breakpoint, no `flex-wrap` without a basis, no `auto-fill` / `auto-fit`. Columns are set per breakpoint (`sm:grid-cols-2 lg:grid-cols-4`) or come from `SplitRow`.
+- Below `lg` the reading columns (a doc page, a post) take the full container width: their cap is `lg:max-w-reading`.
+- Two text measures, `--container-<name>` in `@theme static` of `app/assets/css/main.css`, so the class is `max-w-<name>`:
+  - `split` (520 px) - text in the text column of a `SplitRow`: the section leads of the landing page, the hero, the reproduce lead of benchmarks, the error page lead.
+  - `reading` (720 px) - the other capped text: full-width section heads (packages on the landing page, the suites and methodology on benchmarks), page intros (benchmarks, `/blog`), the description of the latest post, the reading column of a doc page and of a post from `lg`.
+- No `max-w-[Npx]` on text: a measure is a token, and a new measure is a new token. The exception is the brand block of the footer (`lg:max-w-[340px]`).
+- tailwind-merge does not know the names either: they are registered in `app/app.config.ts` under `ui.tv.twMergeConfig.extend.classGroups['max-w']`. Without that, on a `UContainer`, a `SplitRow` `class` or a `:ui` slot both a token and `max-w-(--ui-container)` would stay and CSS order would decide. The list lives in two places, `main.css` and `app.config.ts`, and they must match.
 
 ## Version
 
@@ -408,12 +419,12 @@ commands:
 | `app/components/DocsMobileBar.vue` | Docs below `lg`: the page menu with the doc tree and "on this page". |
 | `app/pages/docs/[...slug].vue` | Renders one doc page; `UPageHeader` with breadcrumb and status badge in `#headline` + `ContentRenderer`, prev/next, edit link, TOC. |
 | `app/components/content/*.global.vue` | `ProsePre`, the callouts and `AppCard`. |
-| `app/assets/css/main.css` | Font stacks, brand scale, type tokens (`text-<name>`), Nuxt UI `--ui-*` tokens per theme, `--ui-container`. |
+| `app/assets/css/main.css` | Font stacks, brand scale, type tokens (`text-<name>`), measure tokens (`max-w-split`, `max-w-reading`), Nuxt UI `--ui-*` tokens per theme, `--ui-container`. |
 | `app/utils/brand-colors.ts` | `BRAND_COLORS`, the brand colors for `theme-color` and the OG image, auto-imported. |
 | `content.config.ts` | Zod schemas for `index`, `docs` and `blog` collections; excludes blog drafts outside `nuxt dev`. |
 | `app/utils/experimental-badge.ts` | `EXPERIMENTAL_BADGE`, auto-imported. |
 | `app/utils/page-columns.ts` | `TOC_COLUMNS`, the main column and the TOC column of doc pages and posts, auto-imported. |
-| `app/components/SplitRow.vue` | Text + panel row of the home, benchmarks and 404 pages: one 400/520 split, so the panels line up; slots `#text` and `#panel`, props `align`, `flow` (the text column dissolves below `lg`), `textClass`; `class` and `as` go to its `UContainer`. |
+| `app/components/SplitRow.vue` | Text + panel row of the home, benchmarks and 404 pages: two columns from `lg`, 432 / 472 at 1024 and 520 / 640 from 1280, so the panels line up; the gap gives way to a classic scrollbar at 1024; slots `#text` and `#panel`, props `align`, `flow` (the text column dissolves below `lg`), `textClass`; `class` and `as` go to its `UContainer`. |
 | `app/pages/blog/index.vue` | Post list: RSS link, the latest post with `topics`, rows of older posts, `Draft` badge in dev. |
 | `app/pages/blog/[slug].vue` | One post: article SEO tags, schema.org `Article`, `defineOgImage('MiiaPost', ...)`, TOC, discussion and share links. |
 | `app/components/OgImage/MiiaPost.takumi.vue` | OG image template of a post (Takumi). |

@@ -1,11 +1,12 @@
 export default defineAppConfig({
   ui: {
-    // The type tokens of main.css, the same list: unregistered, tailwind-merge takes `text-<token>` for a color and drops it or the color next to it
+    // The type and measure tokens of main.css, the same lists: unregistered, tailwind-merge takes `text-<token>` for a color and drops it or the color next to it
     tv: {
       twMergeConfig: {
         extend: {
           classGroups: {
-            'font-size': [{ text: ['display', 'title', 'heading', 'heading-sm', 'subheading', 'card-title', 'lead', 'body-lg', 'body', 'ui', 'small', 'meta', 'caption', 'code'] }]
+            'font-size': [{ text: ['display', 'title', 'heading', 'heading-sm', 'subheading', 'card-title', 'lead', 'body-lg', 'body', 'ui', 'small', 'meta', 'caption', 'code'] }],
+            'max-w': [{ 'max-w': ['split', 'reading'] }]
           }
         }
       }

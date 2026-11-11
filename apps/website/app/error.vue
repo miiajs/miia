@@ -40,7 +40,7 @@ useSeoMeta({
           <h1 class="text-display font-semibold text-highlighted">
             {{ notFound ? 'Page not found.' : 'Something went wrong.' }}
           </h1>
-          <p class="max-w-[480px] text-lead text-toned">
+          <p class="max-w-split text-lead text-toned">
             <template v-if="notFound">
               Nothing is served at <code class="font-mono text-[0.88em] break-all text-highlighted">{{ path }}</code>. The page may have moved, or the link has a typo.
             </template>

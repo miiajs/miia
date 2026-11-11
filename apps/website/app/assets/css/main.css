@@ -54,6 +54,10 @@
   --text-caption--line-height: 1.5;
   --text-code: 0.8125rem;
   --text-code--line-height: 1.7;
+
+  /* Text measures: `max-w-split` in the text column of a SplitRow, `max-w-reading` for the other capped text */
+  --container-split: 32.5rem;
+  --container-reading: 45rem;
 }
 
 /* Nuxt UI declares these in @layer theme: every one set here is set in .dark too */

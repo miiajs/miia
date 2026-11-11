@@ -74,7 +74,7 @@ const benchRows = (() => {
 
 const eyebrow = 'font-mono text-meta text-muted'
 const heading = 'text-heading font-semibold'
-const lead = 'max-w-[460px] text-body-lg text-toned'
+const lead = 'max-w-split text-body-lg text-toned'
 const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui font-medium text-primary underline-offset-4 hover:underline lg:min-h-8'
 const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
 </script>
@@ -83,17 +83,17 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
   <div v-if="page">
     <SplitRow
       as="section"
-      class="gap-7 py-12 lg:gap-y-14 lg:py-20"
+      class="gap-7 py-12 lg:py-20"
       text-class="gap-5 lg:gap-[26px]"
     >
       <template #text>
         <h1 class="text-display font-semibold">
           {{ heroTitle[0] }}<br><span class="text-dimmed">{{ heroTitle[1] }}</span>
         </h1>
-        <p class="max-w-[520px] text-lead text-toned">
+        <p class="max-w-split text-lead text-toned">
           {{ page.hero.description }}
         </p>
-        <div class="flex flex-col gap-2.5 lg:flex-row lg:flex-wrap lg:gap-3">
+        <div class="flex flex-col gap-2.5 sm:flex-row sm:flex-wrap sm:gap-3">
           <UButton
             v-for="link in page.hero.links"
             :key="link.to"
@@ -157,12 +157,12 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
           <div
             v-for="feature in page.architecture.features"
             :key="feature.title"
-            class="flex flex-col gap-1.5 border-t border-default py-[18px] last:border-b lg:flex-row lg:flex-wrap lg:gap-x-8 lg:gap-y-2 lg:py-[22px]"
+            class="flex flex-col gap-1.5 border-t border-default py-[18px] last:border-b sm:grid sm:grid-cols-[13rem_minmax(0,1fr)] sm:gap-x-6 lg:py-[22px]"
           >
-            <h3 class="text-card-title font-semibold lg:flex-[0_0_220px]">
+            <h3 class="text-card-title font-semibold">
               {{ feature.title }}
             </h3>
-            <p class="text-ui text-toned lg:flex-[1_1_280px]">
+            <p class="text-ui text-toned">
               {{ feature.description }}
             </p>
           </div>
@@ -199,14 +199,14 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
     <section class="border-t border-default">
       <UContainer class="flex flex-col gap-4 py-12 lg:gap-9 lg:py-20">
         <div class="contents lg:flex lg:flex-wrap lg:items-end lg:justify-between lg:gap-x-12 lg:gap-y-4">
-          <div class="flex max-w-[640px] flex-col gap-4 lg:gap-[18px]">
+          <div class="flex max-w-reading flex-col gap-4 lg:gap-[18px]">
             <p :class="eyebrow">
               packages
             </p>
             <h2 :class="heading">
               {{ page.packages.title }}
             </h2>
-            <p :class="lead">
+            <p class="text-body-lg text-toned">
               {{ page.packages.description }}
             </p>
           </div>
@@ -221,7 +221,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
             />
           </NuxtLink>
         </div>
-        <div class="grid border border-default bg-elevated sm:grid-cols-[repeat(auto-fill,minmax(260px,1fr))] sm:border-r-0 sm:border-b-0">
+        <div class="grid border border-default bg-elevated sm:grid-cols-2 sm:border-r-0 sm:border-b-0 lg:grid-cols-4">
           <div
             v-for="item in page.packages.items"
             :key="item.title"
@@ -269,37 +269,35 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
         </template>
         <template #panel>
           <figure class="mt-1 overflow-x-auto rounded-[8px] border border-default bg-elevated font-mono lg:mt-0">
-            <div class="sm:min-w-[500px]">
-              <div class="grid gap-4 border-b border-muted px-3.5 py-2.5 text-caption text-muted sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:px-[18px] sm:py-3">
-                <span class="sm:col-span-2">{{ benchRoute }}</span>
-                <span class="hidden text-right sm:block">req/s</span>
-                <span class="hidden text-right sm:block">latency</span>
-              </div>
-              <div>
-                <div
-                  v-for="row in benchRows"
-                  :key="row.name"
-                  class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-muted px-3.5 py-3 text-meta not-first:border-t sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:gap-4 sm:px-[18px]"
-                  :class="row.highlight ? 'text-highlighted' : 'text-toned'"
-                >
+            <div class="grid gap-4 border-b border-muted px-3.5 py-2.5 text-caption text-muted sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:px-[18px] sm:py-3">
+              <span class="break-all sm:col-span-2">{{ benchRoute }}</span>
+              <span class="hidden text-right sm:block">req/s</span>
+              <span class="hidden text-right sm:block">latency</span>
+            </div>
+            <div>
+              <div
+                v-for="row in benchRows"
+                :key="row.name"
+                class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 border-muted px-3.5 py-3 text-meta not-first:border-t sm:grid-cols-[150px_minmax(0,1fr)_84px_64px] sm:gap-4 sm:px-[18px]"
+                :class="row.highlight ? 'text-highlighted' : 'text-toned'"
+              >
+                <span
+                  class="col-start-1 row-start-1"
+                  :class="row.highlight && 'font-medium'"
+                >{{ row.name }}</span>
+                <span class="col-start-2 row-start-1 text-right sm:contents">
                   <span
-                    class="col-start-1 row-start-1"
+                    class="sm:col-start-3 sm:row-start-1"
                     :class="row.highlight && 'font-medium'"
-                  >{{ row.name }}</span>
-                  <span class="col-start-2 row-start-1 text-right sm:contents">
-                    <span
-                      class="sm:col-start-3 sm:row-start-1"
-                      :class="row.highlight && 'font-medium'"
-                    >{{ row.reqSec }}<span class="text-muted sm:hidden"> req/s</span></span>
-                    <span class="text-muted sm:col-start-4 sm:row-start-1 sm:text-right"><span class="sm:hidden"> · </span>{{ row.latency }}</span>
-                  </span>
-                  <div class="col-span-2 row-start-2 h-2 rounded-[2px] bg-(--ui-border-muted) sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:h-2.5">
-                    <div
-                      class="h-full rounded-[2px]"
-                      :class="row.highlight ? 'bg-primary' : 'bg-(--ui-text-dimmed)/30 dark:bg-(--ui-text-dimmed)/40'"
-                      :style="{ width: row.width }"
-                    />
-                  </div>
+                  >{{ row.reqSec }}<span class="text-muted sm:hidden"> req/s</span></span>
+                  <span class="text-muted sm:col-start-4 sm:row-start-1 sm:text-right"><span class="sm:hidden"> · </span>{{ row.latency }}</span>
+                </span>
+                <div class="col-span-2 row-start-2 h-2 rounded-[2px] bg-(--ui-border-muted) sm:col-span-1 sm:col-start-2 sm:row-start-1 sm:h-2.5">
+                  <div
+                    class="h-full rounded-[2px]"
+                    :class="row.highlight ? 'bg-primary' : 'bg-(--ui-text-dimmed)/30 dark:bg-(--ui-text-dimmed)/40'"
+                    :style="{ width: row.width }"
+                  />
                 </div>
               </div>
             </div>
@@ -323,7 +321,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
           <p :class="lead">
             {{ page.start.description }}
           </p>
-          <div class="order-last flex flex-col gap-2.5 pt-1 lg:order-none lg:flex-row lg:flex-wrap lg:gap-3 lg:pt-1.5">
+          <div class="order-last flex flex-col gap-2.5 pt-1 sm:flex-row sm:flex-wrap sm:gap-3 lg:order-none lg:pt-1.5">
             <UButton
               v-for="link in page.start.links"
               :key="link.to"

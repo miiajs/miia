@@ -50,7 +50,7 @@ const toc = computed(() => post.value?.body?.toc?.links ?? [])
     v-if="post"
     :class="['flex flex-col pb-10 lg:grid lg:pb-[88px]', TOC_COLUMNS]"
   >
-    <header class="flex max-w-[720px] flex-col gap-3.5 pt-8 pb-[22px] lg:col-start-1 lg:row-start-1 lg:gap-[18px] lg:pt-10 lg:pb-10">
+    <header class="flex flex-col gap-3.5 pt-8 pb-[22px] lg:col-start-1 lg:row-start-1 lg:max-w-reading lg:gap-[18px] lg:pt-10 lg:pb-10">
       <p class="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-meta text-muted">
         <span>
           <NuxtLink
@@ -97,7 +97,7 @@ const toc = computed(() => post.value?.body?.toc?.links ?? [])
       </template>
     </UContentToc>
 
-    <article class="-mx-4 mt-6 min-w-0 border-t border-default px-4 pt-1.5 text-body-lg sm:-mx-6 sm:px-6 lg:col-start-1 lg:row-start-2 lg:mx-0 lg:mt-0 lg:max-w-[720px] lg:px-0 lg:pt-2.5">
+    <article class="-mx-4 mt-6 min-w-0 border-t border-default px-4 pt-1.5 text-body-lg sm:-mx-6 sm:px-6 lg:col-start-1 lg:row-start-2 lg:mx-0 lg:mt-0 lg:max-w-reading lg:px-0 lg:pt-2.5">
       <ContentRenderer
         v-if="post.body"
         :value="post"

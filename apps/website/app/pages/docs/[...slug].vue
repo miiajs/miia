@@ -42,7 +42,7 @@ const editUrl = computed(() => `https://github.com/miiajs/miia/edit/main/apps/we
     v-if="page"
     :ui="{
       root: TOC_COLUMNS,
-      center: [toc.length ? 'lg:col-span-1' : 'lg:col-span-2', 'max-w-[780px]'],
+      center: [toc.length ? 'lg:col-span-1' : 'lg:col-span-2', 'lg:max-w-reading'],
       right: 'lg:col-span-1'
     }"
   >
