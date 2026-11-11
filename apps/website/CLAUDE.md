@@ -82,7 +82,7 @@ apps/website/
     └── utils/
         ├── brand-colors.ts         # BRAND_COLORS, see Brand (auto-imported)
         ├── experimental-badge.ts   # EXPERIMENTAL_BADGE, the badge of experimental pages (auto-imported)
-        ├── page-columns.ts         # TOC_COLUMNS, the main column + TOC grid of doc pages and posts (auto-imported)
+        ├── page-columns.ts         # TOC_COLUMNS (main column + TOC of doc pages and posts) and SIDEBAR_COLUMNS (sidebar + main column of the docs layout and posts), auto-imported
         └── blog.ts                 # formatPostDate(), isDraftPost() (auto-imported)
 ```
 
@@ -137,7 +137,7 @@ Text sizes are tokens named by role, in `@theme static` of `app/assets/css/main.
 
 ## Layout
 
-- The layout changes only at `sm` (640) and `lg` (1024): the number of columns, a row turning into a column. `md` is not used. `xl` (1280, the container maximum) only widens the docs sidebar and the TOC column (`app/layouts/docs.vue`, `TOC_COLUMNS`); no column count changes there.
+- The layout changes only at `sm` (640) and `lg` (1024): the number of columns, a row turning into a column. `md` is not used. `xl` (1280, the container maximum) only widens the sidebar column and the TOC column (`SIDEBAR_COLUMNS`, `TOC_COLUMNS`); no column count changes there.
 - No row or grid takes its column count from its content: no `flex-wrap` with a basis that does not fit at the breakpoint, no `flex-wrap` without a basis, no `auto-fill` / `auto-fit`. Columns are set per breakpoint (`sm:grid-cols-2 lg:grid-cols-4`) or come from `SplitRow`.
 - Below `lg` the reading columns (a doc page, a post) take the full container width: their cap is `lg:max-w-reading`.
 - Two text measures, `--container-<name>` in `@theme static` of `app/assets/css/main.css`, so the class is `max-w-<name>`:
@@ -344,11 +344,11 @@ discussion: https://github.com/miiajs/miia/discussions/<n>   # optional, a URL
 - `date` is `z.date()` in the schema, but queries return it as a `YYYY-MM-DD` string. Format it with `formatPostDate()` (`app/utils/blog.ts`, UTC): the string is midnight UTC, and formatting it in the local time zone can show the day before. Both pages render it in a `<time :datetime>`.
 - `tags` - the first tag is the post's section: the breadcrumb of the post (`blog / release`) and the top line of its OG image (`blog · release`). `/blog` shows every tag next to the date.
 - `topics` - listed under the description of the latest post on `/blog`, joined with ` · `. Older posts do not show them.
-- `discussion` - when set, the post ends with a "Discuss on GitHub" link before "Share on X" and "Share on LinkedIn".
+- `discussion` - when set, the post gets a "Discuss on GitHub" link before "Share on X" and "Share on LinkedIn": in the left column from `lg`, in the row after the body below `lg`.
 - There is no `image` field: every post gets a generated OG image (below).
 - The list page selects only the fields it shows (`.select(...)`), otherwise `/blog/_payload.json` carries the body of every post.
 
-Both pages have their own markup, no `UBlogPosts` / `UBlogPost`. `/blog` (`app/pages/blog/index.vue`): a header with the `RSS feed` link, the latest post as a large entry (date, tags, title, description, `topics`, "Read the post"), then one row per older post (date and tags | title and description), and an empty state that links the feed. A post (`app/pages/blog/[slug].vue`): breadcrumb, title, description and `date · author`, then the body with the "In this post" TOC, then "All posts" and the discussion and share links. The header, the TOC and the body are one grid on `TOC_COLUMNS`: from `lg` up the TOC is the sticky column on the right with the docs' look, its label level with the breadcrumb; below `lg` it is a collapsible block between the header and the body.
+Both pages have their own markup, no `UBlogPosts` / `UBlogPost`. `/blog` (`app/pages/blog/index.vue`): a header with the `RSS feed` link, the latest post as a large entry (date, tags, title, description, `topics`, "Read the post"), then one row per older post (date and tags | title and description), and an empty state that links the feed. A post (`app/pages/blog/[slug].vue`): breadcrumb, title and description, then the body with the "In this post" TOC. From `lg` it has the columns of a doc page, `SIDEBAR_COLUMNS` around `TOC_COLUMNS`: the left column holds "All posts", the date, the author and the discussion and share links, sticky like the docs sidebar, its first line level with the breadcrumb; the header and the body are the main column; the TOC is the sticky column on the right with the docs' look, its label level with the breadcrumb. Below `lg` it is one column as before: `date · author` under the description, the TOC as a collapsible block between the header and the body, "All posts" and the discussion and share links after the body.
 
 ### Drafts
 
@@ -423,10 +423,10 @@ commands:
 | `app/utils/brand-colors.ts` | `BRAND_COLORS`, the brand colors for `theme-color` and the OG image, auto-imported. |
 | `content.config.ts` | Zod schemas for `index`, `docs` and `blog` collections; excludes blog drafts outside `nuxt dev`. |
 | `app/utils/experimental-badge.ts` | `EXPERIMENTAL_BADGE`, auto-imported. |
-| `app/utils/page-columns.ts` | `TOC_COLUMNS`, the main column and the TOC column of doc pages and posts, auto-imported. |
+| `app/utils/page-columns.ts` | `TOC_COLUMNS`, the main column and the TOC column of doc pages and posts, and `SIDEBAR_COLUMNS`, the sidebar and the main column of the docs layout and posts; auto-imported. |
 | `app/components/SplitRow.vue` | Text + panel row of the home, benchmarks and 404 pages: two columns from `lg`, 432 / 472 at 1024 and 520 / 640 from 1280, so the panels line up; the gap gives way to a classic scrollbar at 1024; slots `#text` and `#panel`, props `align`, `flow` (the text column dissolves below `lg`), `textClass`; `class` and `as` go to its `UContainer`. |
 | `app/pages/blog/index.vue` | Post list: RSS link, the latest post with `topics`, rows of older posts, `Draft` badge in dev. |
-| `app/pages/blog/[slug].vue` | One post: article SEO tags, schema.org `Article`, `defineOgImage('MiiaPost', ...)`, TOC, discussion and share links. |
+| `app/pages/blog/[slug].vue` | One post, three columns from `lg` like a doc page: article SEO tags, schema.org `Article`, `defineOgImage('MiiaPost', ...)`, TOC, discussion and share links. |
 | `app/components/OgImage/MiiaPost.takumi.vue` | OG image template of a post (Takumi). |
 | `app/utils/blog.ts` | `formatPostDate()`, `isDraftPost()`, auto-imported. |
 | `server/routes/blog/rss.xml.ts` | RSS feed of the blog, prerendered to `/blog/rss.xml`. |

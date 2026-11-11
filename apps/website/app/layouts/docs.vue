@@ -13,7 +13,7 @@ const navigation = useDocsNavigation()
       <UContainer>
         <UPage
           :ui="{
-            root: 'lg:grid-cols-[14rem_minmax(0,1fr)] lg:gap-10 xl:grid-cols-[16rem_minmax(0,1fr)] xl:gap-12',
+            root: SIDEBAR_COLUMNS,
             left: 'lg:col-span-1',
             center: 'lg:col-span-1'
           }"
