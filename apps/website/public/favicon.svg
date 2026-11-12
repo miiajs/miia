@@ -1,19 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <style>
-    .frame { fill: none; stroke: #18181B; }
-    .ink { fill: #18181B; }
-    .dot { fill: #2B4ACB; }
-    @media (prefers-color-scheme: dark) {
-      .frame { stroke: #ECEAE4; }
-      .ink { fill: #ECEAE4; }
-      .dot { fill: #7C93FF; }
-    }
-  </style>
-  <rect class="frame" x="1.5" y="1.5" width="29" height="29" rx="7" stroke-width="2"/>
+  <rect x="1.5" y="1.5" width="29" height="29" rx="7" fill="#151517" stroke="#ECEAE4" stroke-width="2"/>
   <g transform="translate(16 16) scale(0.8) translate(-16 -16)">
-    <rect class="ink" x="10" y="13" width="3.6" height="13" rx="1.8"/>
-    <circle class="dot" cx="11.8" cy="8.4" r="2.3"/>
-    <rect class="ink" x="18.4" y="13" width="3.6" height="13" rx="1.8"/>
-    <circle class="dot" cx="20.2" cy="8.4" r="2.3"/>
+    <rect x="10" y="13" width="3.6" height="13" rx="1.8" fill="#ECEAE4"/>
+    <circle cx="11.8" cy="8.4" r="2.3" fill="#7C93FF"/>
+    <rect x="18.4" y="13" width="3.6" height="13" rx="1.8" fill="#ECEAE4"/>
+    <circle cx="20.2" cy="8.4" r="2.3" fill="#7C93FF"/>
   </g>
 </svg>
