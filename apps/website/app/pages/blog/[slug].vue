@@ -48,7 +48,7 @@ const toc = computed(() => post.value?.body?.toc?.links ?? [])
 <template>
   <UContainer
     v-if="post"
-    class="pb-page"
+    class="py-page"
   >
     <UPage
       :ui="{
@@ -58,7 +58,7 @@ const toc = computed(() => post.value?.body?.toc?.links ?? [])
       }"
     >
       <template #left>
-        <UPageAside :ui="{ root: 'lg:py-page lg:pe-0' }">
+        <UPageAside :ui="{ root: 'lg:overflow-visible' }">
           <div class="flex flex-col gap-[22px]">
             <NuxtLink
               to="/blog"
@@ -125,7 +125,7 @@ const toc = computed(() => post.value?.body?.toc?.links ?? [])
 
       <div :class="['flex flex-col lg:grid', TOC_COLUMNS]">
         <header
-          class="flex flex-col gap-3.5 pt-page pb-[22px] lg:col-start-1 lg:row-start-1 lg:max-w-reading lg:gap-[18px] lg:pb-10"
+          class="flex flex-col gap-3.5 pb-[22px] lg:col-start-1 lg:row-start-1 lg:max-w-reading lg:gap-[18px] lg:pb-10"
           :class="!toc.length && 'lg:col-span-2'"
         >
           <p class="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-meta text-muted">

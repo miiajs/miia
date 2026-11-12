@@ -59,8 +59,8 @@
   --container-split: 32.5rem;
   --container-reading: 45rem;
 
-  /* Space under the header and above the footer on every page: `pt-page`, `pb-page`; 4rem from lg */
-  --spacing-page: 2.5rem;
+  /* Space under the header and above the footer on the inner pages, not on home: `pt-page`, `pb-page`; 2rem from lg */
+  --spacing-page: 1.5rem;
 }
 
 /* Nuxt UI declares these in @layer theme: every one set here is set in .dark too */
@@ -119,6 +119,12 @@
     --text-body: 1.03125rem;
     --text-meta: 0.8125rem;
     --text-code: 0.875rem;
-    --spacing-page: 4rem;
+    --spacing-page: 2rem;
   }
+}
+
+/* Where the sticky columns of doc pages and posts stick and how tall they may be */
+:root {
+  --page-sticky-top: calc(var(--ui-header-height) + var(--spacing-page));
+  --page-sticky-max-h: calc(100vh - var(--page-sticky-top) - var(--spacing-page));
 }

@@ -10,7 +10,7 @@ const navigation = useDocsNavigation()
     <DocsMobileBar :key="route.path" />
 
     <UMain>
-      <UContainer>
+      <UContainer class="py-page">
         <UPage
           :ui="{
             root: SIDEBAR_COLUMNS,
@@ -21,9 +21,8 @@ const navigation = useDocsNavigation()
           <template #left>
             <UPageAside
               :ui="{
-                root: 'lg:py-page lg:pe-0',
-                top: '-top-page -mt-page',
-                topHeader: 'h-page',
+                top: 'top-0 mt-0',
+                topHeader: 'h-0',
                 topFooter: 'h-[22px]'
               }"
             >
@@ -31,7 +30,7 @@ const navigation = useDocsNavigation()
                 <UContentSearchButton
                   :collapsed="false"
                   label="Search docs"
-                  class="min-h-11 w-full gap-2.5 rounded-md bg-elevated ps-3 pe-2.5 text-small font-normal text-muted ring-accented hover:bg-elevated hover:text-default"
+                  class="min-h-11 w-full gap-2.5 rounded-md bg-elevated ps-3 pe-2.5 text-small font-normal text-muted ring-accented hover:bg-elevated hover:text-default focus-visible:outline-offset-[-3px]"
                   :ui="{ leadingIcon: 'size-4' }"
                 >
                   <template #trailing>

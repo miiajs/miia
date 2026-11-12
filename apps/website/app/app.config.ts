@@ -54,8 +54,8 @@ export default defineAppConfig({
     },
     contentToc: {
       slots: {
-        root: 'lg:mx-0 lg:px-0',
-        container: 'lg:pt-page',
+        root: 'lg:mx-0 lg:px-0 lg:top-(--page-sticky-top) lg:max-h-(--page-sticky-max-h)',
+        container: 'lg:py-0',
         trigger: 'mb-1.5 font-mono text-caption font-normal text-muted lowercase',
         listWithChildren: 'ms-3.5',
         link: 'py-1 text-small'
@@ -69,6 +69,11 @@ export default defineAppConfig({
             link: 'ps-[13px]'
           }
         }
+      }
+    },
+    pageAside: {
+      slots: {
+        root: 'py-0 lg:pe-0 lg:top-(--page-sticky-top) lg:max-h-(--page-sticky-max-h)'
       }
     },
     prose: {
