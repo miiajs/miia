@@ -136,7 +136,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
   <div>
     <UContainer
       as="section"
-      class="flex flex-col gap-4 pt-9 pb-7 lg:gap-5 lg:pt-[72px] lg:pb-10"
+      class="flex flex-col gap-4 pt-page pb-7 lg:gap-5 lg:pb-10"
     >
       <p :class="eyebrow">
         benchmarks
@@ -427,7 +427,7 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
     <section class="border-t border-default">
       <SplitRow
         flow
-        class="gap-3.5 py-10 lg:py-16"
+        class="gap-3.5 pt-10 pb-page lg:pt-16"
         text-class="lg:gap-3.5"
       >
         <template #text>

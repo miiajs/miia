@@ -30,7 +30,7 @@ const tag = 'rounded-[3px] border border-default px-1.5 py-px text-caption/4 tex
   <div>
     <UContainer
       as="section"
-      class="flex flex-col gap-5 pt-9 pb-7 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between lg:gap-x-12 lg:pt-[72px] lg:pb-10"
+      class="flex flex-col gap-5 pt-page pb-7 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between lg:gap-x-12 lg:pb-10"
     >
       <div class="flex max-w-reading flex-col gap-4">
         <p class="font-mono text-meta text-muted">
@@ -59,7 +59,7 @@ const tag = 'rounded-[3px] border border-default px-1.5 py-px text-caption/4 tex
     <UContainer
       v-if="latest"
       as="section"
-      class="pb-16 lg:pb-24"
+      class="pb-page"
     >
       <article class="flex flex-col gap-4 border-t border-default pt-7 pb-8 last:border-b lg:flex-row lg:gap-14 lg:pt-10 lg:pb-11">
         <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-meta text-muted lg:w-[200px] lg:shrink-0 lg:flex-col lg:items-start">
@@ -155,7 +155,7 @@ const tag = 'rounded-[3px] border border-default px-1.5 py-px text-caption/4 tex
     <UContainer
       v-else
       as="section"
-      class="pb-16 lg:pb-24"
+      class="pb-page"
     >
       <p class="border-t border-default pt-7 text-muted lg:pt-10">
         No posts yet. Subscribe to the

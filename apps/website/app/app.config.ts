@@ -1,9 +1,12 @@
 export default defineAppConfig({
   ui: {
-    // The type and measure tokens of main.css, the same lists: unregistered, tailwind-merge takes `text-<token>` for a color and drops it or the color next to it
+    // The type, measure and page edge tokens of main.css, the same lists: unregistered, tailwind-merge takes `text-<token>` for a color and leaves the others next to the defaults they replace
     tv: {
       twMergeConfig: {
         extend: {
+          theme: {
+            spacing: ['page']
+          },
           classGroups: {
             'font-size': [{ text: ['display', 'title', 'heading', 'heading-sm', 'subheading', 'card-title', 'lead', 'body-lg', 'body', 'ui', 'small', 'meta', 'caption', 'code'] }],
             'max-w': [{ 'max-w': ['split', 'reading'] }]
@@ -52,7 +55,7 @@ export default defineAppConfig({
     contentToc: {
       slots: {
         root: 'lg:mx-0 lg:px-0',
-        container: 'lg:pt-10',
+        container: 'lg:pt-page',
         trigger: 'mb-1.5 font-mono text-caption font-normal text-muted lowercase',
         listWithChildren: 'ms-3.5',
         link: 'py-1 text-small'

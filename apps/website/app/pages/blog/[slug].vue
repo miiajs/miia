@@ -48,7 +48,7 @@ const toc = computed(() => post.value?.body?.toc?.links ?? [])
 <template>
   <UContainer
     v-if="post"
-    class="pb-10 lg:pb-[88px]"
+    class="pb-page"
   >
     <UPage
       :ui="{
@@ -58,7 +58,7 @@ const toc = computed(() => post.value?.body?.toc?.links ?? [])
       }"
     >
       <template #left>
-        <UPageAside :ui="{ root: 'lg:py-10 lg:pe-0' }">
+        <UPageAside :ui="{ root: 'lg:py-page lg:pe-0' }">
           <div class="flex flex-col gap-[22px]">
             <NuxtLink
               to="/blog"
@@ -125,7 +125,7 @@ const toc = computed(() => post.value?.body?.toc?.links ?? [])
 
       <div :class="['flex flex-col lg:grid', TOC_COLUMNS]">
         <header
-          class="flex flex-col gap-3.5 pt-8 pb-[22px] lg:col-start-1 lg:row-start-1 lg:max-w-reading lg:gap-[18px] lg:pt-10 lg:pb-10"
+          class="flex flex-col gap-3.5 pt-page pb-[22px] lg:col-start-1 lg:row-start-1 lg:max-w-reading lg:gap-[18px] lg:pb-10"
           :class="!toc.length && 'lg:col-span-2'"
         >
           <p class="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-meta text-muted">
@@ -181,6 +181,7 @@ const toc = computed(() => post.value?.body?.toc?.links ?? [])
           <ContentRenderer
             v-if="post.body"
             :value="post"
+            class="[&>:nth-last-child(1_of_:not(style))]:mb-0"
           />
 
           <div class="mt-5 flex flex-col gap-1 border-t border-default pt-4 lg:hidden">

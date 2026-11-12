@@ -50,7 +50,7 @@ const editUrl = computed(() => `https://github.com/miiajs/miia/edit/main/apps/we
       :title="page.title"
       :description="page.description"
       :ui="{
-        root: 'pt-6 pb-[18px] lg:pt-10 lg:pb-7',
+        root: 'pt-page pb-[18px] lg:pb-7',
         headline: 'mb-[18px] flex-wrap gap-x-3 gap-y-1.5 font-mono text-meta font-normal text-muted lg:mb-[22px]',
         title: 'text-title sm:text-title font-semibold',
         description: 'mt-[18px] text-lead text-toned lg:mt-[22px]'
@@ -65,7 +65,7 @@ const editUrl = computed(() => `https://github.com/miiajs/miia/edit/main/apps/we
       </template>
     </UPageHeader>
 
-    <UPageBody class="mt-0 space-y-0 pb-10 text-body lg:pt-1.5 lg:pb-[72px]">
+    <UPageBody class="mt-0 space-y-0 pb-page text-body lg:pt-1.5">
       <ContentRenderer
         v-if="page.body"
         :value="page"

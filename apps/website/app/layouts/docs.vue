@@ -21,9 +21,9 @@ const navigation = useDocsNavigation()
           <template #left>
             <UPageAside
               :ui="{
-                root: 'lg:py-10 lg:pe-0',
-                top: '-top-10 -mt-10',
-                topHeader: 'h-10',
+                root: 'lg:py-page lg:pe-0',
+                top: '-top-page -mt-page',
+                topHeader: 'h-page',
                 topFooter: 'h-[22px]'
               }"
             >
@@ -74,6 +74,6 @@ const navigation = useDocsNavigation()
       </UContainer>
     </UMain>
 
-    <AppFooter compact />
+    <AppFooter />
   </div>
 </template>

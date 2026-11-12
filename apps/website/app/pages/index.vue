@@ -83,7 +83,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
   <div v-if="page">
     <SplitRow
       as="section"
-      class="gap-7 py-12 lg:py-20"
+      class="gap-7 pt-page pb-12 lg:pb-20"
       text-class="gap-5 lg:gap-[26px]"
     >
       <template #text>
@@ -309,7 +309,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
     <section class="border-t border-default">
       <SplitRow
         flow
-        class="gap-4 py-12 lg:py-20"
+        class="gap-4 pt-12 pb-page lg:pt-20"
       >
         <template #text>
           <p :class="eyebrow">

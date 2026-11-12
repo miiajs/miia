@@ -47,12 +47,12 @@ apps/website/
 │   └── routes/blog/rss.xml.ts      # RSS 2.0 feed of the blog
 └── app/
     ├── app.vue                     # root: theme-color, default SEO and OG tags, loading bar, AppSearch
-    ├── app.config.ts               # Nuxt UI: primary `brand`, neutral `stone`, type and measure tokens for tailwind-merge, sidebar, TOC and prose styles
+    ├── app.config.ts               # Nuxt UI: primary `brand`, neutral `stone`, type, measure and page edge tokens for tailwind-merge, sidebar, TOC and prose styles
     ├── error.vue                   # 404 and error page: header, footer, AppSearch
-    ├── assets/css/main.css         # Tailwind 4 theme: Plex font stacks, brand scale, type and measure tokens, Nuxt UI `--ui-*` tokens per theme
+    ├── assets/css/main.css         # Tailwind 4 theme: Plex font stacks, brand scale, type, measure and page edge tokens, Nuxt UI `--ui-*` tokens per theme
     ├── layouts/
     │   ├── default.vue             # landing, benchmarks and blog shell
-    │   └── docs.vue                # doc shell: header, DocsMobileBar, sidebar nav, compact footer
+    │   └── docs.vue                # doc shell: header, DocsMobileBar, sidebar nav, footer
     ├── pages/
     │   ├── index.vue               # landing page (reads content/0.index.yml)
     │   ├── benchmarks.vue          # benchmarks page
@@ -63,7 +63,7 @@ apps/website/
     ├── data/benchmarks/            # benchmark datasets per machine (m1.ts, server.ts)
     ├── components/
     │   ├── AppHeader.vue           # nav, search, theme toggle, GitHub; the site menu below lg
-    │   ├── AppFooter.vue           # link columns, © and version; `compact` in docs, `minimalOnPhones` on the error page
+    │   ├── AppFooter.vue           # link columns, © and version; one footer for every page, no props
     │   ├── AppLogo.vue             # mark + wordmark, dots in `--ui-primary`
     │   ├── AppSearch.vue           # ⌘K docs search (`UContentSearch`), mounted in app.vue and error.vue
     │   ├── CodePanel.vue           # highlighted code outside Markdown (renders through ProsePre)
@@ -145,6 +145,10 @@ Text sizes are tokens named by role, in `@theme static` of `app/assets/css/main.
   - `reading` (720 px) - the other capped text: full-width section heads (packages on the landing page, the suites and methodology on benchmarks), page intros (benchmarks, `/blog`), the description of the latest post, the reading column of a doc page and of a post from `lg`.
 - No `max-w-[Npx]` on text: a measure is a token, and a new measure is a new token. The exception is the brand block of the footer (`lg:max-w-[340px]`).
 - tailwind-merge does not know the names either: they are registered in `app/app.config.ts` under `ui.tv.twMergeConfig.extend.classGroups['max-w']`. Without that, on a `UContainer`, a `SplitRow` `class` or a `:ui` slot both a token and `max-w-(--ui-container)` would stay and CSS order would decide. The list lives in two places, `main.css` and `app.config.ts`, and they must match.
+- Every page has the same space under the header and above the footer: 40 px on phones, 64 px from `lg`. It is a token, `--spacing-page` in `@theme static` of `app/assets/css/main.css` with its lg step in the `@media (min-width: 64rem)` block of `:root`, so the class is `pt-page` / `pb-page` / `py-page` and it changes at `lg` by itself. The first box of a page takes `pt-page` and the last one `pb-page`; the padding of sections inside a page is not the edge. The 404 page is centred vertically, `py-page` is its minimum edge.
+- The sticky columns of doc pages and posts (the docs sidebar, the left column of a post, the TOC) start at the same edge (`lg:py-page`, `lg:pt-page`), so their first line is level with the breadcrumb. The strip that masks the scrolled sidebar links above the sticky search button is as tall as the edge (`top: '-top-page -mt-page'`, `topHeader: 'h-page'` of `UPageAside` in `app/layouts/docs.vue`).
+- tailwind-merge reads spacing values through its theme, so `page` is registered in `app/app.config.ts` under `ui.tv.twMergeConfig.extend.theme.spacing`. Without that `pb-page` would not replace `UPageBody`'s `pb-24`, nor `-top-page` / `h-page` the `-top-8` / `h-8` of `UPageAside`.
+- One header and one footer on every page, without variants: `AppHeader` and `AppFooter` take no props, and the docs layout and the error page render the same footer as the rest.
 
 ## Version
 
@@ -415,11 +419,11 @@ commands:
 |---|---|
 | `app/app.vue` | Root; `theme-color` from `BRAND_COLORS`, default SEO and OG tags, loading bar, mounts `AppSearch`. |
 | `app/composables/docs-navigation.ts` | `useDocsNavigation()`: `queryCollectionNavigation('docs', ['status'])` under the `navigation` key, `expandActiveBranch` (which also maps `status → badge`). |
-| `app/layouts/docs.vue` | Doc shell; sidebar groups from `useDocsNavigation()`, `DocsMobileBar`, compact footer. |
+| `app/layouts/docs.vue` | Doc shell; sidebar groups from `useDocsNavigation()`, `DocsMobileBar`, footer. |
 | `app/components/DocsMobileBar.vue` | Docs below `lg`: the page menu with the doc tree and "on this page". |
 | `app/pages/docs/[...slug].vue` | Renders one doc page; `UPageHeader` with breadcrumb and status badge in `#headline` + `ContentRenderer`, prev/next, edit link, TOC. |
 | `app/components/content/*.global.vue` | `ProsePre`, the callouts and `AppCard`. |
-| `app/assets/css/main.css` | Font stacks, brand scale, type tokens (`text-<name>`), measure tokens (`max-w-split`, `max-w-reading`), Nuxt UI `--ui-*` tokens per theme, `--ui-container`. |
+| `app/assets/css/main.css` | Font stacks, brand scale, type tokens (`text-<name>`), measure tokens (`max-w-split`, `max-w-reading`), the page edge token (`pt-page`, `pb-page`), Nuxt UI `--ui-*` tokens per theme, `--ui-container`. |
 | `app/utils/brand-colors.ts` | `BRAND_COLORS`, the brand colors for `theme-color` and the OG image, auto-imported. |
 | `content.config.ts` | Zod schemas for `index`, `docs` and `blog` collections; excludes blog drafts outside `nuxt dev`. |
 | `app/utils/experimental-badge.ts` | `EXPERIMENTAL_BADGE`, auto-imported. |

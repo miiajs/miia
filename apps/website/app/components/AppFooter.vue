@@ -1,17 +1,10 @@
 <script setup lang="ts">
-defineProps<{
-  compact?: boolean
-  // Phones get only the copyright and the version, as on the error page
-  minimalOnPhones?: boolean
-}>()
-
 const { miiaVersion } = useRuntimeConfig().public
 const year = new Date().getFullYear()
 
 const github = { label: 'GitHub', to: 'https://github.com/miiajs/miia', target: '_blank' }
 const x = { label: 'X', to: 'https://x.com/miiaframework', target: '_blank' }
 const linkedin = { label: 'LinkedIn', to: 'https://www.linkedin.com/company/miiajs/', target: '_blank' }
-const social = [github, x, linkedin]
 
 const columns: { label: string, links: { label: string, to: string, target?: string }[] }[] = [
   {
@@ -44,45 +37,9 @@ const columns: { label: string, links: { label: string, to: string, target?: str
 </script>
 
 <template>
-  <footer
-    v-if="compact"
-    class="border-t border-default bg-accented"
-  >
-    <UContainer class="flex flex-wrap items-center justify-between gap-x-8 gap-y-3 py-[22px] font-mono text-meta text-muted">
-      <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS · MIT License</span>
-      <div class="flex flex-wrap gap-x-5 gap-y-1">
-        <NuxtLink
-          v-for="link in social"
-          :key="link.label"
-          :to="link.to"
-          :target="link.target"
-          class="py-1.5 text-toned hover:text-highlighted"
-        >
-          {{ link.label }}
-        </NuxtLink>
-        <NuxtLink
-          to="https://github.com/miiajs/miia/tags"
-          target="_blank"
-          class="py-1.5 hover:text-highlighted"
-        >
-          v{{ miiaVersion }}
-        </NuxtLink>
-      </div>
-    </UContainer>
-  </footer>
-
-  <footer
-    v-else
-    class="border-t border-default bg-accented"
-  >
-    <UContainer
-      class="flex flex-col gap-7 lg:gap-10 lg:pt-14 lg:pb-5"
-      :class="minimalOnPhones ? 'py-7' : 'pt-10 pb-7'"
-    >
-      <div
-        class="flex flex-col gap-7 lg:flex-row lg:flex-wrap lg:justify-between lg:gap-x-14 lg:gap-y-10"
-        :class="minimalOnPhones && 'max-lg:hidden'"
-      >
+  <footer class="border-t border-default bg-accented">
+    <UContainer class="flex flex-col gap-7 pt-10 pb-7 lg:gap-10 lg:pt-14 lg:pb-5">
+      <div class="flex flex-col gap-7 lg:flex-row lg:flex-wrap lg:justify-between lg:gap-x-14 lg:gap-y-10">
         <div class="flex flex-col gap-3 lg:max-w-[340px] lg:flex-[1_1_280px] lg:gap-3.5">
           <NuxtLink
             to="/"
@@ -121,10 +78,7 @@ const columns: { label: string, links: { label: string, to: string, target?: str
         </nav>
       </div>
 
-      <div
-        class="flex flex-wrap justify-between gap-3 border-default font-mono text-meta text-muted lg:border-t lg:pt-5"
-        :class="!minimalOnPhones && 'border-t pt-7'"
-      >
+      <div class="flex flex-wrap justify-between gap-3 border-t border-default pt-7 font-mono text-meta text-muted lg:pt-5">
         <span>&copy; 2026{{ year > 2026 ? `-${year}` : '' }} MiiaJS</span>
         <NuxtLink
           to="https://github.com/miiajs/miia/tags"

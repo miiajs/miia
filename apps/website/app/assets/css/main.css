@@ -58,6 +58,9 @@
   /* Text measures: `max-w-split` in the text column of a SplitRow, `max-w-reading` for the other capped text */
   --container-split: 32.5rem;
   --container-reading: 45rem;
+
+  /* Space under the header and above the footer on every page: `pt-page`, `pb-page`; 4rem from lg */
+  --spacing-page: 2.5rem;
 }
 
 /* Nuxt UI declares these in @layer theme: every one set here is set in .dark too */
@@ -107,7 +110,7 @@
 @media (min-width: 64rem) {
   :root {
     --ui-header-height: 4.25rem;
-    /* The lg step of the fixed type sizes */
+    /* The lg step of the fixed type sizes and the page edge */
     --text-heading-sm: 1.625rem;
     --text-subheading: 1.3125rem;
     --text-card-title: 1.0625rem;
@@ -116,5 +119,6 @@
     --text-body: 1.03125rem;
     --text-meta: 0.8125rem;
     --text-code: 0.875rem;
+    --spacing-page: 4rem;
   }
 }

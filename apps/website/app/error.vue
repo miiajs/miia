@@ -30,7 +30,7 @@ useSeoMeta({
 
     <UMain class="flex items-center">
       <SplitRow
-        class="gap-8 py-12 lg:py-16"
+        class="gap-8 py-page"
         text-class="gap-[18px] lg:gap-5"
       >
         <template #text>
@@ -92,7 +92,7 @@ useSeoMeta({
       </SplitRow>
     </UMain>
 
-    <AppFooter minimal-on-phones />
+    <AppFooter />
 
     <AppSearch />
   </UApp>
