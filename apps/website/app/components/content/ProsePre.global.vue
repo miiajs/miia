@@ -39,6 +39,7 @@ function copyCode() {
       :icon="copied ? 'i-lucide-check' : 'i-lucide-copy'"
       :aria-label="copied ? 'Copied' : 'Copy code'"
       class="absolute end-0.5 top-0 size-11 justify-center rounded-sm text-muted hover:text-highlighted sm:end-1"
+      :class="hideHeader && 'top-px end-px rounded-tr-[7px] bg-elevated'"
       :ui="{ leadingIcon: 'size-[15px]' }"
       @click="copyCode"
     />
