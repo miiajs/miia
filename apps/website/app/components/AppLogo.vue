@@ -1,17 +1,6 @@
-<script setup lang="ts">
-// Without `size` the logo follows the font size of its parent: the mark is 1.62em, the wordmark 1em
-const props = defineProps<{
-  size?: number
-}>()
-
-const style = computed(() => props.size ? { fontSize: `${Math.round(props.size * 0.62)}px` } : undefined)
-</script>
-
 <template>
-  <span
-    class="inline-flex items-center gap-[0.48em] text-highlighted"
-    :style="style"
-  >
+  <span class="inline-flex items-center gap-[0.48em] text-highlighted">
+    <!-- The logo follows the font size of its parent: the mark is 1.62em, the wordmark 1em -->
     <svg
       viewBox="0 0 32 32"
       aria-hidden="true"

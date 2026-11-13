@@ -13,12 +13,7 @@ const { data: posts } = await useAsyncData('blog-posts', () => {
 const title = 'Blog'
 const description = 'Release notes, design decisions and guides for MiiaJS.'
 
-useSeoMeta({
-  title,
-  ogTitle: title,
-  description,
-  ogDescription: description
-})
+usePageSeo(title, description)
 
 const latest = computed(() => posts.value?.[0])
 const older = computed(() => posts.value?.slice(1) ?? [])

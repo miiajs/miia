@@ -4,27 +4,19 @@
 .nuxt
 .nitro
 .cache
-dist
-
-# Node dependencies
-node_modules
 
 # Logs
 logs
 *.log
 
-# Misc
-.DS_Store
+# Editors
 .fleet
-.idea
+.history
 
 # Local env files
 .env
 .env.*
 !.env.example
-
-# VSC
-.history
 
 # Blog drafts stay in the local checkout
 content/2.blog/*.draft.md

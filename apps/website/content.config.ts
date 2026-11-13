@@ -1,24 +1,25 @@
 import { defineCollection, z } from '@nuxt/content'
 
-const colorEnum = z.enum(['primary', 'secondary', 'neutral', 'error', 'warning', 'success', 'info'])
-const variantEnum = z.enum(['solid', 'outline', 'subtle', 'soft', 'ghost', 'link'])
-
 // Blog drafts (*.draft.md) exist only in `nuxt dev`: the prerendered SQL dump holds every matched file
 const isDev = process.env.NODE_ENV === 'development'
 
-const createBaseSchema = () => z.object({
-  title: z.string().nonempty(),
-  description: z.string().nonempty()
+const text = z.string().nonempty()
+
+const section = z.object({
+  title: text,
+  description: text
 })
 
-const createLinkSchema = () => z.object({
-  label: z.string().nonempty(),
-  to: z.string().nonempty(),
-  icon: z.string().optional().editor({ input: 'icon' }),
+const textLink = z.object({
+  label: text,
+  to: text
+})
+
+const buttonLink = textLink.extend({
+  target: z.literal('_blank').optional(),
+  icon: text.optional(),
   trailing: z.boolean().optional(),
-  target: z.string().optional(),
-  color: colorEnum.optional(),
-  variant: variantEnum.optional()
+  variant: z.literal('outline').optional()
 })
 
 export const collections = {
@@ -26,27 +27,27 @@ export const collections = {
     source: '0.index.yml',
     type: 'page',
     schema: z.object({
-      hero: createBaseSchema().extend({
-        links: z.array(createLinkSchema())
+      hero: section.extend({
+        links: z.array(buttonLink)
       }),
-      architecture: createBaseSchema().extend({
-        link: createLinkSchema(),
-        features: z.array(createBaseSchema()).length(3)
+      architecture: section.extend({
+        link: textLink,
+        features: z.array(section).length(3)
       }),
-      runtimes: createBaseSchema().extend({
-        tested: z.array(z.string().nonempty())
+      runtimes: section.extend({
+        tested: z.array(text)
       }),
-      packages: createBaseSchema().extend({
-        link: createLinkSchema(),
-        items: z.array(createBaseSchema().extend({
-          packages: z.string().nonempty()
+      packages: section.extend({
+        link: textLink,
+        items: z.array(section.extend({
+          packages: text
         }))
       }),
-      performance: createBaseSchema().extend({
-        link: createLinkSchema()
+      performance: section.extend({
+        link: textLink
       }),
-      start: createBaseSchema().extend({
-        links: z.array(createLinkSchema())
+      start: section.extend({
+        links: z.array(buttonLink)
       })
     })
   }),
@@ -56,11 +57,7 @@ export const collections = {
     schema: z.object({
       title: z.string().nonempty(),
       description: z.string().nonempty(),
-      status: z.enum(['experimental']).optional(),
-      seo: z.object({
-        title: z.string().optional(),
-        description: z.string().optional()
-      }).optional()
+      status: z.enum(['experimental']).optional()
     })
   }),
   blog: defineCollection({

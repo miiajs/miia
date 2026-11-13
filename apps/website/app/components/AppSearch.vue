@@ -4,11 +4,13 @@ const { data: files } = useLazyAsyncData('search', () => queryCollectionSearchSe
   server: false
 })
 
-const links = [{
-  label: 'Docs',
-  icon: 'i-lucide-book',
-  to: '/docs/getting-started'
-}]
+// The site links without Home
+const icons: Record<string, string> = {
+  Docs: 'i-lucide-book',
+  Benchmarks: 'i-lucide-gauge',
+  Blog: 'i-lucide-newspaper'
+}
+const links = SITE_NAV.filter(item => item.label in icons).map(item => ({ ...item, icon: icons[item.label] }))
 </script>
 
 <template>
@@ -18,7 +20,7 @@ const links = [{
       shortcut="meta_k"
       :navigation="navigation"
       :links="links"
-      :fuse="{ resultLimit: 42 }"
+      :fuse="{ resultLimit: 12 }"
     />
   </ClientOnly>
 </template>

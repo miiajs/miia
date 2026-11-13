@@ -1,4 +1,3 @@
-// https://nuxt.com/docs/api/configuration/nuxt-config
 import corePkg from '../../packages/core/package.json' with { type: 'json' }
 import { miiaDark, miiaLight } from './shiki-themes'
 
@@ -10,10 +9,6 @@ export default defineNuxtConfig({
     '@nuxt/content',
     '@nuxtjs/seo'
   ],
-
-  devtools: {
-    enabled: true
-  },
 
   app: {
     head: {

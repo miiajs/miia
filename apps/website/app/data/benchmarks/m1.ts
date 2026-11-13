@@ -4,7 +4,6 @@ export const config: EnvConfig = {
   key: 'm1',
   label: 'Apple M1 Pro',
   description: 'Apple M1 Pro, 32 GB RAM, macOS 26.6.1',
-  icon: 'i-lucide-laptop',
   date: 'August 21, 2026',
   versions: { bun: '1.4.0', deno: '2.7.12', node: '24.19.0' },
   specs: ['10 cores (8P + 2E)', '32 GB RAM', 'macOS 26.6.1']

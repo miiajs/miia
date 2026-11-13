@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import { type BenchRow, datasets, environments } from '~/data/benchmarks'
 
-useSeoMeta({
-  title: 'Benchmarks',
-  ogTitle: 'Benchmarks',
-  description: 'MiiaJS outperforms Hono, Elysia, Fastify, and NestJS in realistic API benchmarks on Bun. Compare throughput and latency across Bun, Deno, and Node.js.',
-  ogDescription: 'MiiaJS outperforms Hono, Elysia, Fastify, and NestJS in realistic API benchmarks on Bun. Compare throughput and latency across Bun, Deno, and Node.js.'
-})
+const description = 'MiiaJS next to Hono, Elysia, Fastify and NestJS on Bun, Deno and Node.js: throughput and latency in realistic API tests and in synthetic ones.'
+
+usePageSeo('Benchmarks', description)
 
 const env = ref(environments[0]!.key)
 const activeEnv = computed(() => environments.find(e => e.key === env.value)!)
@@ -103,7 +100,7 @@ const internals = [
     items: [
       { term: 'Trie-based router', detail: 'O(1) static path lookup' },
       { term: 'Compile-time pipelines', detail: 'middleware chains resolved once at startup, not per request' },
-      { term: 'Sync fast path', detail: 'no Promises when the handler and middleware are synchronous' },
+      { term: 'Sync fast path', detail: 'no Promise for a synchronous handler on a route without middleware, guards or schemas' },
       { term: 'No runtime reflection', detail: 'native decorators resolve at class definition' },
       { term: 'Minimal allocations', detail: 'no wrapper objects between your handler and the runtime' }
     ]

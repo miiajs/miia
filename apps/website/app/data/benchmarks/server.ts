@@ -4,7 +4,6 @@ export const config: EnvConfig = {
   key: 'server',
   label: 'Xeon 5218R',
   description: '2×Intel Xeon Gold 5218R (40C/80T), 128 GB RAM, Debian 13',
-  icon: 'i-lucide-server',
   date: 'August 22, 2026',
   versions: { bun: '1.4.0', deno: '2.7.12', node: '24.19.0' },
   specs: ['40 cores / 80 threads @ 2.10 GHz', '128 GB RAM', 'Debian 13 (Trixie)']

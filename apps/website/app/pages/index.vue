@@ -3,16 +3,7 @@ import { config as benchEnv, data as benchData } from '~/data/benchmarks/m1'
 
 const { data: page } = await useAsyncData('index', () => queryCollection('index').first())
 
-const title = page.value?.seo?.title || page.value?.title
-const description = page.value?.seo?.description || page.value?.description
-
-useSeoMeta({
-  titleTemplate: '',
-  title,
-  ogTitle: title,
-  description,
-  ogDescription: description
-})
+usePageSeo(page.value?.seo.title, page.value?.seo.description, { titleTemplate: '' })
 
 const heroTitle = computed(() => page.value?.hero.title.split('\n') ?? [])
 
@@ -98,6 +89,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
             v-for="link in page.hero.links"
             :key="link.to"
             v-bind="link"
+            color="neutral"
             :class="[button, 'font-semibold']"
           />
           <div class="flex min-h-12 items-center gap-2.5 rounded-sm border border-accented bg-elevated ps-3.5 pe-0.5 font-mono text-code lg:pe-1">
@@ -326,6 +318,7 @@ const button = 'min-h-12 justify-center gap-2 rounded-sm px-5 text-ui'
               v-for="link in page.start.links"
               :key="link.to"
               v-bind="link"
+              color="neutral"
               :class="[button, link.variant === 'outline' ? 'bg-transparent ring-inverted' : 'font-semibold']"
               :ui="{ trailingIcon: 'size-3.5' }"
             />

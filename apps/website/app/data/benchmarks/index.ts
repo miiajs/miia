@@ -8,5 +8,5 @@ export const environments = [m1Config, serverConfig]
 
 export const datasets: Record<string, BenchDataset> = {
   [m1Config.key]: m1Data,
-  [serverConfig.key]: serverData,
+  [serverConfig.key]: serverData
 }

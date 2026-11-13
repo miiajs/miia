@@ -13,16 +13,7 @@ if (!post.value) {
 const { title, description, date, author } = post.value
 const tags = post.value.tags ?? []
 
-useSeoMeta({
-  title,
-  ogTitle: title,
-  description,
-  ogDescription: description,
-  ogType: 'article',
-  articlePublishedTime: date,
-  articleAuthor: [author],
-  articleTag: tags
-})
+usePageSeo(title, description, { ogType: 'article', articlePublishedTime: date, articleAuthor: [author], articleTag: tags })
 
 useSchemaOrg([
   defineArticle({

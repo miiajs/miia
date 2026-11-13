@@ -14,20 +14,10 @@ if (!page.value) {
 }
 
 const { data: surround } = await useAsyncData(`${route.path}-surround`, () => {
-  return queryCollectionItemSurroundings('docs', route.path, {
-    fields: ['description']
-  })
+  return queryCollectionItemSurroundings('docs', route.path)
 })
 
-const title = page.value.seo?.title || page.value.title
-const description = page.value.seo?.description || page.value.description
-
-useSeoMeta({
-  title,
-  ogTitle: title,
-  description,
-  ogDescription: description
-})
+usePageSeo(page.value.seo.title, page.value.seo.description)
 
 // "core concepts / modules": the section titles from the sidebar, then the page itself
 const breadcrumb = computed(() => findPageBreadcrumb(navigation.value, route.path, { current: true, indexAsChild: true })

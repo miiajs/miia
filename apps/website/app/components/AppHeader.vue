@@ -12,12 +12,12 @@ onMounted(() => {
 })
 const isDark = computed(() => mounted.value && colorMode.value === 'dark')
 
-const items = computed(() => [
-  { label: 'Home', to: '/', active: route.path === '/' },
-  { label: 'Docs', to: '/docs/getting-started', active: route.path.startsWith('/docs') },
-  { label: 'Benchmarks', to: '/benchmarks', active: route.path === '/benchmarks' },
-  { label: 'Blog', to: '/blog', active: route.path.startsWith('/blog') }
-])
+// Docs and Blog stay active on every page under them
+const sections = ['/docs', '/blog']
+const items = computed(() => SITE_NAV.map((item) => {
+  const section = sections.find(path => item.to.startsWith(path))
+  return { ...item, active: section ? route.path.startsWith(section) : route.path === item.to }
+}))
 
 const themes = [
   { label: 'Light', value: 'light', icon: 'i-lucide-sun' },
