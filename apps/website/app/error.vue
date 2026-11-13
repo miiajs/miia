@@ -12,15 +12,11 @@ const notFound = computed(() => props.error.statusCode === 404)
 const path = computed(() => route.path)
 const message = computed(() => JSON.stringify(`Cannot GET ${path.value}`))
 
-useHead({
-  htmlAttrs: {
-    lang: 'en'
-  }
-})
+useSiteHead()
 
 useSeoMeta({
   title: () => notFound.value ? 'Page not found' : 'Something went wrong',
-  description: () => notFound.value ? 'We are sorry but this page could not be found.' : 'We are sorry but this page could not be loaded.'
+  description: () => notFound.value ? 'Nothing is served at this address. The page may have moved, or the link has a typo.' : 'The request failed. Try again in a moment.'
 })
 </script>
 
