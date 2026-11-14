@@ -132,6 +132,11 @@ export default defineNuxtConfig({
     ]
   },
 
+  // X takes the image from og:image; twitter:card comes from useSiteHead()
+  ogImage: {
+    includeTwitter: false
+  },
+
   sitemap: {
     xsl: false
   },

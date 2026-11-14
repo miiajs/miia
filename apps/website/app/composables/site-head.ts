@@ -14,7 +14,6 @@ export function useSiteHead() {
     titleTemplate: '%s - MiiaJS',
     twitterCard: 'summary_large_image',
     ogImage: '/og-image.png',
-    twitterImage: '/og-image.png',
     ogImageWidth: 1200,
     ogImageHeight: 630,
     ogImageType: 'image/png'
