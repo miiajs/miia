@@ -27,6 +27,8 @@
     "cli:e2e": "bun packages/cli/e2e/run.ts",
     "website:dev": "cd apps/website && bun run dev",
     "website:build": "cd apps/website && bun run build",
+    "website:lint": "cd apps/website && bun run lint",
+    "website:typecheck": "cd apps/website && bun run typecheck",
     "format": "biome format --write .",
     "format:check": "biome format .",
     "update": "bun update --filter '*' -i",

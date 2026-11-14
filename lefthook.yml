@@ -4,3 +4,9 @@ pre-commit:
       glob: "*.{ts,js,json}"
       run: bunx biome format --write --no-errors-on-unmatched {staged_files}
       stage_fixed: true
+    - name: website lint
+      root: apps/website/
+      glob: "*.{ts,vue,mjs}"
+      skip:
+        - run: test ! -f apps/website/.nuxt/eslint.config.mjs
+      run: bunx eslint {staged_files}

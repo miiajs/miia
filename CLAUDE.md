@@ -54,7 +54,7 @@ Benchmarks live in a separate repo: [github.com/miiajs/benchmarks](https://githu
 - **Test runner:** Bun (`bun test`), tests import from `bun:test`
 - **Build:** `tsc --build` with composite project references (`tsconfig.build.json`)
 - **Formatter:** Biome - single quotes, trailing commas, semicolons as needed (`biome.json`)
-- **Git hooks:** Lefthook - pre-commit auto-formats staged files (`lefthook.yml`)
+- **Git hooks:** Lefthook - pre-commit auto-formats staged files with Biome and lints staged `apps/website` files with ESLint (`lefthook.yml`)
 - **Root scripts:** `build`, `build:watch`, `clean`, `test`, `test:uws`, `test:node-server`, `typecheck` (+ `typecheck:tests` / `:examples` / `:templates`), `format`, `format:check`, `cli:e2e`, `changeset:status`, `release`
 
 ## Key patterns
