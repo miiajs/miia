@@ -5,7 +5,7 @@ Documentation site for MiiaJS. This CLAUDE.md describes how the site is wired so
 ## Stack
 
 - **Nuxt 4.6** (ESM, `srcDir: app/`)
-- **@nuxt/content 3.16** - file-based collections under `content/`. `content.experimental.sqliteConnector: 'native'` keeps the local database in Node's built-in `node:sqlite`, so there is no `better-sqlite3`
+- **@nuxt/content 3.16** - file-based collections under `content/`. `content.experimental.sqliteConnector: 'native'` keeps the local database in `node:sqlite`, which both Node and Bun have built in, so there is no `better-sqlite3`
 - **@nuxt/ui 4.12** - UI kit, provides `UPage`, `UPageHeader`, `UContentNavigation`, `UBadge`, Prose components
 - **@nuxt/fonts 1.2** - IBM Plex Sans and IBM Plex Mono, self-hosted (served from `/_nuxt/fonts/`, no Google Fonts). It is listed in `modules` itself, and the families in `fonts.families` have `global: true`, which also feeds them to the OG image template: nuxt-og-image 7 takes its fonts only from `@nuxt/fonts` 1.x. Without its own entry Nuxt UI brings `@nuxt/fonts` 0.14, and with it the OG image silently falls back to the built-in Inter
 - **@nuxtjs/seo 6** - site config, sitemap, robots, schema.org and nuxt-og-image 7 with Takumi 2 (`@takumi-rs/core` 2.x). Two of its modules are off: `aiReady: false` (llms.txt is a separate plan) and `skewProtection: false` (every page is prerendered, so there is no version to poll). The sitemap is prerendered only because `/sitemap.xml` is listed in `nitro.prerender.routes`
@@ -13,7 +13,7 @@ Documentation site for MiiaJS. This CLAUDE.md describes how the site is wired so
 - **Code highlighting** - Shiki themes `miia-light` / `miia-dark` from `shiki-themes.ts`, set in `content.build.markdown.highlight`; Content passes them to `@nuxtjs/mdc`, so `<MDC>` renders with the same themes
 - No third-party docs theme (no docus, no shadcn-docs-nuxt) - own layout built on top of `@nuxt/ui` primitives
 
-Exact versions are in `package.json`. Nuxt 4.6 and `@nuxtjs/seo` 6 need Node `^22.22.3 || ^24.15.0 || >=26`.
+Exact versions are in `package.json`. The scripts run Nuxt on Bun (see Bun), so Node is not needed.
 
 ## Scripts
 
@@ -29,6 +29,21 @@ The site is a workspace of the monorepo (`apps/*`); install from the repository 
 
 `bun run build` prerenders every page into `.output/public`. The output also has a Nitro server (`.output/server`, preset `node-server`), and two things come only from it: the `/docs` → `/docs/getting-started` redirect (`prerender: false` in `routeRules`) and the 404 page on a direct hit (the build writes no `404.html`). A static host needs its own redirect rule and its own 404 page.
 
+## Bun
+
+Every script in `package.json` is `bun --bun <bin>`: the bins have a `node` shebang, and `bun run` would start them on Node when Node is installed. The flag sits in the scripts rather than `[run] bun = true` in `bunfig.toml`, because that setting does not reach `postinstall` during `bun install`, `bunx` or `bun run --filter`.
+
+`bunfig.toml` preloads `bun-compat.mjs` into every Bun process started in `apps/website` (the scripts, the child of the dev server, the postinstall). Run the scripts from `apps/website` or through the root `website:*` scripts; from anywhere else the preload is not found.
+
+`bun-compat.mjs` works around two defects of Bun:
+
+- [oven-sh/bun#41151](https://github.com/oven-sh/bun/issues/41151) - the default `Error.prepareStackTrace` rejects objects that are not errors. Babel inside jiti delegates to it and vite calls `Error.captureStackTrace` on such an object, so the build fails at once.
+- [oven-sh/bun#23898](https://github.com/oven-sh/bun/issues/23898) - `node:module` has no `findPackageJSON`, which nuxt-og-image and nuxtseo-shared call. The polyfill works only because jiti falls back to transforming a module whose native import of `findPackageJSON` fails; if Nuxt loads modules natively one day, it cannot help.
+
+Each workaround checks for its defect first and does nothing on a Bun that has the fix. Once a Bun release fixes both, delete `bun-compat.mjs` and `bunfig.toml`.
+
+Install scripts of dependencies (lefthook, esbuild) still run on whatever `node` is on `PATH` on a machine that has Node; with no Node installed Bun runs them itself.
+
 ## Directory layout
 
 ```
@@ -43,6 +58,8 @@ apps/website/
 │   └── 2.blog/                     # `blog` collection, renders under /blog/*; `<slug>.draft.md` is a draft
 ├── content.config.ts               # Nuxt Content collection schemas (Zod)
 ├── nuxt.config.ts                  # modules, fonts, site meta, version, prerender, redirects
+├── bunfig.toml                     # preloads bun-compat.mjs (see Bun)
+├── bun-compat.mjs                  # workarounds for two Bun defects (see Bun)
 ├── shiki-themes.ts                 # miia-light / miia-dark code block themes
 ├── public/                         # favicons, og-image (colors baked in, see Brand)
 ├── server/
@@ -428,6 +445,8 @@ commands:
 | `app/utils/blog.ts` | `formatPostDate()`, `isDraftPost()`, auto-imported. |
 | `server/routes/blog/rss.xml.ts` | RSS feed of the blog, prerendered to `/blog/rss.xml`. |
 | `nuxt.config.ts` | Modules, fonts, highlight themes, `miiaVersion`, SEO defaults, prerender routes. |
+| `bunfig.toml` | Preloads `bun-compat.mjs` into every Bun process started in `apps/website`. |
+| `bun-compat.mjs` | Workarounds for oven-sh/bun#41151 and #23898; delete with `bunfig.toml` once Bun fixes both. |
 
 ## Documentation follow-ups
 

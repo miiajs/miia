@@ -4,7 +4,7 @@ The landing page, the documentation, the blog and the benchmarks page of [miiajs
 
 ## Development
 
-The site is a workspace of the monorepo, so dependencies come from the root:
+The site is a workspace of the monorepo, so dependencies come from the root. The scripts run Nuxt on Bun, not Node (`bun --bun`, see [CLAUDE.md](./CLAUDE.md)).
 
 ```bash
 bun install            # at the repository root

@@ -4,12 +4,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "nuxt build",
-    "dev": "nuxt dev",
-    "preview": "nuxt preview",
-    "postinstall": "nuxt prepare",
-    "lint": "eslint .",
-    "typecheck": "nuxt typecheck"
+    "build": "bun --bun nuxt build",
+    "dev": "bun --bun nuxt dev",
+    "preview": "bun --bun nuxt preview",
+    "postinstall": "bun --bun nuxt prepare",
+    "lint": "bun --bun eslint .",
+    "typecheck": "bun --bun nuxt typecheck"
   },
   "dependencies": {
     "@iconify-json/lucide": "^1.2.152",
