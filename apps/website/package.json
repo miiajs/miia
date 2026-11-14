@@ -6,6 +6,7 @@
   "scripts": {
     "build": "bun --bun nuxt build",
     "dev": "bun --bun nuxt dev",
+    "generate": "bun --bun nuxt generate",
     "preview": "bun --bun nuxt preview",
     "postinstall": "bun --bun nuxt prepare",
     "lint": "bun --bun eslint .",

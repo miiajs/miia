@@ -15,8 +15,9 @@ Or from this directory:
 
 ```bash
 bun run dev
-bun run build          # production build
-bun run preview        # serve the production build locally
+bun run build          # Nitro server build with prerendered pages
+bun run generate       # static build, what production serves
+bun run preview        # serve the output of bun run build locally
 bun run typecheck
 bun run lint
 ```

@@ -1,0 +1,19 @@
+# Context of apps/website/Dockerfile, which builds from the repository root
+**/node_modules
+**/.nuxt
+**/.output
+**/.data
+**/dist
+**/*.tsbuildinfo
+**/*.draft.md
+
+.git
+.github
+.claude
+.idea
+.vscode
+**/.DS_Store
+tmp
+
+**/.env
+**/.env.*

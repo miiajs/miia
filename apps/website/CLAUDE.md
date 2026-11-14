@@ -22,12 +22,13 @@ The site is a workspace of the monorepo (`apps/*`); install from the repository 
 | Command | What it does |
 | --- | --- |
 | `bun run dev` | Dev server on `http://localhost:3000` (`bun run website:dev` from the root) |
-| `bun run build` | Production build (`bun run website:build` from the root) |
-| `bun run preview` | Serve the production build locally |
+| `bun run build` | Nitro server build with prerendered pages (`bun run website:build` from the root) |
+| `bun run generate` | Static build into `.output/public`, what production serves |
+| `bun run preview` | Serve the output of `bun run build` locally; after `generate` view the static output with `bunx --bun serve .output/public` (`nuxt preview` would run `npx serve` there) |
 | `bun run typecheck` | `nuxt typecheck` (vue-tsc) (`bun run website:typecheck` from the root) |
 | `bun run lint` | ESLint via `@nuxt/eslint` (`bun run website:lint` from the root); the pre-commit hook runs it on staged website files |
 
-`bun run build` prerenders every page into `.output/public`. The output also has a Nitro server (`.output/server`, preset `node-server`), and two things come only from it: the `/docs` → `/docs/getting-started` redirect (`prerender: false` in `routeRules`) and the 404 page on a direct hit (the build writes no `404.html`). A static host needs its own redirect rule and its own 404 page.
+`bun run build` prerenders every page into `.output/public`. The output also has a Nitro server (`.output/server`, preset `node-server`), and two things come only from it: the `/docs` → `/docs/getting-started` redirect (`prerender: false` in `routeRules`) and the 404 page on a direct hit (the build writes no `404.html`). `bun run generate` writes the same pages without the server, plus `404.html` and `200.html` (SPA shells); the image serves them with nginx, and `nginx.conf` repeats the redirects (see Docker image).
 
 ## Bun
 
@@ -43,6 +44,18 @@ Every script in `package.json` is `bun --bun <bin>`: the bins have a `node` sheb
 Each workaround checks for its defect first and does nothing on a Bun that has the fix. Once a Bun release fixes both, delete `bun-compat.mjs` and `bunfig.toml`.
 
 Install scripts of dependencies (lefthook, esbuild) still run on whatever `node` is on `PATH` on a machine that has Node; with no Node installed Bun runs them itself.
+
+## Docker image
+
+`Dockerfile` builds the static site on `oven/bun` (an install of the whole workspace with `--ignore-scripts`, then `bun run generate`) and serves `.output/public` with `nginxinc/nginx-unprivileged` on port 8080. Build it from the repository root, whose `.dockerignore` limits the context:
+
+```sh
+docker build -f apps/website/Dockerfile -t miia-website .
+```
+
+`nginx.conf`: `try_files` for clean URLs, `404.html` for anything else, `Cache-Control` (`no-cache` for pages, `immutable` for `/_nuxt/`), `/healthz`, gzip and `absolute_redirect off` (Traefik sits in front). It repeats the redirects of `routeRules` in `nuxt.config.ts`, so a redirect added there has to be added to `nginx.conf` too.
+
+`.github/workflows/website-image.yml` builds the image for linux/amd64 on a push to `main` that touches the site (the `paths` in the workflow) or by hand, and pushes `ghcr.io/miiajs/miia-website:<commit sha>`. The deployment lives in a separate private infra repo.
 
 ## Directory layout
 
@@ -60,6 +73,8 @@ apps/website/
 ├── nuxt.config.ts                  # modules, fonts, site meta, version, prerender, redirects
 ├── bunfig.toml                     # preloads bun-compat.mjs (see Bun)
 ├── bun-compat.mjs                  # workarounds for two Bun defects (see Bun)
+├── Dockerfile                      # static site image: bun generate + nginx (see Docker image)
+├── nginx.conf                      # nginx server of the image (see Docker image)
 ├── shiki-themes.ts                 # miia-light / miia-dark code block themes
 ├── public/                         # favicons, og-image (colors baked in, see Brand)
 ├── server/
@@ -447,6 +462,8 @@ commands:
 | `nuxt.config.ts` | Modules, fonts, highlight themes, `miiaVersion`, SEO defaults, prerender routes. |
 | `bunfig.toml` | Preloads `bun-compat.mjs` into every Bun process started in `apps/website`. |
 | `bun-compat.mjs` | Workarounds for oven-sh/bun#41151 and #23898; delete with `bunfig.toml` once Bun fixes both. |
+| `Dockerfile` | Image of the static site: `bun run generate` on `oven/bun`, served by `nginx-unprivileged` on 8080; build from the repository root. |
+| `nginx.conf` | Clean URLs, `404.html`, cache headers, `/healthz`, gzip and the `routeRules` redirects, which must be kept in sync with `nuxt.config.ts`. |
 
 ## Documentation follow-ups
 
