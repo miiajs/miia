@@ -99,7 +99,7 @@ apps/website/
     │   ├── AppHeader.vue           # nav (SITE_NAV), search, theme toggle, GitHub; the site menu below lg
     │   ├── AppFooter.vue           # link columns, © and version; one footer for every page, no props
     │   ├── AppLogo.vue             # mark + wordmark, dots in `--ui-primary`
-    │   ├── AppSearch.vue           # ⌘K docs search (`UContentSearch`): the doc sections, loaded on the client, and the site links from SITE_NAV; mounted in app.vue and error.vue
+    │   ├── AppSearch.vue           # ⌘K docs search (`UContentSearch`): the doc sections, loaded on first opening (see Search), and the site links from SITE_NAV; mounted in app.vue and error.vue
     │   ├── CodePanel.vue           # highlighted code outside Markdown (renders through ProsePre)
     │   ├── DocsMobileBar.vue       # docs below lg: the page menu and "on this page"
     │   ├── SplitRow.vue            # text + panel row of the home, benchmarks and 404 pages, two columns from lg: 432 / 472 at 1024, 520 / 640 from 1280
@@ -217,6 +217,12 @@ queryCollectionNavigation('docs', ['status'])
 ```
 
 If you add a new frontmatter field that should show up in the sidebar, update this call in `app/composables/docs-navigation.ts`. Otherwise the field will render fine on the page itself but will be silently `undefined` on sidebar items - and no error is thrown.
+
+## Search
+
+`AppSearch` is the only Nuxt Content query that runs in the browser: every page reads its data from the prerendered `_payload.json`. Content runs a browser query on wasm SQLite with the collection's dump, so the first search loads the sqlite chunk (~63 KB gzip), the wasm (~401 KB) and `/__nuxt_content/docs/sql_dump.txt` (~244 KB). That is why `queryCollectionSearchSections('docs')` starts only when the search opens (`useContentSearch().open`, which ⌘K and every search button set), and the palette shows a loader until the sections arrive. The browser keeps them: the chunk and the wasm sit under `/_nuxt/` (`immutable` in `nginx.conf`), and Content stores the dump in `localStorage` with the collection's checksum, so it is fetched again only after the docs change. A failed load is not retried until the page is reloaded (Content's client keeps the rejected promise), and the palette says so.
+
+Any other Content query that runs in the browser (a `server: false` query, a page without a prerendered payload) brings this download back to every page load. A visit to a missing URL already does it: nginx answers with `404.html`, an SPA shell, so the error page renders in the browser and queries the navigation (and, under `/docs/`, the page) there.
 
 ## Frontmatter schema
 
