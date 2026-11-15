@@ -55,7 +55,9 @@ docker build -f apps/website/Dockerfile -t miia-website .
 
 `nginx.conf`: `try_files` for clean URLs, `404.html` for anything else, `Cache-Control` (`no-cache` for pages, `immutable` for `/_nuxt/`), `/healthz`, gzip and `absolute_redirect off` (Traefik sits in front). It repeats the redirects of `routeRules` in `nuxt.config.ts`, so a redirect added there has to be added to `nginx.conf` too.
 
-`.github/workflows/website-image.yml` builds the image for linux/amd64 on a push to `main` that touches the site (the `paths` in the workflow) or by hand, and pushes `ghcr.io/miiajs/miia-website:<commit sha>`. The deployment lives in a separate private infra repo.
+`.github/workflows/website-image.yml` builds the image for linux/amd64 once per version of the site. It runs on a push to `main` that changes `apps/website/package.json` (or the workflow itself), or by hand from `main`. If `ghcr.io/miiajs/miia-website:<version>` already exists it builds nothing, otherwise it pushes `:<version>` and `:<commit sha>`; a version tag is never overwritten.
+
+The deployment lives in a separate private infra repo and deploys the highest version, so releasing the site means: bump `version` in `apps/website/package.json`, run `bun install` from the repository root (`bun.lock` records the version of each workspace; the frozen install of the image does not fail on a stale one, but the next `bun install` would change it), commit both, push. Changes without a bump are neither built nor deployed. If no run appears after the push (the `paths` filter looks at the first 300 files of a push only) or the build failed, start the workflow by hand on `main` after the fix.
 
 ## Directory layout
 
@@ -189,7 +191,7 @@ Text sizes are tokens named by role, in `@theme static` of `app/assets/css/main.
 
 ## Version
 
-`nuxt.config.ts` imports `packages/core/package.json` (`with { type: 'json' }`) and puts its `version` into `runtimeConfig.public.miiaVersion` at build time. The footer and the mobile site menu show `v{miiaVersion}`; there is no request to npm. The site shows the version of the checkout it was built from, so it changes when a release bumps `@miiajs/core`.
+`nuxt.config.ts` imports `packages/core/package.json` (`with { type: 'json' }`) and puts its `version` into `runtimeConfig.public.miiaVersion` at build time. The footer and the mobile site menu show `v{miiaVersion}`; there is no request to npm. The site shows the version of the checkout it was built from, so it changes when a release bumps `@miiajs/core`. The image is built only for a new version of the site (see Docker image), so a framework release reaches the site with the next bump of the site's version (see `RELEASING.md`).
 
 ## How a doc page renders
 

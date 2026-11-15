@@ -40,7 +40,9 @@ Review the diff:
 git diff
 ```
 
-Expected: every `@miiajs/*` package and `create-miia` bumped to the same new version, CHANGELOGs written, `.changeset/` cleaned, root `package.json` and `examples/*/package.json` untouched.
+Bump `version` in `apps/website/package.json` too (a patch is enough) and run `bun install`: the site shows the version of `@miiajs/core`, and its image is built and deployed only for a new version of the site (`apps/website/CLAUDE.md`, Docker image). The release commit carries it, and the push in step 7 deploys the site.
+
+Expected: every `@miiajs/*` package and `create-miia` bumped to the same new version, CHANGELOGs written, `.changeset/` cleaned, `apps/website/package.json` bumped by hand, root `package.json` and `examples/*/package.json` untouched.
 
 ### 3. Check generated projects
 
