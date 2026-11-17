@@ -67,6 +67,32 @@ describe('typed tokens', () => {
       expect(hinted.hint).toBe('HintModule')
     })
 
+    it('keeps the given name and adds kind only when given', () => {
+      const plain = createToken('User')
+      expect('kind' in plain).toBe(false)
+      expect(Object.keys(plain)).toEqual(['name'])
+
+      const kinded = createToken('User', { kind: 'MongooseModel' })
+      expect(kinded.name).toBe('User')
+      expect(kinded.kind).toBe('MongooseModel')
+      expect(Object.isFrozen(kinded)).toBe(true)
+      expect('hint' in kinded).toBe(false)
+
+      const full = createToken('User', { kind: 'MongooseModel', hint: 'MongooseModule.register([User])' })
+      expect(Object.entries(full)).toEqual([
+        ['name', 'User'],
+        ['kind', 'MongooseModel'],
+        ['hint', 'MongooseModule.register([User])'],
+      ])
+      expect(Object.isFrozen(full)).toBe(true)
+    })
+
+    it('leaves out keys given as undefined', () => {
+      const token = createToken('X', { kind: undefined, hint: undefined })
+      expect(Object.keys(token)).toEqual(['name'])
+      expect(Object.isFrozen(token)).toBe(true)
+    })
+
     it('passes the scope through', () => {
       let seq = 0
       const COUNTER = createToken<{ id: number }>('Counter')
@@ -196,6 +222,24 @@ describe('typed tokens', () => {
       )
     })
 
+    it('names a token with a kind as kind(name)', () => {
+      const MODEL = createToken('User', { kind: 'MongooseModel', hint: 'MongooseModule.register([User])' })
+      class Needy {
+        model = inject(MODEL)
+      }
+      const c = new Container()
+      c.registerClass(Needy)
+
+      expect(errorOf(() => c.resolve(Needy))).toBe(
+        '[Miia] No provider found for token: MongooseModel(User), required by Needy\n' +
+          '  - MongooseModel(User) is provided by MongooseModule.register([User]); ' +
+          'import that module where MongooseModel(User) is used',
+      )
+      expect(errorOf(() => c.resolve(createToken('', { kind: 'drizzleDb' })))).toBe(
+        '[Miia] No provider found for token: drizzleDb()',
+      )
+    })
+
     it('adds no line without a hint', () => {
       const c = new Container()
       @Injectable()
@@ -258,6 +302,27 @@ describe('typed tokens', () => {
       expect(errorOf(() => c.resolve(second))).toBe('[Miia] No provider found for token: UsersService')
     })
 
+    it('flags another token with the same kind, name and hint', () => {
+      const hint = 'MongooseModule.register([User])'
+      const registered = createToken('User', { kind: 'MongooseModel', hint })
+      const other = createToken('User', { kind: 'MongooseModel', hint })
+      const c = new Container()
+      c.register(registered, () => ({}))
+
+      expect(errorOf(() => c.resolve(other))).toContain(
+        '  - another token named MongooseModel(User) with the same hint is registered',
+      )
+    })
+
+    it('stays silent for tokens with the same name and hint but another kind', () => {
+      const registered = createToken('db', { kind: 'paprDb', hint: 'DbModule.configure()' })
+      const other = createToken('db', { kind: 'drizzleDb', hint: 'DbModule.configure()' })
+      const c = new Container()
+      c.register(registered, () => ({}))
+
+      expect(errorOf(() => c.resolve(other))).not.toContain('another token named')
+    })
+
     it('stays silent for tokens with the same name and no hint', () => {
       const c = new Container()
       c.register(createToken('db'), () => ({}))
@@ -269,6 +334,23 @@ describe('typed tokens', () => {
   it('formatToken() prints the name of a token object', () => {
     expect(formatToken(createToken('Mailer'))).toBe('Mailer')
     expect(formatToken(createToken(''))).toBe('<anonymous>')
+  })
+
+  it('formatToken() prints kind(name) for a token with a kind', () => {
+    expect(formatToken(createToken('User', { kind: 'MongooseModel' }))).toBe('MongooseModel(User)')
+    expect(formatToken(createToken('', { kind: 'drizzleDb' }))).toBe('drizzleDb()')
+  })
+
+  it('formatToken() prints the class name of a class with a static kind', () => {
+    class Plugin {
+      static kind = 'Plugin'
+    }
+    expect(formatToken(Plugin)).toBe('Plugin')
+  })
+
+  it('formatToken() is exported from the index', async () => {
+    const core = await import('../src/index.js')
+    expect(core.formatToken).toBe(formatToken)
   })
 
   it('TestApp.override() replaces a token with a mock', async () => {

@@ -24,7 +24,9 @@ export function configureCall(name?: string): string {
   return name ? `MessagingModule.configure(opts, { name: '${name}' })` : 'MessagingModule.configure(opts)'
 }
 
-const namedBus = memoByName((name) => createToken<MessageBus>(`MessageBus(${name})`, { hint: configureCall(name) }))
+const namedBus = memoByName((name) =>
+  createToken<MessageBus>(name ?? '', { kind: 'MessageBus', hint: configureCall(name) }),
+)
 
 /**
  * DI token for a named bus registered by `MessagingModule.configure(opts, { name })`.
@@ -45,15 +47,15 @@ export function messageBus(name: string): Token<MessageBus> {
 // ─── Internal token helpers (not exported from package index) ─────────────
 
 export const optionsToken: (name?: string) => Token<MessagingModuleOptions> = memoByName((name) =>
-  createToken<MessagingModuleOptions>(`MessagingOptions(${name ?? 'default'})`),
+  createToken<MessagingModuleOptions>(name ?? '', { kind: 'MessagingOptions' }),
 )
 
 export const transportToken: (name?: string) => Token<MessageTransport> = memoByName((name) =>
-  createToken<MessageTransport>(`MessageTransport(${name ?? 'default'})`),
+  createToken<MessageTransport>(name ?? '', { kind: 'MessageTransport' }),
 )
 
 export const idempotencyStoreToken: (name?: string) => Token<IdempotencyStore | null> = memoByName((name) =>
-  createToken<IdempotencyStore | null>(`IdempotencyStore(${name ?? 'default'})`),
+  createToken<IdempotencyStore | null>(name ?? '', { kind: 'IdempotencyStore' }),
 )
 
 export function busToken(name?: string): Token<MessageBus> | typeof MessageBus {

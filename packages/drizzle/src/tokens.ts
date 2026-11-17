@@ -23,9 +23,7 @@ export function configureCall(name?: string): string {
   return name ? `DrizzleModule.configure(opts, { name: '${name}' })` : 'DrizzleModule.configure()'
 }
 
-const dbToken = memoByName((name) =>
-  createToken<unknown>(`drizzleDb(${name ?? 'default'})`, { hint: configureCall(name) }),
-)
+const dbToken = memoByName((name) => createToken<unknown>(name ?? '', { kind: 'drizzleDb', hint: configureCall(name) }))
 
 /**
  * Returns a typed DI token for the Drizzle database of a DrizzleModule connection.
@@ -51,5 +49,5 @@ export function drizzleDb<TDb = any>(name?: string): DrizzleDbToken<TDb> {
 // ─── Internal token helpers (not exported from package index) ─────────────
 
 export const getInternalServiceToken: (name?: string) => Token<DrizzleService> = memoByName((name) =>
-  createToken<DrizzleService>(`DrizzleService(${name ?? 'default'})`),
+  createToken<DrizzleService>(name ?? '', { kind: 'DrizzleService' }),
 )

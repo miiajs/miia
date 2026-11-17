@@ -11,9 +11,13 @@ export type AbstractConstructor<T = any> = abstract new (...args: any[]) => T
 
 declare const TOKEN_BRAND: unique symbol
 
-/** A typed DI token. Identity is the object itself; `name` is for messages only. */
+/**
+ * A typed DI token. Identity is the object itself. `name` is the name the token was given (`''` for an unnamed one),
+ * `kind` says what the token is (e.g. `MongooseModel`), and messages show `kind(name)`, or the name alone without a kind.
+ */
 export interface Token<T> {
   readonly name: string
+  readonly kind?: string
   readonly hint?: string
   readonly [TOKEN_BRAND]: T
 }

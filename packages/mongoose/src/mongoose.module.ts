@@ -1,5 +1,5 @@
 import type { ConfiguredModule, Constructor, FactoryProvider, OptionsOrFactory } from '@miiajs/core'
-import { createLazyProxy, provider, resolveOptions } from '@miiajs/core'
+import { createLazyProxy, formatToken, provider, resolveOptions } from '@miiajs/core'
 import type mongoose from 'mongoose'
 import type { MongooseModuleOptions } from './types.js'
 import type { ModelToken } from './define-model.js'
@@ -64,7 +64,7 @@ export class MongooseModule {
 
     const FeatureModule = class MongooseFeatureModule {} as Constructor
     // How errors and the start-up log name this module
-    const listed = models.map((token) => token.modelName).join(', ')
+    const listed = models.map((token) => token.name).join(', ')
     Object.defineProperty(FeatureModule, 'name', {
       value: `MongooseModule.register([${listed}]${name ? `, { name: '${name}' }` : ''})`,
     })
@@ -79,7 +79,7 @@ export class MongooseModule {
             service = resolve(serviceToken)
             registry = resolve(registryToken)
           } catch {
-            throw configureMissingError(name, `inject(${token.name}) failed:`)
+            throw configureMissingError(name, `inject(${formatToken(token)}) failed:`)
           }
           registry.set(token, token)
           // Constructable for the injected model's `new this.users({...})`; `doc instanceof this.users` keeps working

@@ -1,5 +1,5 @@
 import { describe, expect, it, spyOn } from 'bun:test'
-import { Injectable, Miia, Module, inject, overrideModule } from '@miiajs/core'
+import { formatToken, Injectable, Miia, Module, inject, overrideModule } from '@miiajs/core'
 import type { FactoryProvider } from '@miiajs/core'
 import { PaprModule } from '../src/papr.module.js'
 import { PaprService } from '../src/papr.service.js'
@@ -44,8 +44,11 @@ describe('paprDb', () => {
   it('returns a frozen token object named after the connection', () => {
     expect(typeof paprDb()).toBe('object')
     expect(Object.isFrozen(paprDb('analytics'))).toBe(true)
-    expect(paprDb().name).toBe('paprDb(default)')
-    expect(paprDb('analytics').name).toBe('paprDb(analytics)')
+    expect(paprDb().name).toBe('')
+    expect(paprDb('analytics').name).toBe('analytics')
+    expect(paprDb().kind).toBe('paprDb')
+    expect(formatToken(paprDb())).toBe('paprDb()')
+    expect(formatToken(paprDb('analytics'))).toBe('paprDb(analytics)')
   })
 
   it('hints at the configure() call that provides it', () => {
@@ -85,18 +88,19 @@ describe('getRegistryToken', () => {
 })
 
 describe('defineModel', () => {
-  it('returns a frozen token object with collectionName, schema, and brand', () => {
+  it('returns a frozen token object with the collection name, kind and schema', () => {
     const User = defineModel('users', fakeSchema)
     expect(typeof User).toBe('object')
     expect(Object.isFrozen(User)).toBe(true)
-    expect(User.collectionName).toBe('users')
+    expect(User.name).toBe('users')
+    expect(User.kind).toBe('PaprModel')
     expect(User.schema).toBe(fakeSchema)
-    expect(User.__miiaPaprModel).toBe(true)
+    expect(Object.keys(User).sort()).toEqual(['hint', 'kind', 'name', 'schema'])
   })
 
-  it('embeds collection name into the token name for debug clarity', () => {
+  it('shows up in messages as PaprModel(name)', () => {
     const Post = defineModel('posts', fakeSchema)
-    expect(Post.name).toBe('PaprModel(posts)')
+    expect(formatToken(Post)).toBe('PaprModel(posts)')
   })
 
   it('hints at PaprModule.register() with the model', () => {
@@ -231,6 +235,14 @@ describe('PaprModule.register', () => {
     expect(PaprModule.register([User, Post]).exports).toEqual([User, Post])
   })
 
+  it('names the model as PaprModel(name) when the connection is missing', () => {
+    const User = defineModel('users', fakeSchema)
+    const app = createApp(PaprModule.register([User]))
+    expect(() => app.get(User)).toThrow(
+      '[Miia/Papr] inject(PaprModel(users)) failed: PaprModule.configure() is missing in the root module.',
+    )
+  })
+
   it('names the feature module after its collections and connection', () => {
     const User = defineModel('users', fakeSchema)
     const Post = defineModel('posts', fakeSchema)
@@ -310,7 +322,7 @@ describe('PaprModule.register', () => {
       expect(ab.message).toBe(
         '[Miia] 1 module boundary violation:\n\n' +
           'PaprModel(users) (PaprModule.register([users]) in ReportsModule) injects ' +
-          'PaprService(default), PaprRegistry(default) (PaprModule in UsersModule), which is not global:\n' +
+          'PaprService(), PaprRegistry() (PaprModule in UsersModule), which is not global:\n' +
           '  - make it global: PaprModule.configure(options, { global: true })\n' +
           '  - or add PaprModule to ReportsModule `imports`\n\n' +
           'Docs: /docs/core-concepts/modules#boundaries',

@@ -1,6 +1,8 @@
 import type { AnyToken, Constructor } from './types.js'
 
+/** The label of a token in messages: `kind(name)` for a token object with a kind, else its name (a class's name). */
 export function formatToken(token: AnyToken): string {
+  if (typeof token !== 'function' && typeof token.kind === 'string') return `${token.kind}(${token.name})`
   return token.name || '<anonymous>'
 }
 

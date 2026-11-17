@@ -39,8 +39,8 @@ export class PaprService {
     const m = this._models.get(token)
     if (!m) {
       throw new Error(
-        `[Miia/Papr] Model "${token.collectionName}" not initialized. ` +
-          `Did you forget to register it with PaprModule.register([${token.collectionName}])?`,
+        `[Miia/Papr] Model "${token.name}" not initialized. ` +
+          `Did you forget to register it with PaprModule.register([${token.name}])?`,
       )
     }
     return m
@@ -64,7 +64,7 @@ export class PaprService {
         const papr = new PaprDefault()
 
         for (const token of this.registry.values()) {
-          const model = papr.model(token.collectionName, token.schema)
+          const model = papr.model(token.name, token.schema)
           this._models.set(token, model)
         }
 
@@ -117,15 +117,15 @@ export class PaprService {
   private assertNoCollectionCollision(): void {
     const seen = new Map<string, ModelToken<any, any>>()
     for (const token of this.registry.values()) {
-      const previous = seen.get(token.collectionName)
+      const previous = seen.get(token.name)
       if (previous && previous !== token) {
         throw new Error(
           `[Miia/Papr] Two distinct ModelToken-s registered for the same collection ` +
-            `"${token.collectionName}" on the same connection. ` +
+            `"${token.name}" on the same connection. ` +
             `Each collection must be defined once per connection.`,
         )
       }
-      seen.set(token.collectionName, token)
+      seen.set(token.name, token)
     }
   }
 }

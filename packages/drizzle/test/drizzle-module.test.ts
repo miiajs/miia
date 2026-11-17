@@ -1,5 +1,5 @@
 import { describe, expect, it, spyOn } from 'bun:test'
-import { Injectable, Miia, Module, inject, overrideModule } from '@miiajs/core'
+import { formatToken, Injectable, Miia, Module, inject, overrideModule } from '@miiajs/core'
 import type { FactoryProvider } from '@miiajs/core'
 import { DrizzleModule } from '../src/drizzle.module.js'
 import { DrizzleService } from '../src/drizzle.service.js'
@@ -38,8 +38,11 @@ describe('drizzleDb', () => {
   it('returns a frozen token object named after the connection', () => {
     expect(typeof drizzleDb()).toBe('object')
     expect(Object.isFrozen(drizzleDb('analytics'))).toBe(true)
-    expect(drizzleDb().name).toBe('drizzleDb(default)')
-    expect(drizzleDb('analytics').name).toBe('drizzleDb(analytics)')
+    expect(drizzleDb().name).toBe('')
+    expect(drizzleDb('analytics').name).toBe('analytics')
+    expect(drizzleDb().kind).toBe('drizzleDb')
+    expect(formatToken(drizzleDb())).toBe('drizzleDb()')
+    expect(formatToken(drizzleDb('analytics'))).toBe('drizzleDb(analytics)')
   })
 
   it('hints at the configure() call that provides it', () => {
@@ -62,7 +65,8 @@ describe('getInternalServiceToken', () => {
 
   it('is a token of its own, not the db token', () => {
     expect(getInternalServiceToken()).not.toBe(drizzleDb() as unknown)
-    expect(getInternalServiceToken().name).toBe('DrizzleService(default)')
+    expect(formatToken(getInternalServiceToken())).toBe('DrizzleService()')
+    expect(formatToken(getInternalServiceToken('analytics'))).toBe('DrizzleService(analytics)')
   })
 })
 
@@ -240,7 +244,10 @@ describe('hook order', () => {
 describe('DrizzleModule without configure', () => {
   it('names the configure() call when drizzleDb() has no provider', () => {
     const app = new Miia({ logger: false })
-    expect(() => app.get(drizzleDb())).toThrow('drizzleDb(default) is provided by DrizzleModule.configure()')
+    expect(() => app.get(drizzleDb())).toThrow(
+      '[Miia] No provider found for token: drizzleDb()\n' +
+        '  - drizzleDb() is provided by DrizzleModule.configure(); import that module where drizzleDb() is used',
+    )
   })
 
   it('names the configure() call with the name when drizzleDb(name) has no provider', () => {

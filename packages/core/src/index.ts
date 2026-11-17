@@ -14,6 +14,7 @@ export type { LoggerService, LoggerConfig } from './logger.js'
 // DI Container
 export { inject, injectOptional, REQUEST_CONTEXT } from './di-container.js'
 export { createToken, provider } from './di-token.js'
+export { formatToken } from './di-token-format.js'
 export { Resolver } from './resolver.js'
 
 // Discovery

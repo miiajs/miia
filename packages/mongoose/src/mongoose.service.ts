@@ -31,8 +31,8 @@ export class MongooseService {
     const m = this._models.get(token)
     if (!m) {
       throw new Error(
-        `[Miia/Mongoose] Model "${token.modelName}" not initialized. ` +
-          `Did you forget to register it with MongooseModule.register([${token.modelName}])?`,
+        `[Miia/Mongoose] Model "${token.name}" not initialized. ` +
+          `Did you forget to register it with MongooseModule.register([${token.name}])?`,
       )
     }
     return m
@@ -51,7 +51,7 @@ export class MongooseService {
         this._connection = connection
 
         for (const token of this.registry.values()) {
-          const compiled = connection.model(token.modelName, token.schema)
+          const compiled = connection.model(token.name, token.schema)
           this._models.set(token, compiled)
         }
 
@@ -99,15 +99,15 @@ export class MongooseService {
   private assertNoModelNameCollision(): void {
     const seen = new Map<string, ModelToken<any>>()
     for (const token of this.registry.values()) {
-      const previous = seen.get(token.modelName)
+      const previous = seen.get(token.name)
       if (previous && previous !== token) {
         throw new Error(
           `[Miia/Mongoose] Two distinct ModelToken-s registered for the same model name ` +
-            `"${token.modelName}" on the same connection. ` +
+            `"${token.name}" on the same connection. ` +
             `Each model must be defined once per connection.`,
         )
       }
-      seen.set(token.modelName, token)
+      seen.set(token.name, token)
     }
   }
 }

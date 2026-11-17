@@ -1,6 +1,6 @@
 import { describe, expect, it, spyOn } from 'bun:test'
 import { Schema } from 'mongoose'
-import { Injectable, Miia, Module, inject, overrideModule } from '@miiajs/core'
+import { formatToken, Injectable, Miia, Module, inject, overrideModule } from '@miiajs/core'
 import type { FactoryProvider } from '@miiajs/core'
 import { MongooseModule } from '../src/mongoose.module.js'
 import { MongooseService } from '../src/mongoose.service.js'
@@ -45,8 +45,11 @@ describe('mongooseConnection', () => {
   it('returns a frozen token object named after the connection', () => {
     expect(typeof mongooseConnection()).toBe('object')
     expect(Object.isFrozen(mongooseConnection('analytics'))).toBe(true)
-    expect(mongooseConnection().name).toBe('mongooseConnection(default)')
-    expect(mongooseConnection('analytics').name).toBe('mongooseConnection(analytics)')
+    expect(mongooseConnection().name).toBe('')
+    expect(mongooseConnection('analytics').name).toBe('analytics')
+    expect(mongooseConnection().kind).toBe('mongooseConnection')
+    expect(formatToken(mongooseConnection())).toBe('mongooseConnection()')
+    expect(formatToken(mongooseConnection('analytics'))).toBe('mongooseConnection(analytics)')
   })
 
   it('hints at the configure() call that provides it', () => {
@@ -86,19 +89,20 @@ describe('getRegistryToken', () => {
 })
 
 describe('defineModel', () => {
-  it('returns a frozen token object with modelName, schema, and brand', () => {
+  it('returns a frozen token object with the model name, kind and schema', () => {
     const schema = userSchema()
     const User = defineModel('User', schema)
     expect(typeof User).toBe('object')
     expect(Object.isFrozen(User)).toBe(true)
-    expect(User.modelName).toBe('User')
+    expect(User.name).toBe('User')
+    expect(User.kind).toBe('MongooseModel')
     expect(User.schema).toBe(schema)
-    expect(User.__miiaMongooseModel).toBe(true)
+    expect(Object.keys(User).sort()).toEqual(['hint', 'kind', 'name', 'schema'])
   })
 
-  it('embeds model name into the token name for debug clarity', () => {
+  it('shows up in messages as MongooseModel(name)', () => {
     const Post = defineModel('Post', new Schema({ title: String }))
-    expect(Post.name).toBe('MongooseModel(Post)')
+    expect(formatToken(Post)).toBe('MongooseModel(Post)')
   })
 
   it('hints at MongooseModule.register() with the model', () => {
@@ -226,6 +230,14 @@ describe('MongooseModule.register', () => {
     )
   })
 
+  it('names the model as MongooseModel(name) when the connection is missing', () => {
+    const User = defineModel('User', userSchema())
+    const app = createApp(MongooseModule.register([User]))
+    expect(() => app.get(User)).toThrow(
+      '[Miia/Mongoose] inject(MongooseModel(User)) failed: MongooseModule.configure() is missing in the root module.',
+    )
+  })
+
   it('lets two modules that register the same model share one instance', async () => {
     const onInit = spyOn(MongooseService.prototype, 'onInit').mockImplementation(async () => {})
     const onDestroy = spyOn(MongooseService.prototype, 'onDestroy').mockImplementation(async () => {})
@@ -290,7 +302,7 @@ describe('MongooseModule.register', () => {
       expect(ab.message).toBe(
         '[Miia] 1 module boundary violation:\n\n' +
           'MongooseModel(User) (MongooseModule.register([User]) in ReportsModule) injects ' +
-          'MongooseService(default), MongooseRegistry(default) (MongooseModule in UsersModule), which is not global:\n' +
+          'MongooseService(), MongooseRegistry() (MongooseModule in UsersModule), which is not global:\n' +
           '  - make it global: MongooseModule.configure(options, { global: true })\n' +
           '  - or add MongooseModule to ReportsModule `imports`\n\n' +
           'Docs: /docs/core-concepts/modules#boundaries',

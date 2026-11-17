@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { inject, Injectable, Module } from '@miiajs/core'
+import { formatToken, inject, Injectable, Module } from '@miiajs/core'
 import type { ZodLike } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { z } from 'zod'
@@ -39,14 +39,16 @@ function counted<T>(schema: ZodLike<T>): { schema: ZodLike<T>; calls: () => numb
 }
 
 describe('defineConfig()', () => {
-  it('returns a frozen token named after the config, with its name and schema', () => {
+  it('returns a frozen token with the config name, its kind and schema', () => {
     const paymentsConfig = defineConfig('payments', PaymentsSchema)
 
     expect(Object.isFrozen(paymentsConfig)).toBe(true)
-    expect(paymentsConfig.name).toBe('Config(payments)')
+    expect(paymentsConfig.name).toBe('payments')
+    expect(paymentsConfig.kind).toBe('Config')
+    expect(formatToken(paymentsConfig)).toBe('Config(payments)')
     expect(paymentsConfig.hint).toBe("ConfigModule.register() with defineConfig('payments')")
-    expect(paymentsConfig.configName).toBe('payments')
     expect(paymentsConfig.schema).toBe(PaymentsSchema)
+    expect(Object.keys(paymentsConfig).sort()).toEqual(['hint', 'kind', 'name', 'schema'])
   })
 
   it('returns a new token on every call', () => {

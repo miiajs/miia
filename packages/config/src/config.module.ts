@@ -42,7 +42,7 @@ export class ConfigModule {
   static register<T>(config: ConfigToken<T>): ConfiguredModule {
     const FeatureModule = class ConfigFeatureModule {}
     // How errors and the start-up log name this module
-    Object.defineProperty(FeatureModule, 'name', { value: `ConfigModule.register(${config.configName})` })
+    Object.defineProperty(FeatureModule, 'name', { value: `ConfigModule.register(${config.name})` })
 
     return {
       module: FeatureModule,
@@ -52,7 +52,7 @@ export class ConfigModule {
           config,
           () => {
             const env = injectOptional(CONFIG_SOURCE)?.env ?? process.env
-            return deepFrozenCopy(parseEnv(config.schema, env, config.configName))
+            return deepFrozenCopy(parseEnv(config.schema, env, config.name))
           },
           { shared: 'config' },
         ),

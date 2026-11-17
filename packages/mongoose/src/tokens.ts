@@ -26,7 +26,7 @@ export function configureCall(name?: string): string {
 }
 
 const connectionToken = memoByName((name) =>
-  createToken<mongoose.Connection>(`mongooseConnection(${name ?? 'default'})`, { hint: configureCall(name) }),
+  createToken<mongoose.Connection>(name ?? '', { kind: 'mongooseConnection', hint: configureCall(name) }),
 )
 
 /**
@@ -45,9 +45,9 @@ export function mongooseConnection(name?: string): MongooseConnectionToken {
 // ─── Internal token helpers (not exported from package index) ─────────────
 
 export const getInternalServiceToken: (name?: string) => Token<MongooseService> = memoByName((name) =>
-  createToken<MongooseService>(`MongooseService(${name ?? 'default'})`),
+  createToken<MongooseService>(name ?? '', { kind: 'MongooseService' }),
 )
 
 export const getRegistryToken: (name?: string) => Token<Map<ModelToken<any>, ModelToken<any>>> = memoByName((name) =>
-  createToken<Map<ModelToken<any>, ModelToken<any>>>(`MongooseRegistry(${name ?? 'default'})`),
+  createToken<Map<ModelToken<any>, ModelToken<any>>>(name ?? '', { kind: 'MongooseRegistry' }),
 )

@@ -9,7 +9,7 @@ import { UserIdParamsSchema } from './schemas'
 
 // No database: the real model on a connection that never opens, Mongoose casts the id before it needs one
 const connection = mongoose.createConnection()
-const users = connection.model<IUser>(User.modelName, User.schema)
+const users = connection.model<IUser>(User.name, User.schema)
 
 const createApp = () =>
   TestApp.create(UserModule)

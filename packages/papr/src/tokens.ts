@@ -25,7 +25,7 @@ export function configureCall(name?: string): string {
   return name ? `PaprModule.configure(opts, { name: '${name}' })` : 'PaprModule.configure()'
 }
 
-const dbToken = memoByName((name) => createToken<Db>(`paprDb(${name ?? 'default'})`, { hint: configureCall(name) }))
+const dbToken = memoByName((name) => createToken<Db>(name ?? '', { kind: 'paprDb', hint: configureCall(name) }))
 
 /**
  * Returns a typed DI token for the raw mongodb `Db` of a PaprModule connection.
@@ -43,9 +43,9 @@ export function paprDb(name?: string): PaprDbToken {
 // ─── Internal token helpers (not exported from package index) ─────────────
 
 export const getInternalServiceToken: (name?: string) => Token<PaprService> = memoByName((name) =>
-  createToken<PaprService>(`PaprService(${name ?? 'default'})`),
+  createToken<PaprService>(name ?? '', { kind: 'PaprService' }),
 )
 
 export const getRegistryToken: (name?: string) => Token<Map<ModelToken<any, any>, ModelToken<any, any>>> = memoByName(
-  (name) => createToken<Map<ModelToken<any, any>, ModelToken<any, any>>>(`PaprRegistry(${name ?? 'default'})`),
+  (name) => createToken<Map<ModelToken<any, any>, ModelToken<any, any>>>(name ?? '', { kind: 'PaprRegistry' }),
 )

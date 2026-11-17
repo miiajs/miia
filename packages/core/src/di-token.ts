@@ -5,11 +5,14 @@ export const SHARED_PROVIDER = Symbol('miia.sharedProvider')
 
 /**
  * Creates a typed DI token. Every call returns a new token, even for the same name.
+ * `kind` says what the token is (e.g. `'MongooseModel'`): messages then show `kind(name)` instead of the name alone.
  * `hint` names what provides the token (e.g. `'MailModule.configure()'`) and shows up in "No provider" errors.
  */
-export function createToken<T>(name: string, options?: { hint?: string }): Token<T> {
-  const hint = options?.hint
-  return Object.freeze(hint === undefined ? { name } : { name, hint }) as Token<T>
+export function createToken<T>(name: string, options?: { kind?: string; hint?: string }): Token<T> {
+  const token: { name: string; kind?: string; hint?: string } = { name }
+  if (options?.kind !== undefined) token.kind = options.kind
+  if (options?.hint !== undefined) token.hint = options.hint
+  return Object.freeze(token) as Token<T>
 }
 
 /**

@@ -1,5 +1,5 @@
 import type { ConfiguredModule, Constructor, FactoryProvider, OptionsOrFactory } from '@miiajs/core'
-import { createLazyProxy, provider, resolveOptions } from '@miiajs/core'
+import { createLazyProxy, formatToken, provider, resolveOptions } from '@miiajs/core'
 import type { Db } from 'mongodb'
 import type { Model } from 'papr'
 import type { PaprModuleOptions } from './types.js'
@@ -65,7 +65,7 @@ export class PaprModule {
 
     const FeatureModule = class PaprFeatureModule {} as Constructor
     // How errors and the start-up log name this module
-    const listed = models.map((token) => token.collectionName).join(', ')
+    const listed = models.map((token) => token.name).join(', ')
     Object.defineProperty(FeatureModule, 'name', {
       value: `PaprModule.register([${listed}]${name ? `, { name: '${name}' }` : ''})`,
     })
@@ -80,7 +80,7 @@ export class PaprModule {
             service = resolve(serviceToken)
             registry = resolve(registryToken)
           } catch {
-            throw configureMissingError(name, `inject(${token.name}) failed:`)
+            throw configureMissingError(name, `inject(${formatToken(token)}) failed:`)
           }
           registry.set(token, token)
           return createLazyProxy<Model<any, any>>(() => service.getModel(token))

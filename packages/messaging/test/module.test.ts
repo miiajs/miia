@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
-import { Injectable, inject, Module } from '@miiajs/core'
+import { formatToken, Injectable, inject, Miia, Module } from '@miiajs/core'
 import { TestApp } from '@miiajs/testing'
 import { defineEvent } from '../src/contract.js'
 import { On } from '../src/decorators.js'
@@ -7,7 +7,7 @@ import type { IdempotencyStore } from '../src/idempotency.js'
 import { MessageBus } from '../src/message-bus.js'
 import { InMemoryTransport, inMemoryTransport } from '../src/in-memory-transport.js'
 import { MessagingModule } from '../src/messaging.module.js'
-import { messageBus, transportToken } from '../src/tokens.js'
+import { idempotencyStoreToken, messageBus, optionsToken, transportToken } from '../src/tokens.js'
 import type { MessageTransport, Subscription } from '../src/types.js'
 
 const Topic = defineEvent('topic')
@@ -245,6 +245,19 @@ describe('MessagingModule.configure', () => {
   it('messageBus() returns one token per name and rejects an empty name', () => {
     expect(messageBus('kafka')).toBe(messageBus('kafka'))
     expect(() => messageBus('')).toThrow(TypeError)
+  })
+
+  it('labels the bus tokens kind(name), with an empty name for the default bus', () => {
+    expect(messageBus('kafka').name).toBe('kafka')
+    expect(formatToken(messageBus('kafka'))).toBe('MessageBus(kafka)')
+    expect(optionsToken().name).toBe('')
+    expect(formatToken(optionsToken())).toBe('MessagingOptions()')
+    expect(formatToken(transportToken())).toBe('MessageTransport()')
+    expect(formatToken(idempotencyStoreToken())).toBe('IdempotencyStore()')
+    expect(formatToken(optionsToken('kafka'))).toBe('MessagingOptions(kafka)')
+    expect(() => new Miia({ logger: false }).get(optionsToken())).toThrow(
+      '[Miia] No provider found for token: MessagingOptions()',
+    )
   })
 
   it('exports the bus and leaves global unset by default', () => {

@@ -1,4 +1,4 @@
-import { Miia, overrideModule, overrideProvider } from '@miiajs/core'
+import { formatToken, Miia, overrideModule, overrideProvider } from '@miiajs/core'
 import type {
   AbstractConstructor,
   AnyToken,
@@ -19,10 +19,6 @@ function isConfiguredModule(value: unknown): value is ConfiguredModule {
     typeof candidate.module === 'function' &&
     Array.isArray(candidate.providers)
   )
-}
-
-function nameOf(token: AnyToken): string {
-  return token.name || '<anonymous>'
 }
 
 export class TestApp {
@@ -55,8 +51,8 @@ export class TestApp {
     if (isConfiguredModule(value)) {
       if (value.module !== token) {
         throw new Error(
-          `[Miia] TestApp.override(${nameOf(token)}, ...): the configured module's class is ${nameOf(value.module)}, ` +
-            `not ${nameOf(token)}`,
+          `[Miia] TestApp.override(${formatToken(token)}, ...): the configured module's class is ` +
+            `${formatToken(value.module)}, not ${formatToken(token)}`,
         )
       }
       this.overrides.push(overrideModule(value))

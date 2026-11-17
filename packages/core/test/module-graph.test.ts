@@ -563,7 +563,7 @@ describe('duplicate providers (R11)', () => {
   })
 
   it('names two configured modules with their hosts', () => {
-    const MODEL = createToken('PaprModel(users)')
+    const MODEL = createToken('users', { kind: 'PaprModel' })
 
     // A new anonymous module class per call, like papr / mongoose register()
     function registerModels(): ConfiguredModule {
