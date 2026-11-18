@@ -245,15 +245,6 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
       </div>
     </UContainer>
 
-    <UContainer class="pt-6 lg:pt-8 [&>aside]:my-0">
-      <ProseNote title="Node.js">
-        <p>
-          MiiaJS with the uWS adapter outperforms Hono uWS by up to 44% and NestJS+Fastify by up to 23% in realistic API
-          tests on M1 Pro. Same transport - the difference is pure framework overhead.
-        </p>
-      </ProseNote>
-    </UContainer>
-
     <section class="mt-12 border-t border-default lg:mt-16">
       <UContainer class="flex flex-col gap-4 py-10 lg:gap-8 lg:py-16">
         <div class="flex max-w-reading flex-col gap-4 lg:gap-2.5">
@@ -381,10 +372,6 @@ const textLink = 'inline-flex min-h-11 items-center gap-2 self-start text-ui fon
             </tbody>
           </table>
         </div>
-        <p class="font-mono text-caption text-muted">
-          Hono uWS uses the same @miiajs/uws-server adapter (uWebSockets.js 20.69.0), so the difference is pure framework
-          overhead.
-        </p>
       </UContainer>
     </section>
 
