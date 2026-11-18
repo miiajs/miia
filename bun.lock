@@ -21,7 +21,7 @@
     },
     "apps/website": {
       "name": "website",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "dependencies": {
         "@iconify-json/lucide": "^1.2.152",
         "@iconify-json/simple-icons": "^1.2.101",
