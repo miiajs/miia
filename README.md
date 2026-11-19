@@ -2,6 +2,8 @@
 
 Lightweight, decorator-driven HTTP framework for TypeScript.
 
+[Website](https://miiajs.com) · [Docs](https://miiajs.com/docs/getting-started) · [Blog](https://miiajs.com/blog)
+
 Inspired by Angular/NestJS architectural ideas - decorator-driven DI, controllers, modules - Koa's onion-model middleware, and Hono's multi-runtime, lightweight philosophy. Built from scratch on modern standards: TC39 native decorators, Web API (Request/Response), ESM-only.
 
 ## Features
