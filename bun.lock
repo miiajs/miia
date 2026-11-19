@@ -269,7 +269,7 @@
       },
       "peerDependencies": {
         "@miiajs/core": ">=0.9.0 <1.0.0",
-        "jose": "^6.0.0",
+        "jose": "^5.0.0 || ^6.0.0",
       },
     },
     "packages/messaging": {
@@ -309,7 +309,7 @@
       },
       "peerDependencies": {
         "@miiajs/core": ">=0.9.0 <1.0.0",
-        "mongoose": "^9.4.1",
+        "mongoose": "^7.0.0 || ^8.0.0 || ^9.0.0",
       },
     },
     "packages/multipart": {
@@ -343,8 +343,8 @@
       },
       "peerDependencies": {
         "@miiajs/core": ">=0.9.0 <1.0.0",
-        "mongodb": "^7.1.1",
-        "papr": "^17.0.0",
+        "mongodb": "^6.0.0 || ^7.0.0",
+        "papr": "^15.0.0 || ^16.0.0 || ^17.0.0",
       },
     },
     "packages/rate-limit": {
